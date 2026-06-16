@@ -42,7 +42,16 @@ class NodeResolver:
             NodeResolutionError: If the node type is unsupported.
         """
         if node.type == "step":
-            return make_step_node(node.id, node.spec_ref, self._spec_repo)
+            # tool_dispatch + sandbox_root are resolved lazily inside the node (the
+            # primitive is only known once the spec loads at execution time) — a step
+            # that names a primitive but has no injected port raises a clear error then.
+            return make_step_node(
+                node.id,
+                node.spec_ref,
+                self._spec_repo,
+                tool_dispatch=self._adapters.tool_dispatch,
+                sandbox_root=self._adapters.sandbox_root,
+            )
         elif node.type == "content":
             cfg = node.config or {}
             return make_content_node(

@@ -36,6 +36,11 @@ class Adapters:
     tool_dispatch: ToolDispatchPort | None = None
     observability: ObservabilityPort | None = None
 
+    # Run-context (not a port): the sandbox boundary every `tool_dispatch` call
+    # carries (NFR-14). A runner that injects `tool_dispatch` for step nodes also
+    # sets this; the engine threads it to each dispatch.
+    sandbox_root: str | None = None
+
     def require(self, name: str) -> Any:
         """Return the named adapter, or raise `MissingAdapterError` with the fix."""
         adapter = getattr(self, name, None)

@@ -5,6 +5,29 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-16
+
+### Added — step nodes now do REAL work (step → ToolDispatchPort)
+- A `step` node whose spec names a `primitive` (`read_file` / `glob` / `ripgrep`) now
+  **dispatches it through the injected `ToolDispatchPort`** — real workspace work — and the
+  result lands in `step_outputs[node_id]` (was: load-spec-and-mark-completed, no dispatch).
+  Same shape as the content node's `LLMPort` (DR-040): the engine depends on the Protocol;
+  the runner injects the adapter. Proven by `tests/test_adapters.py::
+  test_step_dispatches_a_tool_primitive_via_the_port` (drives `StubToolDispatchAdapter`,
+  asserts the saved result + that tenancy reached the adapter).
+- **`Adapters.sandbox_root`** — the path-traversal boundary (NFR-14) every dispatch carries,
+  threaded from the bundle → resolver → step node. A primitive step with no injected
+  `tool_dispatch` / no `sandbox_root` raises a clear `MissingAdapterError` at execution
+  (fails loud, never a silent no-op).
+- **Backward compatible:** a step with no `primitive` falls back to recording its resolved
+  spec — pure step graphs compile + run unchanged (`test_step_without_a_primitive_*`).
+- Step nodes are now **async** (they may `await` a port), consistent with content nodes.
+
+### Still thin (honest)
+- `fan_out`/`routing`/`while` → passthrough; `handler` → deferred (dispatch port).
+- The step primitive set is the slice-1 surface (`read_file`/`glob`/`ripgrep`); richer
+  primitives extend `_dispatch_primitive` behind the same port.
+
 ## [0.4.0] — 2026-06-16
 
 ### Fixed — content (LLM) workflows now RUN to completion (real work end-to-end)
