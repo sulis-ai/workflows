@@ -17,7 +17,7 @@ from typing import Any
 from sulis_workflows.domain.errors import DAGValidationError
 
 VALID_NODE_TYPES = frozenset(
-    {"step", "gate", "fan_out", "routing", "route_decider", "file_writer", "for_each", "while"}
+    {"step", "content", "gate", "fan_out", "routing", "route_decider", "file_writer", "for_each", "while"}
 )
 
 

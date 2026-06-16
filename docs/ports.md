@@ -53,11 +53,26 @@ resp = await llm.complete(LLMRequest(prompt=prompt, model=model), ...)
 worker-pool). Each ships a `Stub*Adapter` so the engine is testable with no infrastructure.
 Adapters extend `IdentifiedAdapter` (they declare an `AdapterIdentity`).
 
-## Injection seam — where we are
+## Injection seam — the `Adapters` bundle (one injection point)
 
-- **Node-level (today):** node factories take the adapter directly (`make_content_node(..., llm=...)`).
-- **Compile-level (next):** `compile()` will accept an adapter bundle and thread it to the
-  nodes it builds, so a runner injects adapters once per run. Same Protocols; broader seam.
+A runner injects **all** its port adapters once, as an `Adapters` bundle, at `compile()`;
+the engine threads them to every node that needs a port. This is the generic seam — one
+object, every port, uniform resolution (a new port adds a field):
+
+```python
+from sulis_workflows.runtime import Adapters
+from sulis_workflows.compiler.outcome_compiler import OutcomeGraphCompiler
+
+adapters = Adapters(llm=my_llm, content_storage=my_store, checkpointing=my_ckpt)  # what your placement needs
+graph = OutcomeGraphCompiler(spec_repo, adapters=adapters).compile(outcome_id="…")
+```
+
+A node resolves its port from the bundle (e.g. a `content` node → `adapters.require("llm")`).
+If a workflow needs a port the runner didn't inject, the engine raises a clear
+**`MissingAdapterError`** naming the port + the fix — never a crash, never a fake.
+
+- **Node factories** still accept a port directly (`make_content_node(..., llm=…)`) for
+  fine-grained use/tests; the `Adapters` bundle is the runner-facing seam over them.
 - **Tracing** is a port too: the engine defaults to a no-op `span_context` (`_tracing.py`);
   a consumer routes real spans via the `ObservabilityPort`.
 

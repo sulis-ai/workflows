@@ -5,6 +5,25 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-16
+
+### Added — the generic port mechanism (compile-level injection)
+- **`Adapters` bundle** (`sulis_workflows.runtime.Adapters`) — one injection point for every
+  port. A runner injects the adapters its placement needs (`Adapters(llm=…, content_storage=…,
+  checkpointing=…)`); the engine threads them through `OutcomeGraphCompiler(spec_repo,
+  adapters=…)` → the node resolver → each node, which resolves its port via
+  `adapters.require("…")`. A missing port raises a clear **`MissingAdapterError`** (the port +
+  the fix), never a crash. This is the seam both runners (server + client) use.
+- **`content` node type** wired end-to-end: added to the DAG schema + the resolver, builds a
+  content node bound to the injected `LLMPort`. A `content`-node graph compiles + runs against
+  `StubLLMAdapter` with no LLM SDK present (`tests/test_adapters.py`).
+- **Docs:** `docs/getting-started.md` (compile-and-run walkthrough for new developers) +
+  `docs/ports.md` updated (the `Adapters` bundle is the injection seam).
+
+### Deferred (remaining)
+- Handler-node dispatch → a dispatch port (the last platform coupling).
+- Extend `compile()`-time adapter resolution to the remaining node types (step → ToolDispatch, etc.).
+
 ## [0.2.0] — 2026-06-16
 
 ### Added — the port pattern, demonstrated end-to-end
