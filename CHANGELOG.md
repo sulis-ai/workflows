@@ -5,6 +5,23 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-16
+
+### Fixed — content (LLM) workflows now RUN to completion (real work end-to-end)
+- A content node now reads its prompt from / writes its response to the **`step_outputs`**
+  channel (a merge-reducer field on `OFMGraphState`) instead of arbitrary top-level state keys
+  (which the typed schema dropped). So an LLM workflow compiles **and runs to completion**: a
+  step-node + content-node graph executes, the content node calls the LLM via the injected
+  `LLMPort`, and the response lands in `step_outputs` (`tests/test_adapters.py::
+  test_content_workflow_runs_to_completion`). This closes the `/sulis:prove` run-to-completion
+  block for content workflows. `make_content_node` now takes the node id (records `completed_nodes`).
+
+### Still thin (flagged by /sulis:prove — honest)
+- **Step nodes don't do real work yet** — `make_step_node` loads the spec + marks completed; it
+  does not dispatch via `ToolDispatchPort`. Wiring step → ToolDispatch is a *defined slice* (needs
+  the step-spec → primitive mapping + `sandbox_root` threading), not the quick fix it first looked.
+- `fan_out`/`routing`/`while` → passthrough; `handler` → deferred (dispatch port).
+
 ## [0.3.0] — 2026-06-16
 
 ### Added — the generic port mechanism (compile-level injection)

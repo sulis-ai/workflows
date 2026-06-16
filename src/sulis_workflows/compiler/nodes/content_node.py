@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_content_node(
+    node_id: str,
     state_input_key: str,
     state_output_key: str,
     *,
@@ -32,22 +33,26 @@ def make_content_node(
 ) -> Callable:
     """Create an async content node that calls the LLM via the injected `llm` port.
 
+    I/O flows through the `step_outputs` channel of `OFMGraphState` (the engine's data-flow
+    channel, which has a merge reducer) — reads the prompt from `step_outputs[input_key]`,
+    writes the response to `step_outputs[output_key]`. (Top-level state keys are dropped by
+    the typed schema; `step_outputs` is the right channel — same as step nodes use.)
+
     Args:
-        state_input_key: state field holding the compiled prompt.
-        state_output_key: state field to write the LLM response into.
+        node_id: this node's id (recorded in `completed_nodes`).
+        state_input_key / state_output_key: keys within `step_outputs` to read/write.
         llm: the injected `LLMPort` adapter (the engine never constructs an SDK client).
         model / max_tokens: request shaping, mapped by the adapter to its SDK.
         platform_id / run_id / timeout_s: tenancy + bound, threaded to every port call.
-
-    Returns:
-        An async callable suitable for a LangGraph function node.
     """
 
     async def content_fn(state: dict) -> dict:
-        prompt = state.get(state_input_key, "")
+        outputs = state.get("step_outputs") or {}
+        prompt = outputs.get(state_input_key, "")
         if not prompt:
             raise ValueError(
-                f"Content node: state['{state_input_key}'] is empty — no prompt to send to the LLM"
+                f"Content node '{node_id}': step_outputs['{state_input_key}'] is empty — "
+                "no prompt to send to the LLM"
             )
         response = await llm.complete(
             LLMRequest(prompt=prompt, model=model, max_tokens=max_tokens),
@@ -56,12 +61,13 @@ def make_content_node(
             timeout_s=timeout_s,
         )
         logger.info(
-            "Content node produced %d chars from '%s' -> '%s'",
+            "Content node '%s' produced %d chars ('%s' -> '%s')",
+            node_id,
             len(response.text),
             state_input_key,
             state_output_key,
         )
-        return {state_output_key: response.text}
+        return {"step_outputs": {state_output_key: response.text}, "completed_nodes": [node_id]}
 
-    content_fn.__name__ = f"content_{state_input_key}_to_{state_output_key}"
+    content_fn.__name__ = f"content_{node_id}"
     return content_fn

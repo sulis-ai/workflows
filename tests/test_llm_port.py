@@ -23,17 +23,19 @@ def test_stub_adapter_satisfies_the_port():
 
 
 def test_content_node_uses_injected_llm_port():
-    llm = StubLLMAdapter()                                   # adapt (consumer's adapter; stub here)
-    node = make_content_node(                                # inject the port into the node
-        "prompt", "answer", llm=llm, platform_id="tenant-1", run_id="run-1"
+    llm = StubLLMAdapter()                                       # adapt (consumer's adapter; stub here)
+    node = make_content_node(                                    # inject the port into the node
+        "answer", "prompt", "reply", llm=llm, platform_id="tenant-1", run_id="run-1"
     )
-    out = asyncio.run(node({"prompt": "hello world"}))       # invoke — the node calls the port
-    assert out == {"answer": "stub-response:hello world"}    # the stub echoes the prompt
+    # I/O flows through step_outputs (the engine's data channel)
+    out = asyncio.run(node({"step_outputs": {"prompt": "hello world"}}))
+    assert out["step_outputs"] == {"reply": "stub-response:hello world"}  # the stub echoes
+    assert out["completed_nodes"] == ["answer"]
     # tenancy (platform_id / run_id) propagated through the port — not the SDK
     assert llm.observed_calls == [("tenant-1", "run-1")]
 
 
 def test_content_node_requires_a_prompt():
-    node = make_content_node("prompt", "answer", llm=StubLLMAdapter())
+    node = make_content_node("answer", "prompt", "reply", llm=StubLLMAdapter())
     with pytest.raises(ValueError):
-        asyncio.run(node({"prompt": ""}))
+        asyncio.run(node({"step_outputs": {}}))

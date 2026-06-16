@@ -44,10 +44,17 @@ adapters = Adapters(llm=StubLLMAdapter())
 # 3. compile -> a runnable LangGraph graph
 graph = OutcomeGraphCompiler(spec_repo, adapters=adapters).compile(outcome_id="chat")
 
-# 4. run it (LangGraph's async API)
-result = asyncio.run(graph.ainvoke({"prompt": "hello"}))
-print(result["reply"])   # -> "stub-response:hello" (the stub echoes)
+# 4. run it (LangGraph's async API). Node I/O flows through the `step_outputs` channel.
+initial = {"execution_id": "e1", "outcome_id": "chat", "phase": "start",
+           "completed_nodes": [], "step_outputs": {"prompt": "hello"},
+           "gate_decisions": {}, "metadata": {}}
+result = asyncio.run(graph.ainvoke(initial))
+print(result["step_outputs"]["reply"])   # -> "stub-response:hello" (the stub echoes)
 ```
+
+> Node data flows through `step_outputs` (a merge-reducer channel on the state) — a node reads
+> its inputs from `step_outputs[...]` and writes its outputs back. Top-level state keys outside
+> the schema are dropped, so use `step_outputs` (or `metadata`) for data flow.
 
 Swap `StubLLMAdapter()` for a real `LLMPort` adapter (e.g.
 [`examples/anthropic_llm_adapter.py`](../examples/anthropic_llm_adapter.py)) and the *same*
