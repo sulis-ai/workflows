@@ -7,6 +7,8 @@ bundle. Absent → a clear `MissingAdapterError`, never a crash.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 
@@ -35,3 +37,16 @@ def test_missing_llm_adapter_raises_a_clear_error():
     with pytest.raises(MissingAdapterError) as exc:
         _compiler().compile(outcome_id="chat")  # no LLM injected
     assert "llm" in str(exc.value)
+
+
+def test_content_workflow_runs_to_completion():
+    # The real job: compile + RUN an LLM workflow to completion (not just compile).
+    graph = _compiler(Adapters(llm=StubLLMAdapter())).compile(outcome_id="chat")
+    initial = {
+        "execution_id": "e", "outcome_id": "chat", "phase": "start",
+        "completed_nodes": [], "step_outputs": {"prompt": "hello"},
+        "gate_decisions": {}, "metadata": {},
+    }
+    result = asyncio.run(graph.ainvoke(initial))
+    assert result["step_outputs"].get("reply") == "stub-response:hello"  # real LLM-via-port output
+    assert "answer" in result["completed_nodes"]

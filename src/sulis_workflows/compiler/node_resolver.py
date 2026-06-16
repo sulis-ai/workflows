@@ -46,6 +46,7 @@ class NodeResolver:
         elif node.type == "content":
             cfg = node.config or {}
             return make_content_node(
+                node.id,
                 str(cfg.get("input_key", "prompt")),
                 str(cfg.get("output_key", "answer")),
                 llm=self._adapters.require("llm"),  # the injected port (DR-040)
