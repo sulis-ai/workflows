@@ -55,6 +55,12 @@ explicit on both server and client runners.
 
 ## Status
 
-Scaffold (v0.0.0). The engine is being extracted from the platform's
-`apps/api/sulis/shared/workflows` (audited CLEAN-EXTRACT) into this shared library;
-`v0.1.0` lands the pure core (domain + ports + compiler).
+**v0.1.0 — the engine core is extracted and compiles a graph standalone.** `compiler/` +
+core `domain/` (models, ports, signing, identity, state) lifted from the platform; a
+step-node DAG compiles to a LangGraph graph with zero platform dependency. Control-plane
+operations (execution commands, task-definition, sequences) stayed in the platform. The
+handler-node dispatch path becomes a port in a later slice (not exercised by step graphs).
+See `CHANGELOG.md` for the precise in/out boundary.
+
+Next: the platform consumes this published package; the brain-runtime consumes it as a
+client runner; handler-node dispatch becomes a port.
