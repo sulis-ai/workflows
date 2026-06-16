@@ -42,15 +42,18 @@ def test_missing_llm_adapter_raises_a_clear_error():
 
 def test_content_workflow_runs_to_completion():
     # The real job: compile + RUN an LLM workflow to completion (not just compile).
-    graph = _compiler(Adapters(llm=StubLLMAdapter())).compile(outcome_id="chat")
+    llm = StubLLMAdapter()
+    graph = _compiler(Adapters(llm=llm)).compile(outcome_id="chat")
     initial = {
-        "execution_id": "e", "outcome_id": "chat", "phase": "start",
+        "execution_id": "run-42", "outcome_id": "chat", "phase": "start",
         "completed_nodes": [], "step_outputs": {"prompt": "hello"},
-        "gate_decisions": {}, "metadata": {},
+        "gate_decisions": {}, "metadata": {"platform_id": "tenant-x"},
     }
     result = asyncio.run(graph.ainvoke(initial))
     assert result["step_outputs"].get("reply") == "stub-response:hello"  # real LLM-via-port output
     assert "answer" in result["completed_nodes"]
+    # Tenancy (NFR-11/21): the live execution's identity reached the port.
+    assert llm.observed_calls == [("tenant-x", "run-42")]
 
 
 # --- step → ToolDispatchPort (real step work) ------------------------------------
@@ -61,8 +64,9 @@ _STEP_DAG = {"scan": {"dag": {"nodes": [
 _STEP_SPECS = {"scan/find": {"primitive": "glob", "args": {"pattern": "*.py"}}}
 
 _STEP_INITIAL = {
-    "execution_id": "e", "outcome_id": "scan", "phase": "start",
-    "completed_nodes": [], "step_outputs": {}, "gate_decisions": {}, "metadata": {},
+    "execution_id": "run-7", "outcome_id": "scan", "phase": "start",
+    "completed_nodes": [], "step_outputs": {}, "gate_decisions": {},
+    "metadata": {"platform_id": "tenant-a"},
 }
 
 
@@ -81,7 +85,8 @@ def test_step_dispatches_a_tool_primitive_via_the_port():
     assert out["primitive"] == "glob"
     assert out["paths"] == ["stub-glob:*.py"]  # the port was really driven
     assert "find" in result["completed_nodes"]
-    assert stub.observed_calls  # tenancy reached the adapter
+    # Tenancy (NFR-11/21): the live execution's identity reached the adapter.
+    assert stub.observed_calls == [("tenant-a", "run-7")]
 
 
 def test_step_without_a_primitive_falls_back_to_recording_the_spec():

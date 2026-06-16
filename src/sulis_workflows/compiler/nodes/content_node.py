@@ -54,10 +54,15 @@ def make_content_node(
                 f"Content node '{node_id}': step_outputs['{state_input_key}'] is empty — "
                 "no prompt to send to the LLM"
             )
+        # Tenancy (NFR-11/21): the live execution's identity reaches the LLM port.
+        # Factory args win if set; else derive from the running state.
+        meta = state.get("metadata") or {}
+        eff_platform_id = platform_id or str(meta.get("platform_id", ""))
+        eff_run_id = run_id or str(state.get("execution_id", ""))
         response = await llm.complete(
             LLMRequest(prompt=prompt, model=model, max_tokens=max_tokens),
-            platform_id=platform_id,
-            run_id=run_id,
+            platform_id=eff_platform_id,
+            run_id=eff_run_id,
             timeout_s=timeout_s,
         )
         logger.info(
