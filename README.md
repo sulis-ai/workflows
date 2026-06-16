@@ -31,17 +31,23 @@ src/sulis_workflows/
   domain/ports/    # the Protocol ports adapters implement (LLM, ContentStorage,
                    # ToolDispatch, Checkpointing, Observability, ExecutionRuntime)
   compiler/        # canonical Workflow entities → LangGraph StateGraph
+  runtime/         # the runner-facing surface: the Adapters bundle (inject ports)
 ```
 
 Adapters (Firestore, GitHub, Cloud Run, a local store, claude) live in the **consumers**,
 injected at the ports — never in this library.
+
+## Getting started
+
+See **[docs/getting-started.md](docs/getting-started.md)** for a compile-and-run walkthrough,
+and **[docs/ports.md](docs/ports.md)** for how the engine takes its dependencies (the ports).
 
 ## Install (consumers)
 
 Pin a released tag:
 
 ```bash
-pip install "git+https://github.com/sulis-ai/workflows.git@v0.1.0"
+pip install "git+https://github.com/sulis-ai/workflows.git@v0.3.0"
 ```
 
 (PyPI publication is a later option; git-tag install is the zero-infra default.)
@@ -55,12 +61,12 @@ explicit on both server and client runners.
 
 ## Status
 
-**v0.1.0 — the engine core is extracted and compiles a graph standalone.** `compiler/` +
-core `domain/` (models, ports, signing, identity, state) lifted from the platform; a
-step-node DAG compiles to a LangGraph graph with zero platform dependency. Control-plane
-operations (execution commands, task-definition, sequences) stayed in the platform. The
-handler-node dispatch path becomes a port in a later slice (not exercised by step graphs).
-See `CHANGELOG.md` for the precise in/out boundary.
+**v0.3.0 — engine core + the generic port mechanism.** The core (`compiler/` + `domain/`)
+is extracted from the platform and compiles a graph standalone (zero platform dependency).
+A runner injects all its port adapters as one `Adapters` bundle at `compile()`; content
+nodes call the LLM through the injected `LLMPort` (the engine carries no LLM-SDK dependency).
+See `docs/getting-started.md`, `docs/ports.md`, and `CHANGELOG.md`.
 
-Next: the platform consumes this published package; the brain-runtime consumes it as a
-client runner; handler-node dispatch becomes a port.
+Next: the platform consumes this package (server runner); the brain-runtime consumes it
+(client runner); handler-node dispatch becomes a port; `compile()`-time adapters extend to
+the remaining node types.

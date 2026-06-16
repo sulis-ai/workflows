@@ -22,18 +22,25 @@ from sulis_workflows.compiler.node_resolver import NodeResolver
 from sulis_workflows.compiler.nodes.routing import make_routing_edge
 from sulis_workflows.compiler.ports.spec_repository import SpecRepository
 from sulis_workflows.compiler.state import OFMGraphState
+from sulis_workflows.runtime.adapters import Adapters
 
 logger = logging.getLogger(__name__)
 
 
 class OutcomeGraphCompiler:
-    """Compiles a DAG.yaml into a LangGraph StateGraph."""
+    """Compiles a DAG.yaml into a LangGraph StateGraph.
 
-    def __init__(self, spec_repo: SpecRepository) -> None:
+    `adapters` is the runner-injected port bundle (LLM, content storage, checkpointing, …);
+    it threads to the node resolver so nodes resolve their ports from one injection point.
+    Defaults to an empty bundle (graphs whose nodes need no port — e.g. pure step graphs —
+    compile with no adapters; a node needing an absent port raises a clear error).
+    """
+
+    def __init__(self, spec_repo: SpecRepository, *, adapters: Adapters | None = None) -> None:
         self._spec_repo = spec_repo
         self._parser = DAGParser()
         self._validator = GraphValidator()
-        self._resolver = NodeResolver(spec_repo)
+        self._resolver = NodeResolver(spec_repo, adapters)
 
     def compile(self, outcome_id: str, *, checkpointer: Any | None = None) -> CompiledStateGraph:
         metrics = get_compiler_metrics()

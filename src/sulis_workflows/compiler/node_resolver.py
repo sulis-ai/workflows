@@ -9,17 +9,25 @@ from __future__ import annotations
 from typing import Any
 
 from sulis_workflows.compiler.dag_parser import DAGNode
+from sulis_workflows.compiler.nodes.content_node import make_content_node
 from sulis_workflows.compiler.nodes.gate import make_gate_node
 from sulis_workflows.compiler.nodes.step import make_step_node
 from sulis_workflows.compiler.ports.spec_repository import SpecRepository
 from sulis_workflows.domain.errors import NodeResolutionError
+from sulis_workflows.runtime.adapters import Adapters
 
 
 class NodeResolver:
-    """Resolves DAG nodes to Python callables for LangGraph."""
+    """Resolves DAG nodes to Python callables for LangGraph.
 
-    def __init__(self, spec_repo: SpecRepository) -> None:
+    `adapters` is the runner-injected port bundle; nodes that need a port (e.g. a content
+    node needs `LLMPort`) resolve it from here. Defaults to an empty bundle — a node that
+    needs a port the runner didn't inject raises a clear `MissingAdapterError`, never a crash.
+    """
+
+    def __init__(self, spec_repo: SpecRepository, adapters: Adapters | None = None) -> None:
         self._spec_repo = spec_repo
+        self._adapters = adapters or Adapters()
 
     def resolve(self, node: DAGNode) -> Any:
         """Resolve a DAG node to a callable.
@@ -35,6 +43,14 @@ class NodeResolver:
         """
         if node.type == "step":
             return make_step_node(node.id, node.spec_ref, self._spec_repo)
+        elif node.type == "content":
+            cfg = node.config or {}
+            return make_content_node(
+                str(cfg.get("input_key", "prompt")),
+                str(cfg.get("output_key", "answer")),
+                llm=self._adapters.require("llm"),  # the injected port (DR-040)
+                model=str(cfg.get("model", "claude-sonnet-4-20250514")),
+            )
         elif node.type == "gate":
             return make_gate_node(node.id)
         elif node.type in ("fan_out", "routing", "for_each", "while"):
