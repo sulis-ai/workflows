@@ -1,0 +1,33 @@
+[project]
+name = "sulis-workflows"
+version = "0.0.0"
+description = "The Sulis workflow engine — a shared, published library. Compiles canonical Workflow entities to a LangGraph graph and executes it under injected adapters; the same library runs server-side or client-side (per DR-040)."
+authors = [{ name = "Sulis AI", email = "iain@llma.ai" }]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph >= 0.2",
+    "pydantic >= 2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 8.0",
+    "pytest-cov >= 5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sulis-ai/workflows"
+
+[build-system]
+requires = ["setuptools >= 65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
