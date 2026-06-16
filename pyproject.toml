@@ -1,6 +1,6 @@
 [project]
 name = "sulis-workflows"
-version = "0.0.0"
+version = "0.1.0"
 description = "The Sulis workflow engine — a shared, published library. Compiles canonical Workflow entities to a LangGraph graph and executes it under injected adapters; the same library runs server-side or client-side (per DR-040)."
 authors = [{ name = "Sulis AI", email = "iain@llma.ai" }]
 license = "MIT"
@@ -9,7 +9,13 @@ requires-python = ">=3.10"
 dependencies = [
     "langgraph >= 0.2",
     "pydantic >= 2.0",
+    "networkx >= 3.0",        # compiler: DAG validation / cycle detection
+    "pyyaml >= 6.0",          # kind/spec YAML parsing
+    "prometheus-client >= 0.20",  # compiler metrics
 ]
+# NOTE: the engine intentionally does NOT depend on an LLM SDK (e.g. anthropic).
+# LLM access is the injected LLMPort's job; a content node's call-time `import anthropic`
+# is a deferred coupling to be routed through the port (see compiler/nodes/content_node.py).
 
 [project.optional-dependencies]
 dev = [
