@@ -71,14 +71,19 @@ def make_step_node(
 
             primitive = (spec or {}).get("primitive")
             if primitive:
+                # Tenancy (NFR-11/21): the live execution's identity reaches every port
+                # call. Factory args win if set; else derive from the running state.
+                meta = state.get("metadata") or {}
+                eff_platform_id = platform_id or str(meta.get("platform_id", ""))
+                eff_run_id = run_id or str(state.get("execution_id", ""))
                 output: dict[str, Any] = await _dispatch_primitive(
                     node_id=node_id,
                     primitive=str(primitive),
                     args=(spec or {}).get("args") or {},
                     tool_dispatch=tool_dispatch,
                     sandbox_root=sandbox_root,
-                    platform_id=platform_id,
-                    run_id=run_id,
+                    platform_id=eff_platform_id,
+                    run_id=eff_run_id,
                 )
             else:
                 # Pre-dispatch fallback: record the spec we resolved (no tool work).

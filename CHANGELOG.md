@@ -5,6 +5,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-16
+
+### Fixed — live-execution tenancy now reaches the ports (NFR-11/21)
+- Step + content nodes now thread the **running execution's identity** into every port
+  call: `run_id` ← `state["execution_id"]`, `platform_id` ← `state["metadata"]["platform_id"]`
+  (factory args still win if set). Before this, dispatched tool/LLM calls arrived with empty
+  tenancy keys — the isolation/audit keys the ports mandate were silent at runtime. Caught by
+  driving a **real filesystem tool adapter** against the published v0.5.0 (`/sulis:prove`):
+  the glob found the right files but `run_id` reached the adapter empty. Now proven: the tests
+  assert `observed_calls == [(platform_id, run_id)]` from the live run.
+
 ## [0.5.0] — 2026-06-16
 
 ### Added — step nodes now do REAL work (step → ToolDispatchPort)
