@@ -23,10 +23,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
   commands — enqueue/approve/cancel/resume), `domain/task_definition/`, `domain/sequences/` (platform
   content), and all infra adapters + entrypoints + jobs + loader.
 
-### Deferred
-- **Handler-node dispatch** (`node_factory._resolve_handler`) still reaches the platform's
-  service-layer registries; it is **not** exercised by step-node graphs. It becomes a **dispatch port**
-  in a later slice. (Step-node compilation — the v0.1.0 surface — has no such coupling.)
+### Deferred (couplings to route through ports — neither is exercised by step-node graphs)
+- **Handler-node dispatch** (`node_factory._resolve_handler`) reaches the platform's service-layer
+  registries → becomes a **dispatch port** in a later slice.
+- **Content-node LLM call** (`compiler/nodes/content_node.py`) calls the Anthropic SDK directly →
+  routes through the injected **`LLMPort`** in a later slice. The engine declares **no LLM-SDK
+  dependency**; the `anthropic` import is deferred to call-time so the engine imports + compiles
+  without it.
+
+### Dependencies
+- `langgraph`, `pydantic`, `networkx` (DAG validation), `pyyaml` (spec parsing), `prometheus-client`
+  (compiler metrics). Deliberately **no LLM SDK** (that's the `LLMPort`'s job).
 
 ## [0.0.0] — 2026-06-16
 

@@ -10,7 +10,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-import anthropic
+# NOTE (DR-040 / engine purity): a content node should call the LLM via the injected
+# `LLMPort`, not import the Anthropic SDK directly. Until that port wiring lands, the
+# `anthropic` import is deferred to call-time (below) so the engine imports + compiles
+# with no LLM-SDK dependency. Executing a content node still needs `anthropic` installed;
+# routing it through `LLMPort` is a follow-on slice (same shape as the handler-node port).
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,8 @@ def make_content_node(
             raise ValueError(
                 f"Content node: state['{state_input_key}'] is empty — no prompt to send to LLM"
             )
+
+        import anthropic  # deferred — see module note (belongs behind LLMPort)
 
         client = anthropic.AsyncAnthropic()
         response = await client.messages.create(
