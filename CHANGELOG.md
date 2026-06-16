@@ -5,6 +5,26 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-16
+
+### Added — the port pattern, demonstrated end-to-end
+- **Content nodes now consume the injected `LLMPort`** instead of importing the Anthropic SDK
+  directly — closing one of the two deferred couplings. `make_content_node(..., llm=<LLMPort>)`
+  calls `llm.complete(LLMRequest(...))`; the engine carries **no LLM-SDK dependency** (verified:
+  all modules import + all tests pass with `anthropic` blocked).
+- `tests/test_llm_port.py` — proves define → adapt → inject → invoke with `StubLLMAdapter` (no SDK,
+  no network), incl. tenancy (`platform_id`/`run_id`) propagation through the port.
+- `examples/anthropic_llm_adapter.py` — a real `LLMPort` adapter (consumer-side; imports `anthropic`
+  *there*, not in the engine) showing how a runner provides a real LLM.
+- `docs/ports.md` — the port pattern (define/adapt/inject/invoke), the port list, and the injection
+  seam (node-level today; compile-level next).
+
+### Deferred (remaining)
+- **Handler-node dispatch** (`node_factory._resolve_handler`) → a dispatch port (still the one
+  remaining platform coupling; not exercised by step-node graphs).
+- **Compile-level adapter injection** — `compile()` threading an adapter bundle to the nodes it
+  builds (today adapters are injected at the node factory).
+
 ## [0.1.0] — 2026-06-16
 
 ### Added

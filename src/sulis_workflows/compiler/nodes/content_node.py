@@ -1,8 +1,12 @@
-"""Content node — wraps Anthropic messages.create() for LLM-powered graph nodes.
+"""Content node — an LLM-powered graph node, via the injected `LLMPort`.
 
-Separates content generation (LLM, judgment-based) from process execution
-(deterministic, graph-managed). Content nodes read a compiled prompt from state,
-call the Anthropic API, and write the response back to state.
+A content node reads a compiled prompt from state, calls the LLM **through the
+adapter-agnostic `LLMPort`** (never a specific SDK — the engine carries no LLM
+dependency), and writes the response back to state. The consumer/runner injects the
+adapter: a real one (e.g. an Anthropic or Claude-Code adapter — see
+`examples/anthropic_llm_adapter.py`) or the `StubLLMAdapter` in tests. This is the
+canonical "how the engine supports a port" shape (DR-040): the engine depends on the
+Protocol; the consumer provides the implementation.
 """
 
 from __future__ import annotations
@@ -10,11 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-# NOTE (DR-040 / engine purity): a content node should call the LLM via the injected
-# `LLMPort`, not import the Anthropic SDK directly. Until that port wiring lands, the
-# `anthropic` import is deferred to call-time (below) so the engine imports + compiles
-# with no LLM-SDK dependency. Executing a content node still needs `anthropic` installed;
-# routing it through `LLMPort` is a follow-on slice (same shape as the handler-node port).
+from sulis_workflows.domain.ports.llm import LLMPort, LLMRequest
 
 logger = logging.getLogger(__name__)
 
@@ -23,48 +23,45 @@ def make_content_node(
     state_input_key: str,
     state_output_key: str,
     *,
+    llm: LLMPort,
     model: str = "claude-sonnet-4-20250514",
     max_tokens: int = 4096,
+    platform_id: str = "",
+    run_id: str = "",
+    timeout_s: float = 60.0,
 ) -> Callable:
-    """Create an async content node that calls the Anthropic API.
+    """Create an async content node that calls the LLM via the injected `llm` port.
 
     Args:
-        state_input_key: State field containing the compiled prompt.
-        state_output_key: State field to write LLM response into.
-        model: Anthropic model ID.
-        max_tokens: Maximum tokens in response.
+        state_input_key: state field holding the compiled prompt.
+        state_output_key: state field to write the LLM response into.
+        llm: the injected `LLMPort` adapter (the engine never constructs an SDK client).
+        model / max_tokens: request shaping, mapped by the adapter to its SDK.
+        platform_id / run_id / timeout_s: tenancy + bound, threaded to every port call.
 
     Returns:
-        An async callable suitable for LangGraph function nodes.
+        An async callable suitable for a LangGraph function node.
     """
 
     async def content_fn(state: dict) -> dict:
         prompt = state.get(state_input_key, "")
         if not prompt:
             raise ValueError(
-                f"Content node: state['{state_input_key}'] is empty — no prompt to send to LLM"
+                f"Content node: state['{state_input_key}'] is empty — no prompt to send to the LLM"
             )
-
-        import anthropic  # deferred — see module note (belongs behind LLMPort)
-
-        client = anthropic.AsyncAnthropic()
-        response = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
+        response = await llm.complete(
+            LLMRequest(prompt=prompt, model=model, max_tokens=max_tokens),
+            platform_id=platform_id,
+            run_id=run_id,
+            timeout_s=timeout_s,
         )
-        first_block = response.content[0]
-        if not hasattr(first_block, "text"):
-            raise ValueError(f"Content node: expected TextBlock, got {type(first_block).__name__}")
-        text: str = first_block.text
-
         logger.info(
             "Content node produced %d chars from '%s' -> '%s'",
-            len(text),
+            len(response.text),
             state_input_key,
             state_output_key,
         )
-        return {state_output_key: text}
+        return {state_output_key: response.text}
 
     content_fn.__name__ = f"content_{state_input_key}_to_{state_output_key}"
     return content_fn
