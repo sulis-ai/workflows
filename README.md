@@ -40,7 +40,9 @@ injected at the ports — never in this library.
 ## Getting started
 
 See **[docs/getting-started.md](docs/getting-started.md)** for a compile-and-run walkthrough,
-and **[docs/ports.md](docs/ports.md)** for how the engine takes its dependencies (the ports).
+**[docs/ports.md](docs/ports.md)** for how the engine takes its dependencies (the ports), and
+**[docs/adopting.md](docs/adopting.md)** for adopting the engine in an existing codebase
+(replacing an in-app copy with the package + wiring adapters — the path for the platform/server runner).
 
 ## Install (consumers)
 
