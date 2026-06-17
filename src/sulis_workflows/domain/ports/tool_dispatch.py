@@ -75,7 +75,7 @@ class RipgrepMatch:
 class ToolDispatchPort(IdentifiedAdapter, Protocol):
     """Adapter-agnostic stage-primitive dispatch protocol.
 
-    Three methods cover the slice-1 surface:
+    The typed workspace trio covers the slice-1 surface:
 
     - ``read_file`` — batched read (FR-5). Returns a
       :class:`ReadFileResult` with truncation metadata.
@@ -83,6 +83,13 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
       :class:`WorkspacePath`.
     - ``ripgrep`` — structured grep across one or more paths. Returns
       a list of :class:`RipgrepMatch` value-objects.
+
+    ``invoke`` is the generic escape hatch for primitives BEYOND the
+    workspace trio (e.g. a ``subprocess`` / ``http_call`` a consumer's
+    tool catalogue declares). The engine stays transport-agnostic — it
+    names the primitive + args and the adapter decides how to execute
+    it, returning a JSON-friendly dict. This is how richer tool
+    coverage is added without growing the engine's surface.
 
     Every method carries ``sandbox_root`` (NFR-14) plus the tenancy
     keys (NFR-11, NFR-21).
@@ -117,6 +124,16 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
         platform_id: str,
         run_id: str,
     ) -> list[RipgrepMatch]: ...
+
+    async def invoke(
+        self,
+        primitive: str,
+        args: dict,
+        *,
+        sandbox_root: WorkspacePath,
+        platform_id: str,
+        run_id: str,
+    ) -> dict: ...
 
 
 @dataclass
@@ -191,3 +208,15 @@ class StubToolDispatchAdapter:
             )
             for p in paths
         ]
+
+    async def invoke(
+        self,
+        primitive: str,
+        args: dict,
+        *,
+        sandbox_root: WorkspacePath,
+        platform_id: str,
+        run_id: str,
+    ) -> dict:
+        self.observed_calls.append((platform_id, run_id))
+        return {"primitive": primitive, "args": args, "stub": True}

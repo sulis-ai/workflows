@@ -5,6 +5,18 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-17
+
+### Added — generic `ToolDispatchPort.invoke` (richer tool coverage beyond the workspace trio)
+- `ToolDispatchPort` gains `invoke(primitive, args, *, sandbox_root, platform_id, run_id) -> dict`
+  — the escape hatch for primitives **beyond** the typed workspace trio (`read_file`/`glob`/
+  `ripgrep`). A step whose spec names any other primitive (e.g. `subprocess`, `http_call`)
+  routes through `invoke`; the engine stays transport-agnostic (it names the primitive + args),
+  and the **adapter** owns how it executes. This is how a consumer's richer tool catalogue is
+  supported without growing the engine's surface. An adapter with no `invoke` fails loud.
+- `StubToolDispatchAdapter.invoke` returns a deterministic echo; `tests/test_adapters.py::
+  test_step_dispatches_a_non_workspace_primitive_via_invoke` proves the routing + tenancy.
+
 ## [0.6.0] — 2026-06-16
 
 ### Fixed — live-execution tenancy now reaches the ports (NFR-11/21)

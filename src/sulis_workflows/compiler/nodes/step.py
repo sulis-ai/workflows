@@ -168,7 +168,14 @@ async def _dispatch_primitive(
             ],
         }
 
-    raise ValueError(
-        f"step '{node_id}': unknown tool primitive '{primitive}'. "
-        "Supported: read_file, glob, ripgrep."
-    )
+    # Beyond the typed workspace trio: delegate to the adapter's generic `invoke`. The
+    # engine stays transport-agnostic — the adapter owns how a richer primitive (subprocess,
+    # http_call, …) actually executes. An adapter that doesn't implement it fails loud.
+    invoke = getattr(tool_dispatch, "invoke", None)
+    if invoke is None:
+        raise ValueError(
+            f"step '{node_id}': primitive '{primitive}' is beyond the workspace trio "
+            "(read_file/glob/ripgrep) and the injected tool-dispatch adapter has no 'invoke' "
+            "method to handle it."
+        )
+    return await invoke(primitive, args, **tenancy)
