@@ -112,3 +112,18 @@ def test_step_with_primitive_but_no_tool_dispatch_raises_a_clear_error():
     with pytest.raises(MissingAdapterError) as exc:
         asyncio.run(graph.ainvoke(_STEP_INITIAL))
     assert "tool_dispatch" in str(exc.value)
+
+
+def test_step_dispatches_a_non_workspace_primitive_via_invoke():
+    # A primitive beyond the workspace trio routes through the adapter's generic `invoke`.
+    specs = {"scan/find": {"primitive": "subprocess", "args": {"command": "echo hi"}}}
+    stub = StubToolDispatchAdapter()
+    compiler = OutcomeGraphCompiler(
+        MemorySpecRepository(dags=_STEP_DAG, steps=specs, sequences={}),
+        adapters=Adapters(tool_dispatch=stub, sandbox_root="/work"),
+    )
+    graph = compiler.compile(outcome_id="scan")
+    result = asyncio.run(graph.ainvoke(_STEP_INITIAL))
+    out = result["step_outputs"]["find"]
+    assert out == {"primitive": "subprocess", "args": {"command": "echo hi"}, "stub": True}
+    assert stub.observed_calls == [("tenant-a", "run-7")]
