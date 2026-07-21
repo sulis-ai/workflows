@@ -45,12 +45,15 @@ class AnthropicLLMAdapter:
         import anthropic  # the CONSUMER's dependency, not the engine's
 
         client = anthropic.AsyncAnthropic()
-        resp = await client.messages.create(
-            model=req.model,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            messages=[{"role": "user", "content": req.prompt}],
-        )
+        kwargs: dict = {
+            "model": req.model,
+            "max_tokens": req.max_tokens,
+            "temperature": req.temperature,
+            "messages": [{"role": "user", "content": req.prompt}],
+        }
+        if req.system_prompt:
+            kwargs["system"] = req.system_prompt
+        resp = await client.messages.create(**kwargs)
         block = resp.content[0]
         usage = getattr(resp, "usage", None)
         return LLMResponse(

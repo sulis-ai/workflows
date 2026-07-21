@@ -30,6 +30,7 @@ def make_content_node(
     platform_id: str = "",
     run_id: str = "",
     timeout_s: float = 60.0,
+    system_prompt: str = "",
 ) -> Callable:
     """Create an async content node that calls the LLM via the injected `llm` port.
 
@@ -44,6 +45,12 @@ def make_content_node(
         llm: the injected `LLMPort` adapter (the engine never constructs an SDK client).
         model / max_tokens: request shaping, mapped by the adapter to its SDK.
         platform_id / run_id / timeout_s: tenancy + bound, threaded to every port call.
+        system_prompt: compile-time-known static context (e.g. a Step's own authored
+            instructions) baked into the compiled node's config — distinct from the
+            dynamic `prompt`, which is resolved from `step_outputs` at run time. Empty
+            string (the default) means "no system prompt", not an empty one sent to the
+            adapter — kept out of the `LLMRequest` entirely so an adapter's own default
+            system prompt (if any) isn't silently overridden by nothing.
     """
 
     async def content_fn(state: dict) -> dict:
@@ -60,7 +67,10 @@ def make_content_node(
         eff_platform_id = platform_id or str(meta.get("platform_id", ""))
         eff_run_id = run_id or str(state.get("execution_id", ""))
         response = await llm.complete(
-            LLMRequest(prompt=prompt, model=model, max_tokens=max_tokens),
+            LLMRequest(
+                prompt=prompt, model=model, max_tokens=max_tokens,
+                system_prompt=system_prompt or None,
+            ),
             platform_id=eff_platform_id,
             run_id=eff_run_id,
             timeout_s=timeout_s,

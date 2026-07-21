@@ -46,14 +46,23 @@ class LLMRequest:
     """Adapter-agnostic LLM request value-object.
 
     Carries the prompt and the model selector. Adapters map this onto
-    their SDK-specific request shape (system prompts, tool schemas,
-    sampling params) at the adapter boundary.
+    their SDK-specific request shape (tool schemas, sampling params)
+    at the adapter boundary.
+
+    ``system_prompt`` is optional, compile-time-known context a content
+    node's caller (the workflow compiler) attaches to the node's static
+    config -- e.g. a Step's own authored instructions -- distinct from
+    ``prompt``, which carries the run's dynamic, upstream-resolved
+    value. Adapters that support a real system-prompt channel (most do)
+    should use it; one that doesn't MAY fall back to prepending it to
+    ``prompt``, but should not silently drop it.
     """
 
     prompt: str
     model: str
     max_tokens: int = 1024
     temperature: float = 0.0
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -149,8 +158,9 @@ class StubLLMAdapter:
         timeout_s: float,
     ) -> LLMResponse:
         self.observed_calls.append((platform_id, run_id))
+        prefix = f"[system:{req.system_prompt}] " if req.system_prompt else ""
         return LLMResponse(
-            text=f"stub-response:{req.prompt}",
+            text=f"stub-response:{prefix}{req.prompt}",
             input_tokens=len(req.prompt.split()),
             output_tokens=4,
         )

@@ -60,6 +60,7 @@ class NodeResolver:
                 str(cfg.get("output_key", "answer")),
                 llm=self._adapters.require("llm"),  # the injected port (DR-040)
                 model=str(cfg.get("model", "claude-sonnet-4-20250514")),
+                system_prompt=str(cfg.get("system_prompt", "")),
             )
         elif node.type == "gate":
             return make_gate_node(node.id)

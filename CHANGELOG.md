@@ -5,6 +5,25 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-21
+
+### Added — `LLMRequest.system_prompt` (a real system-prompt channel for content nodes)
+- `LLMRequest` gains an optional `system_prompt: str | None = None`. A content node's
+  compiled config can now carry compile-time-known static context (e.g. a Step author's
+  own instructions) SEPARATELY from `prompt` (the run's dynamic, `step_outputs`-resolved
+  value) — `make_content_node(..., system_prompt=...)` threads it through, and
+  `NodeResolver` reads it from `node.config["system_prompt"]`.
+- Found live, not speculative: a consumer (brain-runtime) compiling a real canonical
+  Workflow's Steps into content nodes discovered the engine had NO way to use a Step's
+  own authored `agent_instructions` at all — every LLM call got only the raw upstream
+  text, producing generic, context-free output regardless of how rich the Step's own
+  instructions were. `system_prompt` is the missing channel.
+- `StubLLMAdapter.complete` reflects `system_prompt` in its echo (`[system:...] `
+  prefix, only when set) so consumers can assert the wiring without a real adapter.
+  `examples/anthropic_llm_adapter.py` maps it onto the Anthropic SDK's `system` param.
+- Backward compatible: omitting `system_prompt` (the default) behaves exactly as before
+  on every existing call site — proven by the full existing suite passing unchanged.
+
 ## [0.7.0] — 2026-06-17
 
 ### Added — generic `ToolDispatchPort.invoke` (richer tool coverage beyond the workspace trio)
