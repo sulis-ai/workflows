@@ -19,6 +19,7 @@ from sulis_workflows.compiler.dag_parser import DAGParser, ParsedDAG
 from sulis_workflows.compiler.graph_validator import GraphValidator
 from sulis_workflows.compiler.metrics import get_compiler_metrics
 from sulis_workflows.compiler.node_resolver import NodeResolver
+from sulis_workflows.compiler.node_retry import retry_policy_for
 from sulis_workflows.compiler.nodes.routing import make_routing_edge
 from sulis_workflows.compiler.ports.spec_repository import SpecRepository
 from sulis_workflows.compiler.state import OFMGraphState
@@ -61,12 +62,8 @@ class OutcomeGraphCompiler:
 
             # 4. Add nodes
             for node in dag.nodes:
-                if node.type == "fan_out":
-                    node_fn = self._resolver.resolve(node)
-                    graph.add_node(node.id, node_fn)
-                else:
-                    node_fn = self._resolver.resolve(node)
-                    graph.add_node(node.id, node_fn)
+                node_fn = self._resolver.resolve(node)
+                graph.add_node(node.id, node_fn, retry_policy=retry_policy_for(node))
 
             # 5. Wire edges
             self._wire_edges(graph, dag)
@@ -116,7 +113,7 @@ class OutcomeGraphCompiler:
 
             for node in dag.nodes:
                 node_fn = self._resolver.resolve(node)
-                graph.add_node(node.id, node_fn)
+                graph.add_node(node.id, node_fn, retry_policy=retry_policy_for(node))
 
             self._wire_edges(graph, dag)
 

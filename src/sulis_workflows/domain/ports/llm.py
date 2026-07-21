@@ -102,6 +102,13 @@ class LLMPort(IdentifiedAdapter, Protocol):
 
     Per TDD §3.3 every signature carries ``platform_id``, ``run_id``,
     and ``timeout_s``.
+
+    Error contract (v0.9.0+): an adapter SHOULD raise
+    ``sulis_workflows.domain.errors.TransientPortError`` for a failure a retry might
+    fix (a network blip, a rate limit, a flaky subprocess exit) and
+    ``PermanentPortError`` for one it won't (malformed input, an unrecoverable
+    config error). A compiled node's default retry policy acts on this distinction;
+    an adapter that raises neither gets the policy's own generic classification.
     """
 
     async def complete(

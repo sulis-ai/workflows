@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from sulis_workflows.domain.engine_cache import WorkspacePath
+from sulis_workflows.domain.errors import PermanentPortError, TransientPortError
 from sulis_workflows.domain.identity import (
     AdapterIdentity,
     IdentifiedAdapter,
@@ -72,19 +73,21 @@ class StorageError(Exception):
         super().__init__(f"{message} ({path!r})")
 
 
-class TransientStorageError(StorageError):
+class TransientStorageError(StorageError, TransientPortError):
     """Temporary storage failure (network blip, rate limit, throttle).
 
-    The stage primitive retries via the existing ``tenacity`` policy on
-    this exception class (NFR-17).
+    A compiled node's retry policy retries this exception class (see
+    ``sulis_workflows.domain.errors.TransientPortError``, the shared base every
+    port's transient failures now share).
     """
 
 
-class PermanentStorageError(StorageError):
+class PermanentStorageError(StorageError, PermanentPortError):
     """Permanent storage failure (not found, forbidden, malformed path).
 
-    The stage primitive does NOT retry on this exception class; it
-    propagates after a single attempt.
+    A compiled node's retry policy does NOT retry this exception class; it
+    propagates after a single attempt (see
+    ``sulis_workflows.domain.errors.PermanentPortError``).
     """
 
 

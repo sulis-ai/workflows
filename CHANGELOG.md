@@ -5,6 +5,41 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-21
+
+### Added — retry/resilience, wired to two dead extension points already in the schema
+- `DAGNode.retry` (`compiler/dag_parser.py`) was parsed from every node's YAML since v0.1.0
+  and never consumed anywhere -- a dead field. Now wired to LangGraph's own native
+  `RetryPolicy` (`add_node(..., retry_policy=...)`) via the new `compiler/node_retry.py`.
+  LangGraph re-invokes a node's ENTIRE coroutine on a retryable exception -- the same
+  "whole-unit re-execution + exponential backoff" convention Temporal (Activity retries)
+  and AWS Step Functions (Retry/Catch) both use.
+- `content`/`step` nodes get a REAL DEFAULT retry policy (`max_attempts=3`) even with no
+  explicit `retry` declared -- every consumer benefits, not just ones who remember to opt
+  in. `gate` nodes (human interrupts) get none; an explicit `retry: {max_attempts: 0}`
+  opts any node out.
+- New shared error vocabulary (`domain/errors.py`): `PortError` -> `TransientPortError` /
+  `PermanentPortError`. Generalizes what was storage-only (`TransientStorageError`/
+  `PermanentStorageError` in `ports/content_storage.py` -- the only error classification
+  anywhere in the engine, referencing a "tenacity policy" that was never implemented) so
+  `LLMPort`/`ToolDispatchPort` adapters (which documented ZERO exceptions before this) can
+  opt into the same retry treatment. `TransientStorageError`/`PermanentStorageError` are
+  now subclasses of the new base -- existing `isinstance` call sites are unaffected.
+- Found live, not speculative: a consumer (brain-runtime) proving a real ~75-minute nested
+  Workflow run hit a one-off transient `claude` CLI failure on its final step -- with no
+  retry anywhere, the whole run was lost. `RetryPolicy`'s default `retry_on` classification
+  (5xx/connection errors yes; `ValueError`/`OSError`/etc no) is extended by the new
+  `TransientPortError`/`PermanentPortError` check so an adapter's own classification wins.
+- Scope, named plainly: this covers failures INSIDE a node (a port call). The engine ships
+  no runner (`graph.ainvoke()` is always the consumer's call) -- a consumer reporting a
+  run's terminal state to ITS OWN infrastructure after the run returns is structurally
+  outside the graph and outside this fix's reach.
+- Backward compatible: a node with no `retry` declared and a type outside `{content, step}`
+  behaves exactly as before. Proven by the full existing suite passing unchanged plus 5 new
+  tests (`tests/test_node_retry.py`) exercising real retry-then-succeed and
+  permanent-fails-immediately through the actual compiler + real LangGraph execution, not
+  mocked.
+
 ## [0.8.0] — 2026-07-21
 
 ### Added — `LLMRequest.system_prompt` (a real system-prompt channel for content nodes)

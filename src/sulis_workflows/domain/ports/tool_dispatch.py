@@ -93,6 +93,11 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
 
     Every method carries ``sandbox_root`` (NFR-14) plus the tenancy
     keys (NFR-11, NFR-21).
+
+    Error contract (v0.9.0+): an adapter SHOULD raise
+    ``sulis_workflows.domain.errors.TransientPortError`` for a failure a retry might
+    fix and ``PermanentPortError`` for one it won't -- a compiled node's default
+    retry policy acts on this distinction, same contract as ``LLMPort``.
     """
 
     async def read_file(

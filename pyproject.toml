@@ -1,6 +1,6 @@
 [project]
 name = "sulis-workflows"
-version = "0.8.0"
+version = "0.9.0"
 description = "The Sulis workflow engine — a shared, published library. Compiles canonical Workflow entities to a LangGraph graph and executes it under injected adapters; the same library runs server-side or client-side (per DR-040)."
 authors = [{ name = "Sulis AI", email = "iain@llma.ai" }]
 license = "MIT"

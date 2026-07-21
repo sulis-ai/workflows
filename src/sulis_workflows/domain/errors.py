@@ -239,3 +239,35 @@ class GateConfigError(CompilationError):
         self.gate_id = gate_id
         self.gate_type = gate_type
         super().__init__(message)
+
+
+# --- Port-error vocabulary — transient vs permanent (v0.9.0) ----------------------------
+#
+# The ONE failure classification every adapter (LLMPort, ToolDispatchPort,
+# ContentStoragePort, ...) uses so a compiled node's retry policy can act on the right
+# branch. Was storage-specific (TransientStorageError/PermanentStorageError in
+# ports/content_storage.py) -- the only error classification anywhere in the engine, and
+# the only one any adapter actually raised. Generalized here so LLMPort/ToolDispatchPort
+# adapters (which historically documented ZERO exceptions) can opt into the same retry
+# treatment without inventing a second taxonomy; content_storage.py's names become
+# subclasses of these, so existing isinstance(e, TransientStorageError) call sites are
+# unaffected. Deliberately NOT WorkflowExecutionError subclasses -- these classify a
+# RETRY DECISION for an adapter/port call, not an HTTP-facing execution-API error.
+
+
+class PortError(Exception):
+    """Base class for adapter/port errors.
+
+    Adapters MUST classify failures into transient vs permanent so a compiled node's
+    retry policy can retry the right branch and fail fast on the other.
+    """
+
+
+class TransientPortError(PortError):
+    """Temporary failure (network blip, rate limit, throttle, a flaky subprocess exit) —
+    retried by a node's default retry policy."""
+
+
+class PermanentPortError(PortError):
+    """Permanent failure (not found, forbidden, malformed input) — NOT retried; propagates
+    after a single attempt."""
