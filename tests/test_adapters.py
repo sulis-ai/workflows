@@ -125,5 +125,36 @@ def test_step_dispatches_a_non_workspace_primitive_via_invoke():
     graph = compiler.compile(outcome_id="scan")
     result = asyncio.run(graph.ainvoke(_STEP_INITIAL))
     out = result["step_outputs"]["find"]
-    assert out == {"primitive": "subprocess", "args": {"command": "echo hi"}, "stub": True}
+    assert out == {
+        "primitive": "subprocess", "args": {"command": "echo hi"}, "stub": True,
+        "step_outputs": {},  # this run's OWN accumulated step_outputs at dispatch time (v0.10.0+)
+    }
     assert stub.observed_calls == [("tenant-a", "run-7")]
+
+
+def test_step_invoke_sees_this_runs_own_prior_step_outputs():
+    # REGRESSION: an adapter recursing into a sub-workflow (workflow_dispatch) had no way
+    # to see what THIS run has already produced -- only the outermost run's original inputs.
+    # A second step in the SAME run must see the first step's real output via `step_outputs`.
+    dag = {"scan": {"dag": {"nodes": [
+        {"id": "find", "type": "step", "spec_ref": "scan/find"},
+        {"id": "grep", "type": "step", "spec_ref": "scan/grep", "depends_on": ["find"]},
+    ]}}}
+    specs = {
+        "scan/find": {"primitive": "subprocess", "args": {"command": "echo hi"}},
+        "scan/grep": {"primitive": "subprocess", "args": {"command": "echo bye"}},
+    }
+    stub = StubToolDispatchAdapter()
+    compiler = OutcomeGraphCompiler(
+        MemorySpecRepository(dags=dag, steps=specs, sequences={}),
+        adapters=Adapters(tool_dispatch=stub, sandbox_root="/work"),
+    )
+    graph = compiler.compile(outcome_id="scan")
+    result = asyncio.run(graph.ainvoke(_STEP_INITIAL))
+    grep_out = result["step_outputs"]["grep"]
+    # `grep` dispatched AFTER `find` completed -- its own step_outputs snapshot must carry
+    # find's real result, not an empty dict.
+    assert grep_out["step_outputs"] == {
+        "find": {"primitive": "subprocess", "args": {"command": "echo hi"}, "stub": True,
+                  "step_outputs": {}}
+    }

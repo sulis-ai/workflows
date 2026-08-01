@@ -5,6 +5,26 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-01
+
+### Added — `ToolDispatchPort.invoke` sees this run's own accumulated `step_outputs`
+- `invoke(primitive, args, *, sandbox_root, platform_id, run_id, step_outputs=None)` — a new
+  optional, additive keyword. `compiler/nodes/step.py`'s `step_fn` already receives the full
+  LangGraph `state` (including `step_outputs`); this just threads it past the tenancy trio it
+  already forwards, into `invoke` itself. Every existing adapter that ignores the new kwarg
+  keeps working unchanged (`StubToolDispatchAdapter` now records + echoes it back for test
+  assertions).
+- **Why:** found live, driving a real two-level-deep `workflow_dispatch` recursion (a
+  Workflow's own step dispatching a second Workflow) for the first time — the second hop had
+  no way to see what the FIRST hop had actually produced by that point (e.g. a
+  gather-context step's real output), only the outermost run's original inputs, which a
+  consumer-side adapter (`SubworkflowDispatch`) had already threaded down via
+  `set_run_inputs`. That mechanism is necessarily shallow — set once, inherited unchanged by
+  every further recursion — since the engine never gave the adapter anything richer to work
+  from. `step_outputs` closes that gap without changing the engine's execution model at all;
+  a `workflow_dispatch`-kind adapter can now seed a nested sub-run from the CALLING run's own
+  latest output, not just the original top-level inputs.
+
 ## [0.9.0] — 2026-07-21
 
 ### Added — retry/resilience, wired to two dead extension points already in the schema

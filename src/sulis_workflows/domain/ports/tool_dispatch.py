@@ -98,6 +98,17 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
     ``sulis_workflows.domain.errors.TransientPortError`` for a failure a retry might
     fix and ``PermanentPortError`` for one it won't -- a compiled node's default
     retry policy acts on this distinction, same contract as ``LLMPort``.
+
+    ``invoke``'s ``step_outputs`` (v0.10.0+): the calling run's own accumulated
+    ``state["step_outputs"]`` at the moment this primitive dispatches -- the step node
+    already holds this (``compiler/nodes/step.py``'s ``step_fn`` receives the full LangGraph
+    ``state``), it just wasn't threaded past the tenancy trio before. Optional and additive:
+    every existing adapter that ignores it keeps working unchanged. Exists so an adapter that
+    itself recurses into another run (e.g. a ``workflow_dispatch``-kind Tool composing a
+    sub-workflow) can seed that sub-run from what THIS run has actually produced so far,
+    instead of only ever seeing the top-level run's original inputs -- the gap found live: a
+    two-level-deep dispatch (a Workflow's own step dispatching a second Workflow) had no way
+    to pass its own intermediate output down, only the outermost run's original inputs.
     """
 
     async def read_file(
@@ -138,6 +149,7 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
         sandbox_root: WorkspacePath,
         platform_id: str,
         run_id: str,
+        step_outputs: dict | None = None,
     ) -> dict: ...
 
 
@@ -222,6 +234,7 @@ class StubToolDispatchAdapter:
         sandbox_root: WorkspacePath,
         platform_id: str,
         run_id: str,
+        step_outputs: dict | None = None,
     ) -> dict:
         self.observed_calls.append((platform_id, run_id))
-        return {"primitive": primitive, "args": args, "stub": True}
+        return {"primitive": primitive, "args": args, "stub": True, "step_outputs": step_outputs}

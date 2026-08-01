@@ -84,6 +84,7 @@ def make_step_node(
                     sandbox_root=sandbox_root,
                     platform_id=eff_platform_id,
                     run_id=eff_run_id,
+                    step_outputs=state.get("step_outputs"),
                 )
             else:
                 # Pre-dispatch fallback: record the spec we resolved (no tool work).
@@ -111,6 +112,7 @@ async def _dispatch_primitive(
     sandbox_root: str | None,
     platform_id: str,
     run_id: str,
+    step_outputs: dict | None = None,
 ) -> dict[str, Any]:
     """Dispatch a step's tool primitive via the injected `ToolDispatchPort`.
 
@@ -178,4 +180,4 @@ async def _dispatch_primitive(
             "(read_file/glob/ripgrep) and the injected tool-dispatch adapter has no 'invoke' "
             "method to handle it."
         )
-    return await invoke(primitive, args, **tenancy)
+    return await invoke(primitive, args, step_outputs=step_outputs, **tenancy)
