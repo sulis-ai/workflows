@@ -84,7 +84,7 @@ class GraphValidator:
     def _check_gv01_unbounded_cycles(self, dag: ParsedDAG, node_ids: set[str]) -> None:
         """GV-01: Detect cycles with no conditional exit path.
 
-        Cycles through routing or fan_out nodes are permitted because
+        Cycles through routing, route_decider, or fan_out nodes are permitted because
         they have conditional edges that provide an exit path.
         Cycles through only step/gate nodes with simple edges are
         unbounded and rejected.
@@ -103,17 +103,22 @@ class GraphValidator:
                 continue  # Single node — not a cycle (self-loops caught by GV-08)
 
             # Check if any node in the cycle has a conditional exit capability.
-            # routing, fan_out, and while nodes have conditional edges by definition.
+            # routing, route_decider, fan_out, and while nodes have conditional edges by
+            # definition (a route_decider node's own edges are wired identically to a
+            # routing node's -- see OutcomeGraphBuilder._wire_edges -- it just also computes
+            # its own routing value via a real step dispatch, rather than reading one that
+            # some other node already wrote).
             has_conditional_exit = any(
-                node_type_map.get(node_id) in ("routing", "fan_out", "while") for node_id in scc
+                node_type_map.get(node_id) in ("routing", "route_decider", "fan_out", "while")
+                for node_id in scc
             )
 
             if not has_conditional_exit:
                 cycle_path = " -> ".join(sorted(scc))
                 raise GraphValidationError(
                     f"GV-01: Unbounded cycle detected: {cycle_path}. "
-                    "Cycles must include a routing or fan_out node to provide "
-                    "a conditional exit path.",
+                    "Cycles must include a routing, route_decider, or fan_out node to "
+                    "provide a conditional exit path.",
                     rule_id="GV-01",
                 )
 

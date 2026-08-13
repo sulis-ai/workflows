@@ -143,7 +143,12 @@ class OutcomeGraphCompiler:
             elif len(successors) == 1:
                 graph.add_edge(node.id, successors[0])
             else:
-                if node.type == "routing":
+                if node.type in ("routing", "route_decider"):
+                    # A route_decider node computes its OWN routing value (via a real step
+                    # dispatch, see NodeResolver) and writes it to step_outputs[node.id] --
+                    # make_routing_edge reads that same node's own id, so no separate
+                    # "routing" node is needed once the deciding node's own output already
+                    # carries the route.
                     routes = node.config.get("routes", {})
                     route_key = node.config.get("route_key", "route")
                     edge_fn = make_routing_edge(node.id, routes, route_key)

@@ -41,7 +41,16 @@ class NodeResolver:
         Raises:
             NodeResolutionError: If the node type is unsupported.
         """
-        if node.type == "step":
+        if node.type in ("step", "route_decider"):
+            # A route_decider node IS a step node (real dispatch, writes its own
+            # step_outputs[node.id]) — the ONLY difference is what OutcomeGraphBuilder does
+            # with its successors afterwards (_wire_edges reads this node's own step_outputs
+            # entry back to pick a conditional edge, instead of a plain/fan-out edge). No
+            # separate execution mechanism is needed: the node that COMPUTES the routing
+            # decision and the node whose id the conditional edge reads from are the same
+            # node, avoiding the id-collision problem a separate "decider + routing" node
+            # pair would otherwise have (DAGNode ids must be globally unique).
+            #
             # tool_dispatch + sandbox_root are resolved lazily inside the node (the
             # primitive is only known once the spec loads at execution time) — a step
             # that names a primitive but has no injected port raises a clear error then.
