@@ -10,6 +10,7 @@ No ``sulis.`` import, no vendor SDK (WP-01 A5).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Iterator
 
@@ -29,7 +30,15 @@ from sulis_workflows.definition.expressions import (
 from sulis_workflows.definition.load import load_definition
 from sulis_workflows.definition.registry import Registry
 
-__all__ = ["Finding", "validate", "validate_process", "validate_tool", "validate_control", "validate_profile"]
+__all__ = [
+    "Finding",
+    "validate",
+    "validate_definition",
+    "validate_process",
+    "validate_tool",
+    "validate_control",
+    "validate_profile",
+]
 
 _ENGINE_ENDINGS = ("ESCALATED", "FAILED", "FORBIDDEN", "CANCELLED")
 
@@ -56,6 +65,13 @@ def validate(text: str, *, fmt: str = "yaml", registry: Registry | None = None) 
         definition = load_definition(text, fmt=fmt)
     except DefinitionError as exc:
         return [Finding(rule=exc.rule, message=exc.message, node=exc.node, fix=exc.schema_path)]
+    return validate_definition(definition, registry)
+
+
+def validate_definition(definition: model.Definition, registry: Registry) -> list[Finding]:
+    """Validate an already-loaded definition (skipping the parse step `validate`
+    does) — for a caller, such as the CLI, that loads several files into one
+    registry before validating any of them, so cross-file references resolve."""
 
     if isinstance(definition, model.Profile):
         return validate_profile(definition, registry)
@@ -66,6 +82,24 @@ def validate(text: str, *, fmt: str = "yaml", registry: Registry | None = None) 
     if isinstance(definition, model.Process):
         return validate_process(definition, registry)
     raise AssertionError(f"unreachable: unknown definition type {type(definition)!r}")  # pragma: no cover
+
+
+_PROFILE_REF_RE = re.compile(r"profile:([a-z][a-z0-9-]*@\^?\d+(?:\.\d+){0,2})")
+
+
+def _v2_profile_type_refs(type_strings: Any, registry: Registry, *, node: str | None = None) -> list[Finding]:
+    """A `profile:<id>@<version>` embedded in a declared type — bare, or nested
+    inside `list<...>`/`map<...>` — is a reference too (spec §2.1); walking
+    type strings for it is what makes removing a corpus Profile actually break
+    validation (WP-01 A2), not just its own Tool/Process document's `controls`."""
+
+    findings: list[Finding] = []
+    for type_string in type_strings:
+        for ref in _PROFILE_REF_RE.findall(type_string):
+            _, err = _resolve(registry, "PROFILE", ref)
+            if err:
+                findings.append(Finding(rule="V2", node=node, message=err.message))
+    return findings
 
 
 def _resolve(registry: Registry, kind: str, ref: str | None) -> tuple[Any, Finding | None]:
@@ -162,6 +196,8 @@ def validate_tool(tool: model.Tool, registry: Registry) -> list[Finding]:
             if err:
                 findings.append(err)
     findings.extend(_v2_mechanism_references(tool.mechanism, registry))
+    type_strings = [i.type for i in tool.inputs.values()] + [o.type for o in tool.output.values()]
+    findings.extend(_v2_profile_type_refs(type_strings, registry))
     return findings
 
 
@@ -218,11 +254,23 @@ def v3_tool_controls(tool: model.Tool, registry: Registry) -> list[Finding]:
     return findings
 
 
-def v3_checker_examples(tool: model.Tool) -> list[Finding]:
-    """A checker (a Tool with checker_for) with only passing examples, or only
-    failing ones — it must ship both (spec §5.2)."""
+def _is_checker(tool: model.Tool) -> bool:
+    """spec §5.2 defines a checker by what it returns ("A checker is a `CODE`
+    Tool that... returns `profile:control-result@1`"), not by declaring
+    `checker_for` — that field only marks the *generic* checker for a control
+    kind (e.g. `profile-conformance@1` for every `profile:` control). A
+    specific checker wired through a Profile's own `checker:` field (e.g.
+    `decision-evidence@1`) is still a checker and still owes the spec's pass
+    + fail example requirement."""
 
-    if not tool.checker_for:
+    return any(o.type == "profile:control-result@1" for o in tool.output.values())
+
+
+def v3_checker_examples(tool: model.Tool) -> list[Finding]:
+    """A checker with only passing examples, or only failing ones — it must
+    ship both (spec §5.2)."""
+
+    if not _is_checker(tool):
         return []
     saw_pass = False
     saw_fail = False
@@ -255,6 +303,12 @@ def validate_process(process: model.Process, registry: Registry) -> list[Finding
     ctx = TypeContext(process, registry)
 
     findings.extend(_v2_process_references(process, registry))
+    process_type_strings = (
+        [i.type for i in process.inputs.values()]
+        + [i.type for i in process.host_inputs.values()]
+        + [s.type for s in process.state.values()]
+    )
+    findings.extend(_v2_profile_type_refs(process_type_strings, registry))
     findings.extend(v4_mappings(process, registry, ctx))
     findings.extend(v5_expressions(process, ctx))
     findings.extend(v6_routes(process, ctx))

@@ -1,0 +1,14 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: check-recommendation-fidelity
+version: 1.0.0
+title: Check recommendation fidelity
+inputs:
+  recommendations: { type: "list<profile:recommendation@1>" }
+  insights:        { type: "list<profile:insight@1>" }
+output:
+  recommendations: { type: "list<profile:recommendation@1>" }
+  verdict:         { type: "enum[ENTAILED, DROPPED, REVISED]" }
+controls: [ { profile: recommendation@1 } ]
+mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:check_recommendation_fidelity" }
+effect: QUERY

@@ -1,0 +1,26 @@
+# A corpus-only checker (not one of the format's built-ins, unlike
+# profile-conformance@1/decision-evidence@1 in src/.../builtin/): its
+# mechanism.ref is a plausible module:function path that this test corpus
+# never actually imports, since nothing in the validator resolves or runs a
+# CODE mechanism's ref — that's the engine's job, out of WP-01's scope.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: output-present
+version: 1.0.0
+title: Output present checker
+mechanism: { kind: CODE, ref: "appendix_a_corpus.checkers:output_present" }
+checker_for: { control: CONVENTIONS }
+inputs:
+  value:   { type: any }
+  control: { type: string }
+output:
+  result: { type: "profile:control-result@1" }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - name: a present value passes
+    inputs: { value: "framed question text", control: "output-present@1" }
+    expect: { result: { passed: true } }
+  - name: an absent value fails
+    inputs: { value: null, control: "output-present@1" }
+    expect: { result: { passed: false } }

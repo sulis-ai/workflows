@@ -135,6 +135,29 @@ examples:
     assert "V3" not in _rules(findings)
 
 
+def test_v3_refused_checker_with_only_passing_examples_even_without_checker_for() -> None:
+    """spec §5.2 defines a checker by what it returns, not by declaring
+    `checker_for` — a specific checker wired through a Profile's own `checker:`
+    field (like decision-evidence@1) still owes the pass+fail requirement."""
+
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: specific-checker
+version: 1.0.0
+title: Specific checker
+mechanism: { kind: CODE, ref: "pkg.mod:fn" }
+inputs: { value: { type: any }, control: { type: string } }
+output: { result: { type: "profile:control-result@1" } }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - { name: "passes", inputs: { value: {}, control: "x@1" }, expect: { result: { passed: true } } }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V3" in _rules(findings)
+
+
 def test_v3_refused_non_policy_control_with_no_checker() -> None:
     doc = """
 api_version: sulis.workflows/v1

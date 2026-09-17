@@ -1,0 +1,13 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: recommend
+version: 1.0.0
+title: Recommend
+inputs:
+  insights: { type: "list<profile:insight@1>" }
+  brief:    { type: "profile:brief@1" }
+output:
+  recommendations: { type: "list<profile:recommendation@1>" }
+controls: [ { profile: recommendation@1 } ]
+mechanism: { kind: AGENTIC, ref: skills/recommend }
+effect: QUERY

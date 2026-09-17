@@ -118,6 +118,51 @@ def test_declared_paths_type_check() -> None:
     assert infer_type(parse("steps.sign-off.verdict"), ctx).__class__.__name__ == "TEnum"
 
 
+def test_can_drill_one_level_into_a_profile_typed_input() -> None:
+    """spec Appendix A reads `inputs.brief.question` — one level into the
+    `brief` profile's own schema."""
+
+    brief_profile = load_definition(
+        """
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: brief
+version: 1.0.0
+title: Brief
+grounded_in: this format's own convention
+schema:
+  type: object
+  required: [question]
+  properties:
+    question: { type: string }
+    priority: { type: integer }
+""",
+        fmt="yaml",
+    )
+    process = load_definition(
+        """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+inputs:
+  brief: { type: "profile:brief@1" }
+start: a
+nodes:
+  a: { type: STEP, tool: interrogate@1, in: { question: inputs.brief.question }, out: {}, end: DONE }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+""",
+        fmt="yaml",
+    )
+    ctx = TypeContext(process, Registry([brief_profile, _registry().resolve("TOOL", "interrogate@1")]))
+    assert infer_type(parse("inputs.brief.question"), ctx).__class__.__name__ == "TString"
+    assert infer_type(parse("inputs.brief.priority"), ctx).__class__.__name__ == "TInteger"
+    with pytest.raises(DefinitionError):
+        infer_type(parse("inputs.brief.nonexistent"), ctx)
+
+
 def test_undeclared_path_is_refused() -> None:
     with pytest.raises(DefinitionError) as excinfo:
         infer_type(parse("state.does_not_exist"), _ctx())

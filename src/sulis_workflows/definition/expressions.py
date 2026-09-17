@@ -409,6 +409,31 @@ def parse_type(type_string: str) -> Type:
     raise DefinitionError(f"not a recognised type string: {type_string!r}", rule="V5")
 
 
+_JSON_SCHEMA_PRIMITIVES: dict[str, Type] = {
+    "string": TString(),
+    "integer": TInteger(),
+    "number": TNumber(),
+    "boolean": TBoolean(),
+}
+
+
+def _json_schema_fragment_to_type(fragment: Mapping[str, Any]) -> Type:
+    """Best-effort JSON Schema -> :class:`Type`, for drilling one level into a
+    profile's own embedded schema (see `TypeContext._drill_into_profile`). Not a
+    general JSON Schema type inferencer — just enough of one for a profile
+    property's own declared `type`/`enum`/`items`."""
+
+    if "enum" in fragment and all(isinstance(m, str) for m in fragment["enum"]):
+        return TEnum(tuple(fragment["enum"]))
+    json_type = fragment.get("type")
+    if json_type in _JSON_SCHEMA_PRIMITIVES:
+        return _JSON_SCHEMA_PRIMITIVES[json_type]
+    if json_type == "array":
+        items = fragment.get("items")
+        return TList(_json_schema_fragment_to_type(items) if isinstance(items, dict) else TAny())
+    return TAny()
+
+
 # ------------------------------------------------------------------------ type context --
 
 
@@ -442,7 +467,29 @@ class TypeContext:
     def _from_input_map(self, inputs: Mapping[str, Any], rest: Sequence[Any], path: Path) -> Type:
         if not rest or not isinstance(rest[0], str) or rest[0] not in inputs:
             raise DefinitionError(f"undeclared path: {path}", rule="V5")
-        return parse_type(inputs[rest[0]].type)
+        declared = parse_type(inputs[rest[0]].type)
+        if len(rest) > 1:
+            return self._drill_into_profile(declared, rest[1:], path)
+        return declared
+
+    def _drill_into_profile(self, base: Type, remaining: Sequence[Any], path: Path) -> Type:
+        """One property deep into a profile-typed value's own JSON Schema — spec
+        Appendix A reads `inputs.brief.question`, one level into `brief`'s schema,
+        so this format's expressions clearly mean to allow it even though §8's
+        grammar doesn't call it out. Only one level: a profile field that is
+        itself another profile is not walked further (no fixture needs it yet)."""
+
+        if not isinstance(base, TProfile) or len(remaining) != 1 or not isinstance(remaining[0], str):
+            raise DefinitionError(f"cannot resolve path past a non-profile or nested field: {path}", rule="V5")
+        try:
+            profile = self._registry.resolve("PROFILE", base.ref)
+        except DefinitionError as exc:
+            raise DefinitionError(f"cannot resolve {path}: {exc.message}", rule="V5") from exc
+        properties = profile.schema.get("properties", {}) if isinstance(profile.schema, dict) else {}
+        field = remaining[0]
+        if field not in properties:
+            raise DefinitionError(f"profile {base.ref!r} has no property {field!r} (path: {path})", rule="V5")
+        return _json_schema_fragment_to_type(properties[field])
 
     def _from_state(self, rest: Sequence[Any], path: Path) -> Type:
         if not rest or not isinstance(rest[0], str) or rest[0] not in self._process.state:

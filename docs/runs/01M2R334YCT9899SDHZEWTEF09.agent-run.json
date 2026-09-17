@@ -1,0 +1,141 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2R334YCT9899SDHZEWTEF09",
+  "started_at": "2026-09-17T16:16:00Z",
+  "completed_at": "2026-09-17T16:27:14Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-01 step 4 of 5",
+  "work_package": "docs/work-packages/WP-01-definition-model-and-validator.md",
+  "branch": "wp-01/step-4-checkers-cli-appendix-a",
+  "summary_for_principal": "Step 4 of 5, and the milestone this whole work package has been building toward: the spec's own full worked example (Appendix A, 'grounded inquiry') now loads, resolves and validates end-to-end with zero problems reported, through the actual command-line tool a person or another program would run. Built the two checkers the spec names, a `validate`/`explain` command line tool, and a complete supporting cast (every Tool, Profile and Control Appendix A calls) so there was something real to validate against — then proved that removing any single one of them makes validation correctly refuse it. Building this surfaced one real gap: a value's own 'this is a profile-shaped thing' declaration was never actually checked against the real profile it named, anywhere in the format — now fixed. 55 new tests, all passing on every supported Python version.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Work autonomously through the remaining WP-01 steps (2-5), opening a PR for each, per the same rules as step 1.",
+    "read_as": "For this step (WP-01's step 4, 'Checkers + CLI + Appendix A fixture'): checkers.py (profile-conformance@1, decision-evidence@1, each with a passing and failing example); cli.py (`validate`/`explain`, registered as a console script); and enough fixtures that spec Appendix A validates end-to-end (WP-01 A2), with removing any one of them making V2 refuse it. Nothing about CI lint/type checking (PR5).",
+    "filled_in": [
+      {
+        "gap": "spec §7.6's decision@1 evidence checker needs the gate's `reviewing` list to check evidence[].path against — beyond the generic checker shape spec §5.2 shows (`inputs: { value: any, control: string }`).",
+        "assumed": "Gave decision-evidence@1 an extra `reviewing: list<string>` input alongside `value`/`control`; nothing in the spec restricts a checker's inputs to exactly the two-field shape shown, that's simply profile-conformance@1's own shape. Checked only that evidence[].path is a member of `reviewing` — the second half of §7.6's requirement ('and to resolve to a value in the run') needs live run state this checker is never given, which is squarely the engine's job and out of WP-01's own stated scope.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/work-packages/WP-01-definition-model-and-validator.md, 'Out of scope' — names the engine (next/runs/records/claims) as later work",
+        "reversal_cost": "Cheap — additive input field, and the run-state half of the check is new code entirely, not a change to what's here.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Type strings (`profile:<id>@<version>`, bare or nested in `list<...>`/`map<...>`) are now checked for resolution (V2) wherever they're declared — Tool inputs/outputs, Process inputs/host_inputs/state.",
+      "problem": "Building the Appendix A corpus for A2 found that removing a referenced Profile (e.g. `brief@1`) produced no V2 finding at all: nothing anywhere checked that a declared type's embedded profile reference actually resolves, only that structural references (a Tool's own `controls[]`, a Step's `tool:`) did.",
+      "options_rejected": [
+        "Leave it unchecked, since it's not explicitly named as its own line in spec §14's V-rule table: rejected — a `profile:<ref>` in a type string is exactly the same kind of reference V2 already governs (spec §1.2, 'a reference to another definition is id@version'), just appearing inside a type string instead of a dedicated field; refusing to check it would mean a broken profile reference in the single most common place profiles appear (typed inputs/outputs/state) silently passes."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One regex-based walker (_v2_profile_type_refs) called from validate_tool and validate_process; no fixture depends on the old, narrower behaviour.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Removing tests/definition/fixtures/appendix_a_corpus/brief.profile.yaml from the registry produced zero findings before this fix, despite the Process's own inputs.brief being declared profile:brief@1.",
+          "source": "measured directly while building tests/definition/test_appendix_a.py, before the fix"
+        }
+      ],
+      "revisit_if": "Never expected — this closes a real hole in V2's own stated coverage."
+    },
+    {
+      "headline": "The pass+fail example requirement (spec §5.2) now applies to any Tool that returns `profile:control-result@1`, not only ones declaring `checker_for`.",
+      "problem": "decision-evidence@1 is a checker by spec's own definition (returns control-result@1) but is wired through decision@1's `checker:` field rather than a generic `checker_for` role, since it checks one specific profile rather than every control of a kind. The V3 check written in step 3 only looked at `checker_for`, so decision-evidence@1 would have escaped the requirement entirely.",
+      "options_rejected": [
+        "Give decision-evidence@1 a `checker_for` anyway, just to satisfy the existing check: rejected — `checker_for: { control: PROFILE }` already names profile-conformance@1's specific generic role (spec §5.2's own example); reusing it for a specialised checker would misdescribe what decision-evidence@1 actually is."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One helper function (_is_checker) and a one-line change to what v3_checker_examples gates on.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "spec §5.2: 'A checker is a CODE Tool that declares what it checks and returns profile:control-result@1' — the defining property is what it returns, not the checker_for field, which spec's own example uses only for the generic profile-conformance case.",
+          "source": "docs/spec/process-definition.md §5.2"
+        }
+      ],
+      "revisit_if": "Never expected."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "spec Appendix A + its full supporting corpus, validated end-to-end through the real console script",
+      "method": "Ran `sulis-workflows validate` (the installed console script, not a Python-level shortcut) against every builtin file, every corpus fixture, and the Appendix A process file together.",
+      "location": "manual run; the same assertion is also tests/definition/test_appendix_a.py::test_appendix_a_validates_end_to_end_with_the_full_corpus",
+      "result": "24 files, every one reports OK, exit code 0 — zero findings anywhere (WP-01 A2, fully met)."
+    },
+    {
+      "subject": "Removing any one of the 23 supporting definitions (WP-01 A2's second half)",
+      "method": "Parametrized test: for each of the 23 builtin/corpus files, load every other one into a registry, validate the whole remaining set plus Appendix A, and check that at least one V2 finding appears.",
+      "location": "tests/definition/test_appendix_a.py::test_removing_any_referenced_definition_makes_v2_refuse_appendix_a",
+      "result": "All 23 confirmed: no file in the corpus is inert — removing any one breaks something checkably."
+    },
+    {
+      "subject": "The checker functions' own declared examples, run for real",
+      "method": "For both profile_conformance and decision_evidence, ran every example inputs their Tool document declares through the actual Python function and compared the result to the declared expect.",
+      "location": "tests/definition/test_checkers.py",
+      "result": "Both checkers' examples are not just structurally present (which V3 alone would accept) but actually correct."
+    },
+    {
+      "subject": "pytest on Python 3.10, 3.11, 3.12",
+      "method": "Ran the full suite on the container's default 3.11; isolated venvs for 3.10 and 3.12 running tests/definition directly.",
+      "location": "N/A — command-line runs, not committed",
+      "result": "200/200 passing on 3.11 (full suite); 171/171 passing on 3.10 and 3.12 (tests/definition)."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "A 'closed set of fixtures references everything, and removing any one breaks something' acceptance criterion (WP-01 A2) is itself a strong forcing function for finding gaps in a reference-checking rule — build the full fixture set and prove the negative (removal breaks it) before declaring the rule complete, rather than trusting the rule's own unit tests alone.",
+      "incident": "Rule V2's own unit tests (step 2) all passed, yet Appendix A's corpus revealed a whole class of reference — a type string's embedded profile:<ref> — that V2 never checked at all, only surfaced by literally removing a real fixture and watching nothing complain.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "any future WP-01-style validator work, and any future PR that adds a new place a reference can appear in this format",
+      "proposed_check": "tests/definition/test_appendix_a.py::test_removing_any_referenced_definition_makes_v2_refuse_appendix_a",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "src/sulis_workflows/definition/checkers.py — profile_conformance(value, control, registry=...) and decision_evidence(value, control, reviewing) as plain Python functions, wired from builtin/{profile-conformance,decision-evidence}.tool.yaml.",
+      "src/sulis_workflows/definition/cli.py — `sulis-workflows validate <files...>` (exit non-zero on any finding, across the whole set) and `sulis-workflows explain <file>` (nodes, loops with resolved budgets, gates with deciders, endings with their sentences), registered as a console script (pyproject.toml [project.scripts]).",
+      "tests/definition/fixtures/appendix_a_corpus/ — every Tool, Profile and Control spec Appendix A references; validates end-to-end with the two builtin files."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Proceed to the final PR (CI lint and type checking)",
+        "action": "Start WP-01 step 5: add ruff check, ruff format --check and mypy on src/sulis_workflows/definition/ to .github/workflows/ci.yml, fixing whatever either tool finds.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Proceed to WP-01 step 5 next — the last step in the work package.",
+      "reason": "Everything ruff/mypy would check already exists; running them now is what actually proves WP-01 A6 (pytest, ruff, mypy all pass on 3.10-3.12), which no step so far has been able to claim.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

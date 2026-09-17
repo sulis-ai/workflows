@@ -1,0 +1,21 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: check-entailment
+version: 1.0.0
+title: Entailment checker
+mechanism: { kind: CODE, ref: "appendix_a_corpus.checkers:check_entailment" }
+checker_for: { control: CONVENTIONS }
+inputs:
+  value:   { type: any }
+  control: { type: string }
+output:
+  result: { type: "profile:control-result@1" }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - name: an insight-entailed recommendation passes
+    inputs: { value: { id: "r1", action: "adopt the finding" }, control: "faithful-generation@1" }
+    expect: { result: { passed: true } }
+  - name: a recommendation with no supporting insight fails
+    inputs: { value: { id: "r1", action: "invent something ungrounded" }, control: "faithful-generation@1" }
+    expect: { result: { passed: false } }
