@@ -334,6 +334,7 @@ class Process:
     defaults: ProcessDefaults | None = None
     triggers: tuple[Trigger, ...] = ()
     execution_policy: str = fmt_defaults.EXECUTION_POLICY
+    permission: str | None = None  # host's opaque grammar (ADR-024); spec §10.1, D14
 
 
 Definition = Profile | Tool | Control | Process
@@ -641,5 +642,6 @@ def build(doc: Mapping[str, Any]) -> Definition:
             },
             triggers=tuple(_trigger(t) for t in doc.get("triggers", ())),
             execution_policy=doc.get("execution_policy", fmt_defaults.EXECUTION_POLICY),
+            permission=doc.get("permission"),
         )
     raise ValueError(f"unknown kind {kind!r}")

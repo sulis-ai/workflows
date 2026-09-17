@@ -11,6 +11,7 @@ from __future__ import annotations
 __all__ = [
     "CONTROL_FAIL_THEN",
     "ENGINE_ENDINGS",
+    "ENGINE_ENDING_SENTENCES",
     "EXECUTION_POLICY",
     "FOR_EACH_CONCURRENCY",
     "GATE_DECIDERS",
@@ -67,3 +68,13 @@ GATE_DECIDERS = (
 
 # The four endings the engine adds to every process (spec §6).
 ENGINE_ENDINGS = ("ESCALATED", "FAILED", "FORBIDDEN", "CANCELLED")
+
+# §6 describes each engine ending in parentheses but states no literal `says`
+# text; every state must carry a sentence (D6), so these quote that
+# description directly rather than inventing new wording.
+ENGINE_ENDING_SENTENCES = {
+    "ESCALATED": "A limit ran out with no route.",
+    "FAILED": "A permanent error had no route.",
+    "FORBIDDEN": "A permission was refused.",
+    "CANCELLED": "A person stopped the run.",
+}
