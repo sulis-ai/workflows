@@ -1,0 +1,267 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2RA1K0HC4PESBZ6YK39X2PD",
+  "started_at": "2026-09-17T00:00:00Z",
+  "completed_at": "2026-09-17T00:45:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 step 1 of 5",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-1-policy-records-claims",
+  "summary_for_principal": "Started the next piece of work after the validator: the part that actually runs a process. Before writing code, checked whether the workflow engine already in this codebase could be reused as-is. It can't be reused directly — it turns out there are two different, older, partly-built attempts at an engine already in the codebase, and they disagree with each other, so extending either would mean choosing which set of problems to inherit. Decided instead to build a new, small execution core that reuses the genuinely solid parts of the existing tooling (LangGraph, already a dependency) without touching either old attempt. This first piece adds the three permission/safety mechanisms the new format requires before anything can run: checking permission before every action, recording every attempt durably so a crash never loses track of progress, and preventing a resumed run from repeating an action that has a real-world effect (like sending something) twice. Nothing runs yet — this is the foundation the next four pieces build on.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/domain/ports",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": ".github/workflows/ci.yml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Extended the existing lint/type-check step to also cover the three new port files and their tests, named individually rather than as a directory glob."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-02-execution-engine.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Authored this run, to scope the new work package before starting it (WP-01 explicitly left the engine out of scope; nothing pre-existing defined WP-02's shape)."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      },
+      {
+        "coordinate": "src/sulis_workflows/compiler",
+        "kind": "COMPONENT",
+        "role": "OBSERVED",
+        "reason": "Read to decide whether WP-02 could extend the existing engine paths rather than build a new one; found two disagreeing implementations, neither touched."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Is it possible to reconcile the spec with existing definitions? It may be that we already can support a lot of what's been specified. / What are you proposing? / [a standing instruction that technical decisions are mine to make and should not be deferred to the principal, and that a work package is done when its whole designed scope is done, not a narrow slice of it]",
+    "read_as": "Investigate whether the existing engine code in this repository can be reused for the new format; decide, on the evidence, how much can be reused versus what has to be built; then act on that decision rather than describing it and waiting — start the execution engine work package, scoped and sequenced the same way WP-01 was.",
+    "filled_in": [
+      {
+        "gap": "No existing document defines what WP-02 (the execution engine) actually contains or how it is sequenced into PRs.",
+        "assumed": "Authored docs/work-packages/WP-02-execution-engine.md this run, scoping it directly from the spec sections it implements (S7, S9.2, S10, S12) and sequencing it as 5 PRs, matching WP-01's granularity (one reviewable concern per PR, tests first).",
+        "basis": "JUDGMENT",
+        "reversal_cost": "Cheap — a work-package document and PR sequencing are easy to revise; no code depends on the document itself.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "The spec does not define the concrete method shapes for a PolicyPort, a records store, or a claims/lease mechanism — only the behaviour they must have (S10.1, S12.2, S12.3).",
+        "assumed": "Matched the exact Protocol/IdentifiedAdapter/tenancy-keys/stub-adapter shape every other port in this codebase already uses (LLMPort, ToolDispatchPort, CheckpointingPort), rather than inventing a new shape.",
+        "basis": "STACK_IDIOM",
+        "grounded_in": "src/sulis_workflows/domain/ports/llm.py, tool_dispatch.py, checkpointing.py — read directly, same pattern in all three.",
+        "reversal_cost": "Cheap — no consumer of these ports exists yet outside this PR's own tests.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec S10.1 describes permission checking as a binary outcome (permitted, or refused as FORBIDDEN) but does not say what an engine should do with ADR-028's third value, INDETERMINATE, when it comes back from a plain permission check.",
+        "assumed": "Documented PolicyPort's contract as treating anything other than PERMIT — DENY or INDETERMINATE — as a refusal, i.e. failing closed, consistent with S10.1's own 'the engine never runs a step without one' and CLAUDE.md's fail-closed principle.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/spec/process-definition.md S10.1; ADR-028 (decision vocabulary), as CLAUDE.md itself cites it.",
+        "reversal_cost": "Cheap — this is a docstring-level interpretation on an unconsumed port; no stored data depends on it yet.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Build a new, small execution engine targeting LangGraph directly, rather than extending either of the two existing DAG-compiler paths in compiler/.",
+      "problem": "Whether the new v1 process-definition format (built in WP-01) could reuse the workflow engine already in this codebase instead of needing new execution code.",
+      "options_rejected": [
+        "Extend compiler/dag_parser.py + outcome_compiler.py's node-type vocabulary to match the spec's STEP/ROUTE/PARALLEL/JOIN/FOR_EACH/GATE: rejected — this path's own route-decider node defaults silently to the first route on no match (compiler/nodes/routing.py:277), the opposite of the spec's fail-closed requirement, and only its 'step' node type has any test coverage (tests/test_compile.py, tests/test_smoke.py).",
+        "Extend compiler/graph_dsl.py + graph_compiler.py's NodeDef/GraphDefinition model instead: rejected — this is a second, independent implementation of the same idea with a different node-type vocabulary and a different dict shape (from/to instead of depends_on) from the first path, and has no test coverage at all; the two paths do not even agree with each other, so picking one over the other does not remove the disagreement, and extending both doubles the cost.",
+        "Design a translation layer that maps the new spec's Process definitions into one of the two existing DAG.yaml/GRAPH.yaml shapes: rejected — this would carry both paths' gaps (routing default-first behaviour, no JOIN, no PolicyPort) forward into the new format rather than closing them, which the spec's fail-closed and permission-first rules do not allow."
+      ],
+      "reversibility": "HEAVY_DOOR",
+      "cost_to_change": "A full new module tree (engine/) plus five PRs of work; reversing this after PR5 lands would mean re-doing the whole work package against a different target, not a small patch.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "compiler/nodes/routing.py defaults to the first route when no value matches, rather than refusing.",
+          "source": "src/sulis_workflows/compiler/nodes/routing.py, read directly, line ~24-25 ('Default to first route if no match')."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Only the 'step' DAGNode type is exercised by any test in this repository; tests/test_compile.py's two tests and tests/test_smoke.py both use type: step exclusively.",
+          "source": "tests/test_compile.py, tests/test_smoke.py — read in full; no test file matching *compiler* or *dag* or *graph* exists beyond these plus test_route_decider.py, test_node_retry.py, test_adapters.py."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "compiler/graph_dsl.py + graph_compiler.py define a second, independent graph model (NodeDef/EdgeDef/GraphDefinition, node types {handler, function, gate, fan_out, routing, kind_invocation}) distinct from compiler/dag_parser.py + outcome_compiler.py's ParsedDAG/DAGNode (node types {step, content, gate, fan_out, routing, route_decider, file_writer, for_each, while}); no shared code between them beyond both compiling to LangGraph.",
+          "source": "src/sulis_workflows/compiler/graph_dsl.py, graph_compiler.py, dag_parser.py, outcome_compiler.py, node_factory.py — all read in full."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "No PolicyPort or equivalent authorization port exists anywhere in domain/ports/ today; the only permission concept present (WorkflowPermission/WorkflowRole in domain/models/roles.py) is API-level RBAC, not the engine's pre-dispatch authorization call S10.1 requires.",
+          "source": "Directory listing and read of src/sulis_workflows/domain/ports/*.py (12 files) plus a grep for Policy across the domain package, this and an earlier turn in this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "LangGraph's interrupt()/Command(resume=...) mechanism and its checkpointer contract (BaseCheckpointSaver, keyed by thread_id) are designed for exactly the pause-and-resume-in-a-different-process pattern the spec's stateless next(run, scope) contract requires.",
+          "source": "langgraph.types.interrupt and langgraph.checkpoint.base.BaseCheckpointSaver source, read directly from the installed langgraph 1.2.11 package this session."
+        }
+      ],
+      "load_bearing_assumptions": [
+        "compiler/ stays frozen per CLAUDE.md ('Do not change src/sulis_workflows/compiler/ ... unless the work package says so'); WP-02 does not ask for a change there, so this decision does not depend on compiler/ ever being cleaned up."
+      ],
+      "revisit_if": "Either compiler/ path gains real test coverage and a fix for the routing-default-first defect, making it a credible base to extend instead — unlikely without its own dedicated work package, since CLAUDE.md currently keeps it frozen."
+    },
+    {
+      "headline": "Scope PolicyPort's first method to S10.1's plain permission check only; defer the richer named-policy evaluation a GATE's `policy:` decider needs (S7.6) to the PR that builds GATE execution.",
+      "problem": "The spec's PolicyPort is used in two shapes: a plain 'may this identity do this?' check before every dispatch (S10.1), and a named-policy evaluation for a gate's policy decider (S7.6, e.g. policy: grounded-inquiry-sign-off@1). Only the first is needed by this PR.",
+      "options_rejected": [
+        "Design both methods now, since they'll both live on the same port eventually: rejected — the policy-decider shape depends on how GATE deciders and their provenance recording work, which is PR4's concern and not yet built; designing it now would be guessing ahead of the evidence PR4 will produce."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Adding a second method to an existing Protocol later; no existing caller of authorize() needs to change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S10.1 and S7.6 describe two distinct PolicyPort uses with different inputs (a permission string + identity, versus a named control/policy reference + reviewed values).",
+          "source": "docs/spec/process-definition.md S10.1, S7.6 — read directly."
+        }
+      ],
+      "revisit_if": "PR4 (GATE execution) starts and needs the second shape."
+    },
+    {
+      "headline": "Extend CI's lint/type-check step to name the three new port files and three new test files individually, not the whole domain/ports/ or tests/ directories.",
+      "problem": "WP-01's own CI step only lints/type-checks src/sulis_workflows/definition/; this PR adds files outside that directory and needs its own coverage.",
+      "options_rejected": [
+        "Lint and type-check the whole domain/ports/ directory now that this PR touches part of it: rejected and tested — running python -m ruff check src/sulis_workflows/domain/ports/ found 3 pre-existing findings in files this PR does not touch (execution_runtime.py, observability.py), unrelated to this change; adding directory-wide lint coverage in this PR would fail CI on code this PR is not responsible for."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "A one-line change to ci.yml's file list, either direction.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "python -m ruff check src/sulis_workflows/domain/ports/ reports 3 errors, none in the three files this PR adds (an unsorted __all__ elsewhere and a blind except Exception in observability.py); python -m mypy src/sulis_workflows/domain/ports/ reports 0 errors across all 15 files, including this PR's 3.",
+          "source": "Ran both commands directly against the full directory in this session, after this PR's own files were already ruff/mypy-clean individually."
+        }
+      ],
+      "revisit_if": "A later work package takes on cleaning up domain/ports/ as a whole and wants directory-wide CI coverage."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after adding PolicyPort, RecordsPort, ClaimsPort and their tests.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "220 passed (200 pre-existing + 20 new), 0 failed."
+    },
+    {
+      "subject": "Lint, format and type-check of the 3 new port files + 3 new test files, and of src/sulis_workflows/definition/ + tests/definition/ together (the combined CI file list).",
+      "method": "python -m ruff check, python -m ruff format --check, python -m mypy — the same invocation form ci.yml uses, run against the exact file list ci.yml now names.",
+      "location": ".github/workflows/ci.yml",
+      "result": "All clean: 0 ruff findings, 0 reformatting needed, mypy success on 13 source files."
+    },
+    {
+      "subject": "Lint and type-check of the whole src/sulis_workflows/domain/ports/ directory (15 files), beyond just this PR's 3.",
+      "method": "python -m ruff check src/sulis_workflows/domain/ports/; python -m mypy src/sulis_workflows/domain/ports/",
+      "location": "src/sulis_workflows/domain/ports/",
+      "result": "ruff: 3 pre-existing findings in files this PR does not touch (execution_runtime.py: unsorted __all__, one unused-import-adjacent finding; observability.py: blind except Exception). mypy: clean across all 15 files. Not fixed — outside this PR's blast radius; recorded below as untouched."
+    },
+    {
+      "subject": "compiler/'s two DAG-compiler paths' test coverage.",
+      "method": "Read tests/test_compile.py, tests/test_smoke.py, tests/test_route_decider.py, tests/test_node_retry.py, tests/test_adapters.py in full; globbed for any *compiler*/*dag*/*graph* test file.",
+      "location": "tests/",
+      "result": "Only the 'step' DAGNode type (dag_parser.py's vocabulary) has any compiling test; graph_dsl.py + graph_compiler.py (the second path) has zero test files referencing it anywhere in tests/."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "compiler-two-disagreeing-paths",
+      "location": "src/sulis_workflows/compiler/ — dag_parser.py+outcome_compiler.py vs graph_dsl.py+graph_compiler.py",
+      "divergence": "Two independent DAG-to-LangGraph compilers coexist with different node-type vocabularies and different dict shapes, and the second (graph_dsl.py path) has no test coverage at all. Neither matches the new v1 spec's node vocabulary or its fail-closed routing rule.",
+      "governed_exception": false,
+      "why_not_now": "CLAUDE.md keeps compiler/ frozen ('the LangGraph path, being deprecated') unless a work package says otherwise; WP-02 builds a new engine/ module instead rather than touching either path.",
+      "recorded_in": "docs/work-packages/WP-02-execution-engine.md, 'Why this shape' section."
+    },
+    {
+      "id": "compiler-routing-default-first-bug",
+      "location": "src/sulis_workflows/compiler/nodes/routing.py, ~line 24-25",
+      "divergence": "An unmatched route value silently falls through to the first declared route instead of failing — the opposite of fail-closed.",
+      "governed_exception": false,
+      "why_not_now": "Lives in the frozen compiler/ path; a real defect but not this work package's to fix, since WP-02 does not execute definitions through this code at all.",
+      "recorded_in": "docs/work-packages/WP-02-execution-engine.md, 'Why this shape' section (item 5 names it explicitly as the behaviour engine/routes.py must not repeat)."
+    },
+    {
+      "id": "domain-ports-partial-lint-coverage",
+      "location": "src/sulis_workflows/domain/ports/execution_runtime.py, observability.py",
+      "divergence": "3 pre-existing ruff findings (an unsorted __all__/unused-import-adjacent issue, and a blind except Exception) in files this PR did not touch; CI does not lint domain/ports/ as a whole, only the 3 files this PR added within it.",
+      "governed_exception": false,
+      "why_not_now": "Outside this PR's blast radius — these files predate WP-02 and are unrelated to PolicyPort/RecordsPort/ClaimsPort; fixing them here would widen the PR beyond one reviewable concern.",
+      "recorded_in": "this run record only; not yet a backlog item anywhere durable."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a new work package's code depends on a prior work package's unmerged output, branch from that prior work package's own tip branch, not from the shared long-lived branch both are stacked on — the shared branch may not yet contain the dependency.",
+      "incident": "First created this PR's branch from origin/docs/process-definition-spec (the branch WP-01's own PRs target but do not yet appear on, since none are merged) and only noticed the definition/ package was missing when checking git log against the new branch; recreated the branch from wp-01/step-5-ci-lint-mypy (WP-01's actual, complete, unmerged tip) instead, before writing any code on the wrong base.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "This repository's own branching convention for stacked work packages (currently only stated informally in prior run records' language, not written down as a rule).",
+      "proposed_check": "Before creating a new work package's first branch, run git log --oneline on the intended base and confirm the prior work package's own commits are present, not just the shared branch it targets.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "PolicyPort, RecordsPort and ClaimsPort exist with stub adapters and passing contract tests — nothing in the running system depends on them yet."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "The two disagreeing DAG-compiler paths in compiler/, and the routing default-first defect inside one of them.",
+        "untouched_id": "compiler-two-disagreeing-paths",
+        "trigger": "A future work package proposes reviving or unifying compiler/ instead of building fresh against the new format.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "compiler/ is deprecated and frozen by CLAUDE.md; WP-02 does not depend on it changing, so leaving it as-is costs nothing further."
+      },
+      {
+        "item": "3 pre-existing ruff findings in domain/ports/execution_runtime.py and observability.py, outside CI's current lint scope.",
+        "untouched_id": "domain-ports-partial-lint-coverage",
+        "trigger": "A later PR touches either file directly, or a work package takes on directory-wide lint coverage for domain/ports/.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "These findings are style-only (an ordering issue and a broad except clause), not correctness bugs; they do not block WP-02's engine work."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Nothing needs deciding from you on this PR — continuing straight to the next 4 PRs of this work package.",
+        "action": "Proceed to WP-02 step 2 (STEP node execution: dispatch, controls-after-every-step, retry/error classes) on a branch stacked on wp-02/step-1-policy-records-claims, same pattern as WP-01.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "MEDIUM"
+      },
+      {
+        "n": 2,
+        "label": "When you're ready, review and merge sulis-ai/workflows PR #17 (this step) — in order, after WP-01's own 5 PRs (#12-#16), since this one is stacked on top of WP-01's tip.",
+        "action": "Review PR #17 and merge it after WP-01's PRs #12-#16 are merged, in that order, since #17 targets wp-01/step-5-ci-lint-mypy.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Keep going through the remaining 4 PRs of WP-02 in this same sitting, reporting after each exactly as WP-01 did, rather than pausing here.",
+      "reason": "This PR is inert scaffolding on its own; the engine only becomes usable once STEP, ROUTE and GATE execution and the next/report/decide contract all land, and there is no principal decision blocking any of that work.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
