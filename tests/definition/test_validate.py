@@ -135,7 +135,9 @@ examples:
     assert "V3" not in _rules(findings)
 
 
-def test_v3_refused_checker_with_only_passing_examples_even_without_checker_for() -> None:
+def test_v3_refused_checker_with_only_passing_examples_even_without_checker_for() -> (
+    None
+):
     """spec §5.2 defines a checker by what it returns, not by declaring
     `checker_for` — a specific checker wired through a Profile's own `checker:`
     field (like decision-evidence@1) still owes the pass+fail requirement."""
@@ -229,20 +231,20 @@ def test_v4_accepted_mapped_required_input() -> None:
 
 
 def test_v4_refused_type_mismatch_in_out_mapping() -> None:
-    doc = f"""
+    doc = """
 api_version: sulis.workflows/v1
 kind: PROCESS
 id: p
 version: 1.0.0
 title: P
 state:
-  count: {{ type: integer, reducer: REPLACE }}
+  count: { type: integer, reducer: REPLACE }
 start: step
 nodes:
   step:
-    {{ type: STEP, tool: interrogate@1, in: {{ question: "state.count" }}, out: {{ verdict: state.count }}, end: DONE }}
+    { type: STEP, tool: interrogate@1, in: { question: "state.count" }, out: { verdict: state.count }, end: DONE }
 endings:
-  DONE: {{ outcome: SUCCESS, says: "Done." }}
+  DONE: { outcome: SUCCESS, says: "Done." }
 """
     findings = validate(doc, registry=_base_registry(_INTERROGATE_TOOL))
     assert "V4" in _rules(findings)
@@ -253,8 +255,8 @@ endings:
 
 def test_v5_accepted_expression() -> None:
     doc = _process_with_step(
-        '    { type: STEP, tool: interrogate@1, in: { question: inputs.question }, out: { verdict: state.verdict },\n'
-        '      precondition: \'state.verdict == "SURVIVED"\', end: DONE }'
+        "    { type: STEP, tool: interrogate@1, in: { question: inputs.question }, out: { verdict: state.verdict },\n"
+        "      precondition: 'state.verdict == \"SURVIVED\"', end: DONE }"
     )
     findings = validate(doc, registry=_base_registry(_INTERROGATE_TOOL))
     assert "V5" not in _rules(findings)
@@ -308,8 +310,8 @@ def _route_process(when: str) -> str:
 
 def test_v6_accepted_exhaustive_route_needs_no_otherwise() -> None:
     doc = _route_process(
-        '      - { if: \'state.verdict == "SURVIVED"\', end: SURVIVED_END }\n'
-        '      - { if: \'state.verdict == "DROPPED"\', end: DROPPED_END }'
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', end: DROPPED_END }"
     )
     findings = validate(doc, registry=Registry())
     assert "V6" not in _rules(findings)
@@ -319,14 +321,16 @@ def test_v6_refused_route_missing_one_enum_value_and_no_otherwise() -> None:
     """A3 bad-but-conformant: looks exhaustive (every branch is a clean enum ==
     literal test) but SURVIVED is never covered."""
 
-    doc = _route_process('      - { if: \'state.verdict == "DROPPED"\', end: DROPPED_END }')
+    doc = _route_process(
+        "      - { if: 'state.verdict == \"DROPPED\"', end: DROPPED_END }"
+    )
     findings = validate(doc, registry=Registry())
     assert "V6" in _rules(findings)
 
 
 def test_v6_accepted_route_with_otherwise() -> None:
     doc = _route_process(
-        '      - { if: \'state.verdict == "DROPPED"\', end: DROPPED_END }\n    otherwise: { end: SURVIVED_END }'
+        "      - { if: 'state.verdict == \"DROPPED\"', end: DROPPED_END }\n    otherwise: { end: SURVIVED_END }"
     )
     findings = validate(doc, registry=Registry())
     assert "V6" not in _rules(findings)
@@ -398,8 +402,8 @@ endings:
 
 def test_v8_accepted_positive_loop_budget() -> None:
     doc = _route_process(
-        '      - { if: \'state.verdict == "SURVIVED"\', end: SURVIVED_END }\n'
-        '      - { if: \'state.verdict == "DROPPED"\', next: route, loop: { budget: 3 } }'
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, loop: { budget: 3 } }"
     )
     findings = validate(doc, registry=Registry())
     assert "V8" not in _rules(findings)
@@ -407,8 +411,8 @@ def test_v8_accepted_positive_loop_budget() -> None:
 
 def test_v8_refused_zero_loop_budget() -> None:
     doc = _route_process(
-        '      - { if: \'state.verdict == "SURVIVED"\', end: SURVIVED_END }\n'
-        '      - { if: \'state.verdict == "DROPPED"\', next: route, loop: { budget: 0 } }'
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, loop: { budget: 0 } }"
     )
     findings = validate(doc, registry=Registry())
     assert "V8" in _rules(findings)
@@ -437,19 +441,25 @@ def _gate_process(gate_body: str) -> str:
 
 
 def test_v9_accepted_gate_with_permit_and_deny() -> None:
-    doc = _gate_process('    { type: GATE, asks: "Proceed?", on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }')
+    doc = _gate_process(
+        '    { type: GATE, asks: "Proceed?", on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }'
+    )
     findings = validate(doc, registry=Registry())
     assert "V9" not in _rules(findings)
 
 
 def test_v9_refused_gate_with_no_asks() -> None:
-    doc = _gate_process('    { type: GATE, on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }')
+    doc = _gate_process(
+        "    { type: GATE, on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }"
+    )
     findings = validate(doc, registry=Registry())
     assert "V9" in _rules(findings)
 
 
 def test_v9_refused_permit_with_no_route() -> None:
-    doc = _gate_process('    { type: GATE, asks: "Proceed?", on: { DENY: { end: DENIED } } }')
+    doc = _gate_process(
+        '    { type: GATE, asks: "Proceed?", on: { DENY: { end: DENIED } } }'
+    )
     findings = validate(doc, registry=Registry())
     assert "V9" in _rules(findings)
 
@@ -458,7 +468,7 @@ def test_v9_refused_indeterminate_with_a_route() -> None:
     """A3 bad-but-conformant: INDETERMINATE must never route."""
 
     doc = _gate_process(
-        "    { type: GATE, asks: \"Proceed?\", on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED }, "
+        '    { type: GATE, asks: "Proceed?", on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED }, '
         "INDETERMINATE: { end: DENIED } } }"
     )
     findings = validate(doc, registry=Registry())

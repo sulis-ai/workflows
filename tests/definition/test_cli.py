@@ -12,7 +12,9 @@ from sulis_workflows.definition.cli import main
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def test_validate_exits_zero_for_a_clean_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_validate_exits_zero_for_a_clean_document(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     # A POLICY control has no checker and no other references to resolve — the
     # simplest genuinely self-contained document to prove a clean exit with.
     doc = tmp_path / "policy.yaml"
@@ -86,7 +88,9 @@ effect: QUERY
     assert "OK" in out
 
 
-def test_explain_lists_nodes_loops_gates_and_endings(capsys: pytest.CaptureFixture[str]) -> None:
+def test_explain_lists_nodes_loops_gates_and_endings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     code = main(["explain", str(FIXTURES / "accepted" / "process-appendix-a.yaml")])
     out = capsys.readouterr().out
     assert code == 0

@@ -12,7 +12,9 @@ from sulis_workflows.definition.load import load_definition_file
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.definition.validate import validate_definition
 
-BUILTIN = Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+BUILTIN = (
+    Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+)
 CORPUS = Path(__file__).parent / "fixtures" / "appendix_a_corpus"
 APPENDIX_A = Path(__file__).parent / "fixtures" / "accepted" / "process-appendix-a.yaml"
 
@@ -36,7 +38,9 @@ def test_appendix_a_validates_end_to_end_with_the_full_corpus() -> None:
     registry = _full_registry()
     process = load_definition_file(APPENDIX_A)
     findings = validate_definition(process, registry)
-    assert findings == [], "\n".join(f"{f.rule} [{f.node}]: {f.message}" for f in findings)
+    assert findings == [], "\n".join(
+        f"{f.rule} [{f.node}]: {f.message}" for f in findings
+    )
 
 
 def test_every_corpus_and_builtin_file_is_itself_valid() -> None:
@@ -47,11 +51,17 @@ def test_every_corpus_and_builtin_file_is_itself_valid() -> None:
     for path in [*_BUILTIN_FILES, *_CORPUS_FILES]:
         definition = load_definition_file(path)
         findings = validate_definition(definition, registry)
-        assert findings == [], f"{path.name}: " + "; ".join(f"{f.rule}: {f.message}" for f in findings)
+        assert findings == [], f"{path.name}: " + "; ".join(
+            f"{f.rule}: {f.message}" for f in findings
+        )
 
 
-@pytest.mark.parametrize("missing_path", _CORPUS_FILES + _BUILTIN_FILES, ids=lambda p: p.name)
-def test_removing_any_referenced_definition_makes_v2_refuse_appendix_a(missing_path: Path) -> None:
+@pytest.mark.parametrize(
+    "missing_path", _CORPUS_FILES + _BUILTIN_FILES, ids=lambda p: p.name
+)
+def test_removing_any_referenced_definition_makes_v2_refuse_appendix_a(
+    missing_path: Path,
+) -> None:
     """Validates the whole set together, the way `sulis-workflows validate
     <files...>` does — some definitions are only referenced transitively (a
     checker's own `controls`, a Control's own `checker`), which only shows up
@@ -67,7 +77,9 @@ def test_removing_any_referenced_definition_makes_v2_refuse_appendix_a(missing_p
         kept.append(definition)
 
     process = load_definition_file(APPENDIX_A)
-    all_findings = [f for d in [process, *kept] for f in validate_definition(d, registry)]
+    all_findings = [
+        f for d in [process, *kept] for f in validate_definition(d, registry)
+    ]
     assert any(f.rule == "V2" for f in all_findings), (
         f"removing {missing_path.name} should have made some reference unresolvable, but got: "
         + "; ".join(f"{f.rule}: {f.message}" for f in all_findings)

@@ -75,7 +75,9 @@ def test_resolve_exact_version() -> None:
 
 
 def test_resolve_caret_range_picks_highest_satisfying_version() -> None:
-    registry = Registry([_tool("echo", "1.0.0"), _tool("echo", "1.4.0"), _tool("echo", "2.0.0")])
+    registry = Registry(
+        [_tool("echo", "1.0.0"), _tool("echo", "1.4.0"), _tool("echo", "2.0.0")]
+    )
     resolved = registry.resolve("TOOL", "echo@^1.2")
     assert resolved.header.version == "1.4.0"
 
@@ -85,7 +87,9 @@ def test_resolve_bare_partial_version_matches_caret_of_same_precision() -> None:
     reference throughout this spec (`frame-question@1`, `insight@1`, ...) is
     written the bare way, so this is the form that has to work."""
 
-    registry = Registry([_tool("echo", "1.0.0"), _tool("echo", "1.4.0"), _tool("echo", "2.0.0")])
+    registry = Registry(
+        [_tool("echo", "1.0.0"), _tool("echo", "1.4.0"), _tool("echo", "2.0.0")]
+    )
     assert registry.resolve("TOOL", "echo@1").header.version == "1.4.0"
     assert registry.resolve("TOOL", "echo@1") is registry.resolve("TOOL", "echo@^1")
 
@@ -105,7 +109,9 @@ def test_resolve_full_bare_version_is_an_exact_pin_not_a_range() -> None:
         ("^0", ["0.9.9", "1.0.0"], "0.9.9"),
     ],
 )
-def test_caret_bounds_match_node_semver(requested: str, registered: list[str], expected: str) -> None:
+def test_caret_bounds_match_node_semver(
+    requested: str, registered: list[str], expected: str
+) -> None:
     registry = Registry([_tool("echo", v) for v in registered])
     resolved = registry.resolve("TOOL", f"echo@{requested}")
     assert resolved.header.version == expected

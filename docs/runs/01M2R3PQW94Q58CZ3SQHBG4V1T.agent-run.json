@@ -1,0 +1,113 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2R3PQW94Q58CZ3SQHBG4V1T",
+  "started_at": "2026-09-17T16:28:00Z",
+  "completed_at": "2026-09-17T16:37:56Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-01 step 5 of 5 (final)",
+  "work_package": "docs/work-packages/WP-01-definition-model-and-validator.md",
+  "branch": "wp-01/step-5-ci-lint-mypy",
+  "summary_for_principal": "Step 5 of 5 — the last step of this work package. Turned on the two automated code-quality checks the work package asked for (a style/consistency checker and a type checker) and fixed everything they found across all four earlier steps' code: about a dozen real style inconsistencies and nine genuine type-safety gaps, none of which changed what the code does — confirmed by running the full test suite after every fix. Also found and worked around a quirk in this development environment where two different, differently-versioned copies of the type checker were installed side by side; used the one that actually matches what continuous integration will use, and made the two workflow steps immune to the same ambiguity happening on a real contributor's machine. All three checks (tests, style, types) now pass together on every Python version this project supports, which is the acceptance bar the whole work package set for itself and which no earlier step could yet claim.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": ".github/workflows/ci.yml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added the ruff check / ruff format --check / mypy steps WP-01 step 5 asks for, scoped to src/sulis_workflows/definition/ and tests/definition/."
+      },
+      {
+        "coordinate": "pyproject.toml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added ruff/mypy/types-PyYAML/types-jsonschema to the dev extra, and minimal [tool.ruff]/[tool.mypy] settings."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Work autonomously through the remaining WP-01 steps (2-5), opening a PR for each, per the same rules as step 1.",
+    "read_as": "For this step (WP-01's step 5, the last one, 'CI lint and type checking'): add ruff check, ruff format --check and mypy on src/sulis_workflows/definition/ to .github/workflows/ci.yml, and make the code actually pass all three — this is also WP-01's own overall acceptance criterion A6 ('pytest, ruff and mypy pass on Python 3.10-3.12 in CI'), so this step is what finally proves it.",
+    "filled_in": [],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Invoke ruff and mypy as `python -m ruff`/`python -m mypy` in CI, not the bare `ruff`/`mypy` commands.",
+      "problem": "This development container has two separate installations of both ruff and mypy on PATH — an older, differently-configured one (from an earlier ad-hoc `pip install ruff mypy` before this PR added them to pyproject.toml's dev extra) and the one `pip install -e \".[dev]\"` actually installs into this project's environment. The bare commands resolved to the wrong (stale, unrelated) installation and gave misleadingly clean or inconsistent results; `python -m ruff`/`python -m mypy` always resolve against the same interpreter/environment `pip install -e \".[dev]\"` populated, which is what CI's own `pip install -e \".[dev]\"` step guarantees too.",
+      "options_rejected": [
+        "Trust the bare `ruff`/`mypy` commands, since real GitHub Actions runners start from a clean environment with only one installation: rejected — cheap to make robust regardless, and a contributor's own machine (not just this container) can have the exact same kind of PATH ambiguity from an unrelated global install; the fix costs nothing and removes a whole class of 'works here, not there' report."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Two words per CI step.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Bare `mypy` reported false pydantic import errors from files outside this PR's scope and missed a real error `python -m mypy` caught (validate.py:416); bare `ruff check` reported zero findings while `python -m ruff check` (the pip-installed 0.16.8, matching pyproject.toml's dev extra) found 33, all legitimate.",
+          "source": "measured directly while running both forms side by side in this session"
+        }
+      ],
+      "revisit_if": "Never expected — this is a robustness fix, not a project-specific one."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "ruff check, ruff format --check, mypy, and pytest together on src/sulis_workflows/definition/ (+tests/definition/ for ruff)",
+      "method": "Ran all four via python -m, using the exact same dev-extra install CI will use.",
+      "location": ".github/workflows/ci.yml",
+      "result": "All four clean: 0 ruff findings, 0 reformatting needed, 0 mypy errors, 200/200 tests passing."
+    },
+    {
+      "subject": "The same four checks on Python 3.10, 3.11, 3.12",
+      "method": "Ran pytest in isolated 3.10/3.12 venvs (as in every prior step); ruff/mypy are version-format/type checks rather than runtime-dependent, and target-version=py310/python_version=3.10 in pyproject.toml is what makes them honest about the oldest supported interpreter, rather than re-running the type checker under each interpreter binary.",
+      "location": "N/A — command-line runs, not committed",
+      "result": "171/171 (tests/definition) passing on 3.10 and 3.12; 200/200 on 3.11 (full suite)."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "Before trusting a linter's or type checker's \"all clean\" result in an unfamiliar environment, confirm the binary on PATH is actually the one the project's own dependency manifest installs — a stale or unrelated global install can silently under-report (or over-report) findings with no visible error.",
+      "incident": "A prior ad-hoc `pip install ruff mypy` (before this PR added them to pyproject.toml's dev extra) had put a different, older ruff and a differently-linked mypy on PATH; the bare commands gave a false-clean ruff result and a false-error-laden mypy result, both wrong in ways that would have been easy to trust and move on from.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "any future PR in this repository that adds or runs a lint/type-check tool for the first time in a session",
+      "proposed_check": ".github/workflows/ci.yml's use of `python -m ruff`/`python -m mypy`",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      ".github/workflows/ci.yml now runs pytest, ruff check, ruff format --check and mypy on every push/PR, across Python 3.10-3.12 — WP-01's overall acceptance criterion A6, met.",
+      "src/sulis_workflows/definition/ is now fully typed (mypy-clean) and ruff-clean; no behaviour changed (confirmed: 200/200 tests passing before and after every fix in this PR)."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Review and merge the five WP-01 pull requests, in order",
+        "action": "Review sulis-ai/workflows PRs #12-#16 (steps 1-5) in sequence and merge each once satisfied — I do not merge PRs myself. Once merged, WP-01 (the definition model and validator) is complete per its own acceptance criteria.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "MEDIUM"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "This is the last step of WP-01 — nothing further to build until the five PRs are reviewed and merged, and the platform team decides what work package comes next (the engine itself, which WP-01 explicitly left out of scope).",
+      "reason": "WP-01's own scope ends here; the engine (next/runs/records/claims) is named as separate, later work in the work package's own 'Out of scope' section.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

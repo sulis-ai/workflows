@@ -11,8 +11,9 @@ No ``sulis.`` import, no vendor SDK (WP-01 A5).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 from sulis_workflows.definition import model
 from sulis_workflows.definition.errors import DefinitionError
@@ -33,11 +34,11 @@ from sulis_workflows.definition.registry import Registry
 __all__ = [
     "Finding",
     "validate",
+    "validate_control",
     "validate_definition",
     "validate_process",
-    "validate_tool",
-    "validate_control",
     "validate_profile",
+    "validate_tool",
 ]
 
 _ENGINE_ENDINGS = ("ESCALATED", "FAILED", "FORBIDDEN", "CANCELLED")
@@ -54,7 +55,9 @@ class Finding:
 # ------------------------------------------------------------------------- entry --
 
 
-def validate(text: str, *, fmt: str = "yaml", registry: Registry | None = None) -> list[Finding]:
+def validate(
+    text: str, *, fmt: str = "yaml", registry: Registry | None = None
+) -> list[Finding]:
     """Parse, then run every rule this document's kind is subject to. `registry`
     supplies every other definition this document references (V2), and — for
     V10's depth-exhaustion check — every other Process, so a self-reachable call
@@ -64,11 +67,17 @@ def validate(text: str, *, fmt: str = "yaml", registry: Registry | None = None) 
     try:
         definition = load_definition(text, fmt=fmt)
     except DefinitionError as exc:
-        return [Finding(rule=exc.rule, message=exc.message, node=exc.node, fix=exc.schema_path)]
+        return [
+            Finding(
+                rule=exc.rule, message=exc.message, node=exc.node, fix=exc.schema_path
+            )
+        ]
     return validate_definition(definition, registry)
 
 
-def validate_definition(definition: model.Definition, registry: Registry) -> list[Finding]:
+def validate_definition(
+    definition: model.Definition, registry: Registry
+) -> list[Finding]:
     """Validate an already-loaded definition (skipping the parse step `validate`
     does) — for a caller, such as the CLI, that loads several files into one
     registry before validating any of them, so cross-file references resolve."""
@@ -81,13 +90,17 @@ def validate_definition(definition: model.Definition, registry: Registry) -> lis
         return validate_tool(definition, registry)
     if isinstance(definition, model.Process):
         return validate_process(definition, registry)
-    raise AssertionError(f"unreachable: unknown definition type {type(definition)!r}")  # pragma: no cover
+    raise AssertionError(
+        f"unreachable: unknown definition type {type(definition)!r}"
+    )  # pragma: no cover
 
 
 _PROFILE_REF_RE = re.compile(r"profile:([a-z][a-z0-9-]*@\^?\d+(?:\.\d+){0,2})")
 
 
-def _v2_profile_type_refs(type_strings: Any, registry: Registry, *, node: str | None = None) -> list[Finding]:
+def _v2_profile_type_refs(
+    type_strings: Any, registry: Registry, *, node: str | None = None
+) -> list[Finding]:
     """A `profile:<id>@<version>` embedded in a declared type — bare, or nested
     inside `list<...>`/`map<...>` — is a reference too (spec §2.1); walking
     type strings for it is what makes removing a corpus Profile actually break
@@ -102,7 +115,9 @@ def _v2_profile_type_refs(type_strings: Any, registry: Registry, *, node: str | 
     return findings
 
 
-def _resolve(registry: Registry, kind: str, ref: str | None) -> tuple[Any, Finding | None]:
+def _resolve(
+    registry: Registry, kind: str, ref: str | None
+) -> tuple[Any, Finding | None]:
     if ref is None:
         return None, None
     try:
@@ -127,7 +142,10 @@ def v15_grounding_profile(profile: model.Profile) -> list[Finding]:
     """A closed value set (a JSON Schema `enum` anywhere in the Profile's own
     embedded schema) with no `grounded_in` on the Profile that declares it."""
 
-    if _schema_declares_an_enum(profile.schema) and not (profile.grounded_in or "").strip():
+    if (
+        _schema_declares_an_enum(profile.schema)
+        and not (profile.grounded_in or "").strip()
+    ):
         return [
             Finding(
                 rule="V15",
@@ -196,12 +214,16 @@ def validate_tool(tool: model.Tool, registry: Registry) -> list[Finding]:
             if err:
                 findings.append(err)
     findings.extend(_v2_mechanism_references(tool.mechanism, registry))
-    type_strings = [i.type for i in tool.inputs.values()] + [o.type for o in tool.output.values()]
+    type_strings = [i.type for i in tool.inputs.values()] + [
+        o.type for o in tool.output.values()
+    ]
     findings.extend(_v2_profile_type_refs(type_strings, registry))
     return findings
 
 
-def _v2_mechanism_references(mechanism: model.Mechanism, registry: Registry) -> list[Finding]:
+def _v2_mechanism_references(
+    mechanism: model.Mechanism, registry: Registry
+) -> list[Finding]:
     """`ref`/`composes`/`allowed_tools` are `id@version` references where the
     mechanism kind makes them one (spec §4.3); CODE/SKILL/AGENTIC's own `ref`
     names a module or skill path, not a registered definition, so only PROCESS's
@@ -275,7 +297,9 @@ def v3_checker_examples(tool: model.Tool) -> list[Finding]:
     saw_pass = False
     saw_fail = False
     for example in tool.examples:
-        result = example.expect.get("result") if isinstance(example.expect, dict) else None
+        result = (
+            example.expect.get("result") if isinstance(example.expect, dict) else None
+        )
         passed = result.get("passed") if isinstance(result, dict) else None
         if passed is True:
             saw_pass = True
@@ -339,7 +363,9 @@ def _v2_process_references(process: model.Process, registry: Registry) -> list[F
                 else:
                     err = None
                 if err:
-                    findings.append(Finding(rule="V2", node=node_id, message=err.message))
+                    findings.append(
+                        Finding(rule="V2", node=node_id, message=err.message)
+                    )
     for trigger in process.triggers:
         if trigger.kind == "STATE_ENTRY" and trigger.process:
             _, err = _resolve(registry, "PROCESS", trigger.process)
@@ -351,7 +377,9 @@ def _v2_process_references(process: model.Process, registry: Registry) -> list[F
 # ------------------------------------------------------------------------ V4 --
 
 
-def v4_mappings(process: model.Process, registry: Registry, ctx: TypeContext) -> list[Finding]:
+def v4_mappings(
+    process: model.Process, registry: Registry, ctx: TypeContext
+) -> list[Finding]:
     """An unmapped required input; a type mismatch in `in`, `out` or `collect`."""
 
     findings: list[Finding] = []
@@ -363,7 +391,9 @@ def v4_mappings(process: model.Process, registry: Registry, ctx: TypeContext) ->
     return findings
 
 
-def _v4_step(node_id: str, node: model.StepNode, registry: Registry, ctx: TypeContext) -> Iterator[Finding]:
+def _v4_step(
+    node_id: str, node: model.StepNode, registry: Registry, ctx: TypeContext
+) -> Iterator[Finding]:
     tool, err = _resolve(registry, "TOOL", node.tool)
     if err or tool is None:
         return
@@ -379,9 +409,18 @@ def _v4_step(node_id: str, node: model.StepNode, registry: Registry, ctx: TypeCo
         if input_name not in tool.inputs:
             continue
         declared = _parse_type_or_none(tool.inputs[input_name].type)
-        for path_text in path_or_paths if isinstance(path_or_paths, (list, tuple)) else [path_or_paths]:
+        paths: list[str] = (
+            list(path_or_paths)
+            if isinstance(path_or_paths, (list, tuple))
+            else [path_or_paths]
+        )
+        for path_text in paths:
             actual = _resolve_path_type(path_text, ctx)
-            if declared is not None and actual is not None and not _types_compatible(declared, actual):
+            if (
+                declared is not None
+                and actual is not None
+                and not _types_compatible(declared, actual)
+            ):
                 yield Finding(
                     rule="V4",
                     node=node_id,
@@ -395,7 +434,11 @@ def _v4_step(node_id: str, node: model.StepNode, registry: Registry, ctx: TypeCo
             continue
         declared = _parse_type_or_none(tool.output[output_name].type)
         actual = _resolve_path_type(dest_path, ctx)
-        if declared is not None and actual is not None and not _types_compatible(actual, declared):
+        if (
+            declared is not None
+            and actual is not None
+            and not _types_compatible(actual, declared)
+        ):
             yield Finding(
                 rule="V4",
                 node=node_id,
@@ -407,7 +450,11 @@ def _v4_step(node_id: str, node: model.StepNode, registry: Registry, ctx: TypeCo
 
 
 def _v4_for_each(
-    node_id: str, node: model.ForEachNode, process: model.Process, registry: Registry, ctx: TypeContext
+    node_id: str,
+    node: model.ForEachNode,
+    process: model.Process,
+    registry: Registry,
+    ctx: TypeContext,
 ) -> Iterator[Finding]:
     if node.collect is None:
         return
@@ -421,7 +468,9 @@ def _v4_for_each(
     into_type = _resolve_path_type(node.collect.into, ctx)
     if item_type is None or into_type is None:
         return
-    if not isinstance(into_type, TList) or not _types_compatible(into_type.item, item_type):
+    if not isinstance(into_type, TList) or not _types_compatible(
+        into_type.item, item_type
+    ):
         yield Finding(
             rule="V4",
             node=node_id,
@@ -474,7 +523,13 @@ def _type_repr(t: Type) -> str:
 
 
 def _types_compatible(declared: Type, actual: Type) -> bool:
-    from sulis_workflows.definition.expressions import TAny, TInteger, TMap, TNumber, TProfile
+    from sulis_workflows.definition.expressions import (
+        TAny,
+        TInteger,
+        TMap,
+        TNumber,
+        TProfile,
+    )
 
     if isinstance(declared, TAny) or isinstance(actual, TAny):
         return True
@@ -553,7 +608,11 @@ def _route_is_exhaustive(node: model.RouteNode, ctx: TypeContext) -> bool:
         if not isinstance(expr, Compare) or expr.op != "==":
             return False
         left, right = expr.left, expr.right
-        if not isinstance(left, Path) or not isinstance(right, Literal) or not isinstance(right.value, str):
+        if (
+            not isinstance(left, Path)
+            or not isinstance(right, Literal)
+            or not isinstance(right.value, str)
+        ):
             return False
         path_key = str(left)
         if common_path is None:
@@ -633,7 +692,11 @@ def v7_reachability(process: model.Process) -> list[Finding]:
     reachable = _bfs(process.start, forward)
     for node_id in process.nodes:
         if node_id != process.start and node_id not in reachable:
-            findings.append(Finding(rule="V7", node=node_id, message=f"node {node_id!r} is unreachable"))
+            findings.append(
+                Finding(
+                    rule="V7", node=node_id, message=f"node {node_id!r} is unreachable"
+                )
+            )
 
     reverse: dict[str, set[str]] = {nid: set() for nid in process.nodes}
     for node_id, targets in forward.items():
@@ -651,7 +714,13 @@ def v7_reachability(process: model.Process) -> list[Finding]:
         frontier = nxt
     for node_id in process.nodes:
         if node_id not in can_end:
-            findings.append(Finding(rule="V7", node=node_id, message=f"node {node_id!r} has no way to end"))
+            findings.append(
+                Finding(
+                    rule="V7",
+                    node=node_id,
+                    message=f"node {node_id!r} has no way to end",
+                )
+            )
     return findings
 
 
@@ -678,7 +747,9 @@ def v8_loops(process: model.Process) -> list[Finding]:
     findings: list[Finding] = []
     for node_id, node in process.nodes.items():
         for loop, where in _all_loops(node):
-            if loop.budget is not None and (not isinstance(loop.budget, int) or loop.budget < 1):
+            if loop.budget is not None and (
+                not isinstance(loop.budget, int) or loop.budget < 1
+            ):
                 findings.append(
                     Finding(
                         rule="V8",
@@ -694,7 +765,12 @@ def _all_loops(node: model.Node) -> Iterator[tuple[model.LoopSpec, str]]:
         for option in node.when:
             if option.loop:
                 yield option.loop, f"route option {option.if_!r}"
-    elif isinstance(node, model.StepNode) and node.on_control_fail and node.on_control_fail.then and node.on_control_fail.then.loop:
+    elif (
+        isinstance(node, model.StepNode)
+        and node.on_control_fail
+        and node.on_control_fail.then
+        and node.on_control_fail.then.loop
+    ):
         yield node.on_control_fail.then.loop, "on_control_fail.then"
     elif isinstance(node, model.GateNode):
         for verdict, rt in node.on.items():
@@ -716,7 +792,9 @@ def v9_gates(process: model.Process, registry: Registry) -> list[Finding]:
     return findings
 
 
-def _producer_tool_ids(reviewing: tuple[str, ...], process: model.Process, registry: Registry) -> set[str]:
+def _producer_tool_ids(
+    reviewing: tuple[str, ...], process: model.Process, registry: Registry
+) -> set[str]:
     """Every Tool id whose STEP writes one of `reviewing`'s `state.*` paths —
     what an agent decider's "no deciding on your own work" check (spec §7.6,
     ANSI INCITS 359-2004 static separation of duty) needs to compare against."""
@@ -727,7 +805,8 @@ def _producer_tool_ids(reviewing: tuple[str, ...], process: model.Process, regis
         if not isinstance(node, model.StepNode):
             continue
         writes_a_reviewed_channel = any(
-            dest.startswith("state.") and dest[len("state.") :] in channels for dest in node.out.values()
+            dest.startswith("state.") and dest[len("state.") :] in channels
+            for dest in node.out.values()
         )
         if not writes_a_reviewed_channel:
             continue
@@ -738,23 +817,37 @@ def _producer_tool_ids(reviewing: tuple[str, ...], process: model.Process, regis
     return ids
 
 
-def _v9_one_gate(node_id: str, node: model.GateNode, process: model.Process, registry: Registry) -> Iterator[Finding]:
+def _v9_one_gate(
+    node_id: str, node: model.GateNode, process: model.Process, registry: Registry
+) -> Iterator[Finding]:
     if not (node.asks or "").strip():
-        yield Finding(rule="V9", node=node_id, message=f"gate {node_id!r} has no `asks`")
+        yield Finding(
+            rule="V9", node=node_id, message=f"gate {node_id!r} has no `asks`"
+        )
 
     if node.kind not in _KNOWN_GATE_KINDS:
-        yield Finding(rule="V9", node=node_id, message=f"gate {node_id!r} has unknown kind {node.kind!r}")
+        yield Finding(
+            rule="V9",
+            node=node_id,
+            message=f"gate {node_id!r} has unknown kind {node.kind!r}",
+        )
         return  # the checks below assume a known kind
 
     if "INDETERMINATE" in node.on:
         yield Finding(
-            rule="V9", node=node_id, message=f"gate {node_id!r} routes INDETERMINATE, which must pass on, not route"
+            rule="V9",
+            node=node_id,
+            message=f"gate {node_id!r} routes INDETERMINATE, which must pass on, not route",
         )
 
     required_verdicts = ("PERMIT", "DENY") if node.kind == "APPROVAL" else ("ANSWERED",)
     for verdict in required_verdicts:
         if verdict not in node.on:
-            yield Finding(rule="V9", node=node_id, message=f"gate {node_id!r} has no route for {verdict}")
+            yield Finding(
+                rule="V9",
+                node=node_id,
+                message=f"gate {node_id!r} has no route for {verdict}",
+            )
 
     if node.person_required_when and not any(d.kind == "person" for d in node.deciders):
         yield Finding(
@@ -836,6 +929,9 @@ def v10_calls(process: model.Process, registry: Registry) -> list[Finding]:
 def _build_call_graph(registry: Registry) -> dict[str, set[str]]:
     graph: dict[str, set[str]] = {}
     for proc in registry.all("PROCESS"):
+        assert isinstance(
+            proc, model.Process
+        )  # registry.all("PROCESS", ...) guarantees this
         edges = graph.setdefault(proc.header.id, set())
         for node in proc.nodes.values():
             if not isinstance(node, model.StepNode):
@@ -844,6 +940,9 @@ def _build_call_graph(registry: Registry) -> dict[str, set[str]]:
                 tool = registry.resolve("TOOL", node.tool)
             except DefinitionError:
                 continue
+            assert isinstance(
+                tool, model.Tool
+            )  # registry.resolve("TOOL", ...) guarantees this
             if tool.mechanism.kind == "PROCESS" and tool.mechanism.ref:
                 try:
                     child = registry.resolve("PROCESS", tool.mechanism.ref)
@@ -857,7 +956,7 @@ def _reaches(graph: dict[str, set[str]], start: str, target: str) -> bool:
     seen: set[str] = set()
     frontier = list(graph.get(start, ()))
     while frontier:
-        nxt = []
+        nxt: list[str] = []
         for n in frontier:
             if n == target:
                 return True
@@ -891,7 +990,10 @@ def v11_parallel(process: model.Process) -> list[Finding]:
         for channel, branches in writes_by_channel.items():
             if len(branches) < 2:
                 continue
-            if process.state.get(channel) and process.state[channel].reducer == "REPLACE":
+            if (
+                process.state.get(channel)
+                and process.state[channel].reducer == "REPLACE"
+            ):
                 findings.append(
                     Finding(
                         rule="V11",
@@ -964,9 +1066,17 @@ def v13_side_effects(process: model.Process) -> list[Finding]:
 
     findings: list[Finding] = []
     for node_id, node in process.nodes.items():
-        if isinstance(node, model.StepNode) and node.destructive and not (node.precondition or "").strip():
+        if (
+            isinstance(node, model.StepNode)
+            and node.destructive
+            and not (node.precondition or "").strip()
+        ):
             findings.append(
-                Finding(rule="V13", node=node_id, message=f"step {node_id!r} is destructive but has no precondition")
+                Finding(
+                    rule="V13",
+                    node=node_id,
+                    message=f"step {node_id!r} is destructive but has no precondition",
+                )
             )
     return findings
 
@@ -983,9 +1093,15 @@ def v14_endings(process: model.Process) -> list[Finding]:
         for _next_id, end_name in _all_targets(node):
             if end_name and end_name not in declared:
                 findings.append(
-                    Finding(rule="V14", node=node_id, message=f"`end: {end_name}` names an undeclared ending")
+                    Finding(
+                        rule="V14",
+                        node=node_id,
+                        message=f"`end: {end_name}` names an undeclared ending",
+                    )
                 )
     for name, ending in process.endings.items():
         if not (ending.says or "").strip():
-            findings.append(Finding(rule="V14", message=f"ending {name!r} has no `says`"))
+            findings.append(
+                Finding(rule="V14", message=f"ending {name!r} has no `says`")
+            )
     return findings

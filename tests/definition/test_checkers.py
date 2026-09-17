@@ -13,7 +13,9 @@ from sulis_workflows.definition.load import load_definition, load_definition_fil
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.definition.validate import validate_tool
 
-BUILTIN = Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+BUILTIN = (
+    Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+)
 
 _FINDING_PROFILE = """
 api_version: sulis.workflows/v1
@@ -34,7 +36,12 @@ schema:
 
 
 def _registry_with_finding_profile() -> Registry:
-    return Registry([load_definition_file(BUILTIN / "control-result.profile.yaml"), load_definition(_FINDING_PROFILE)])
+    return Registry(
+        [
+            load_definition_file(BUILTIN / "control-result.profile.yaml"),
+            load_definition(_FINDING_PROFILE),
+        ]
+    )
 
 
 def test_profile_conformance_tool_has_no_v3_findings() -> None:
@@ -48,7 +55,9 @@ def test_profile_conformance_examples_actually_match_the_real_function() -> None
     tool = load_definition_file(BUILTIN / "profile-conformance.tool.yaml")
     registry = _registry_with_finding_profile()
     for example in tool.examples:
-        result = profile_conformance(example.inputs["value"], example.inputs["control"], registry=registry)
+        result = profile_conformance(
+            example.inputs["value"], example.inputs["control"], registry=registry
+        )
         assert result["passed"] == example.expect["result"]["passed"], example.name
 
 
@@ -63,7 +72,9 @@ def test_decision_evidence_examples_actually_match_the_real_function() -> None:
     tool = load_definition_file(BUILTIN / "decision-evidence.tool.yaml")
     for example in tool.examples:
         result = decision_evidence(
-            example.inputs["value"], example.inputs["control"], example.inputs["reviewing"]
+            example.inputs["value"],
+            example.inputs["control"],
+            example.inputs["reviewing"],
         )
         assert result["passed"] == example.expect["result"]["passed"], example.name
 
@@ -81,10 +92,18 @@ def test_profile_conformance_directly() -> None:
 
 def test_decision_evidence_directly() -> None:
     reviewing = ["state.recommendations"]
-    good = {"verdict": "PERMIT", "rationale": "ok", "evidence": [{"path": "state.recommendations", "claim": "x"}]}
+    good = {
+        "verdict": "PERMIT",
+        "rationale": "ok",
+        "evidence": [{"path": "state.recommendations", "claim": "x"}],
+    }
     assert decision_evidence(good, "decision@1", reviewing)["passed"] is True
 
-    bad = {"verdict": "PERMIT", "rationale": "ok", "evidence": [{"path": "state.notes", "claim": "x"}]}
+    bad = {
+        "verdict": "PERMIT",
+        "rationale": "ok",
+        "evidence": [{"path": "state.notes", "claim": "x"}],
+    }
     result = decision_evidence(bad, "decision@1", reviewing)
     assert result["passed"] is False
     assert "state.notes" in result["findings"][0]["message"]

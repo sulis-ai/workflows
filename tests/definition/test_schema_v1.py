@@ -20,7 +20,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 ACCEPTED = sorted((FIXTURES / "accepted").glob("*.yaml"))
 REFUSED = sorted((FIXTURES / "refused").glob("*.yaml"))
 
-_MODEL_TYPE_BY_KIND = {"PROFILE": Profile, "TOOL": Tool, "CONTROL": Control, "PROCESS": Process}
+_MODEL_TYPE_BY_KIND = {
+    "PROFILE": Profile,
+    "TOOL": Tool,
+    "CONTROL": Control,
+    "PROCESS": Process,
+}
 
 
 @pytest.mark.parametrize("path", ACCEPTED, ids=lambda p: p.stem)

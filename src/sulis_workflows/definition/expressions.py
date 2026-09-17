@@ -10,39 +10,40 @@ No ``sulis.`` import, no vendor SDK (WP-01 A5).
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence, Union
+from typing import Any, ClassVar
 
 from sulis_workflows.definition.errors import DefinitionError
-from sulis_workflows.definition.model import GateNode, Process, StepNode
+from sulis_workflows.definition.model import GateNode, Process, Profile, StepNode, Tool
 from sulis_workflows.definition.registry import Registry
 
 __all__ = [
     "ABSENT",
-    "Path",
-    "Literal",
-    "ExistsCall",
-    "LenCall",
-    "Not",
     "And",
-    "Or",
     "Compare",
+    "ExistsCall",
     "Expr",
-    "parse",
-    "TString",
-    "TInteger",
-    "TNumber",
-    "TBoolean",
+    "LenCall",
+    "Literal",
+    "Not",
+    "Or",
+    "Path",
     "TAny",
+    "TBoolean",
     "TEnum",
+    "TInteger",
     "TList",
     "TMap",
+    "TNumber",
     "TProfile",
+    "TString",
     "Type",
-    "parse_type",
     "TypeContext",
-    "infer_type",
     "evaluate",
+    "infer_type",
+    "parse",
+    "parse_type",
 ]
 
 # --------------------------------------------------------------------------- lexer --
@@ -82,11 +83,15 @@ def _tokenize(text: str) -> list[_Token]:
     while pos < len(text):
         match = _TOKEN_RE.match(text, pos)
         if not match:
-            raise DefinitionError(f"unexpected character {text[pos]!r} at position {pos} in {text!r}", rule="V5")
+            raise DefinitionError(
+                f"unexpected character {text[pos]!r} at position {pos} in {text!r}",
+                rule="V5",
+            )
         pos = match.end()
         if match.lastgroup == "ws":
             continue
         kind = match.lastgroup
+        assert kind is not None  # every alternative in _TOKEN_RE names a group
         value = match.group(kind)
         if kind == "ident" and value in _KEYWORDS:
             kind = "keyword"
@@ -105,7 +110,7 @@ def _unescape_string(literal: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Path:
-    segments: tuple[Union[str, int], ...]
+    segments: tuple[str | int, ...]
 
     def __str__(self) -> str:  # pragma: no cover - debug convenience
         out = ""
@@ -134,29 +139,29 @@ class LenCall:
 
 @dataclass(frozen=True, slots=True)
 class Not:
-    operand: "Expr"
+    operand: Expr
 
 
 @dataclass(frozen=True, slots=True)
 class And:
-    left: "Expr"
-    right: "Expr"
+    left: Expr
+    right: Expr
 
 
 @dataclass(frozen=True, slots=True)
 class Or:
-    left: "Expr"
-    right: "Expr"
+    left: Expr
+    right: Expr
 
 
 @dataclass(frozen=True, slots=True)
 class Compare:
-    left: "Expr"
+    left: Expr
     op: str | None  # ==, !=, <, <=, >, >=, in — None means "bare value, no comparison"
-    right: "Expr | None"
+    right: Expr | None
 
 
-Expr = Union[Or, And, Not, Compare, Path, Literal, ExistsCall, LenCall]
+Expr = Or | And | Not | Compare | Path | Literal | ExistsCall | LenCall
 
 
 # ---------------------------------------------------------------------------- parser --
@@ -211,15 +216,18 @@ class _Parser:
             return Not(self._parse_not())
         return self._parse_cmp()
 
-    _COMPARE_OPS = {"==", "!=", "<", "<=", ">", ">="}
+    _COMPARE_OPS: ClassVar[set[str]] = {"==", "!=", "<", "<=", ">", ">="}
 
     def _parse_cmp(self) -> Expr:
         left = self._parse_value()
         token = self._peek()
         op: str | None = None
-        if token.kind == "op" and token.text in self._COMPARE_OPS:
-            op = self._advance().text
-        elif token.kind == "keyword" and token.text == "in":
+        if (
+            token.kind == "op"
+            and token.text in self._COMPARE_OPS
+            or token.kind == "keyword"
+            and token.text == "in"
+        ):
             op = self._advance().text
         if op is None:
             return Compare(left, None, None)
@@ -262,7 +270,8 @@ class _Parser:
         if token.kind == "ident":
             return self._parse_path()
         raise DefinitionError(
-            f"unexpected token {token.text or '<end>'!r} at position {token.pos} in {self._source!r}", rule="V5"
+            f"unexpected token {token.text or '<end>'!r} at position {token.pos} in {self._source!r}",
+            rule="V5",
         )
 
     def _parse_list_literal(self) -> Literal:
@@ -299,7 +308,7 @@ class _Parser:
         )
 
     def _parse_path(self) -> Path:
-        segments: list[Union[str, int]] = [self._expect("ident").text]
+        segments: list[str | int] = [self._expect("ident").text]
         while True:
             token = self._peek()
             if token.kind == "punct" and token.text == ".":
@@ -310,7 +319,8 @@ class _Parser:
                 index_token = self._expect("number")
                 if "." in index_token.text:
                     raise DefinitionError(
-                        f"a path index must be an integer, got {index_token.text!r} in {self._source!r}", rule="V5"
+                        f"a path index must be an integer, got {index_token.text!r} in {self._source!r}",
+                        rule="V5",
                     )
                 self._expect("punct", "]")
                 segments.append(int(index_token.text))
@@ -364,12 +374,12 @@ class TEnum:
 
 @dataclass(frozen=True, slots=True)
 class TList:
-    item: "Type"
+    item: Type
 
 
 @dataclass(frozen=True, slots=True)
 class TMap:
-    item: "Type"
+    item: Type
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,7 +387,7 @@ class TProfile:
     ref: str
 
 
-Type = Union[TString, TInteger, TNumber, TBoolean, TAny, TEnum, TList, TMap, TProfile]
+Type = TString | TInteger | TNumber | TBoolean | TAny | TEnum | TList | TMap | TProfile
 
 _ENUM_RE = re.compile(r"^enum\[\s*([A-Z][A-Z0-9_]*(?:\s*,\s*[A-Z][A-Z0-9_]*)*)\s*\]$")
 
@@ -430,7 +440,9 @@ def _json_schema_fragment_to_type(fragment: Mapping[str, Any]) -> Type:
         return _JSON_SCHEMA_PRIMITIVES[json_type]
     if json_type == "array":
         items = fragment.get("items")
-        return TList(_json_schema_fragment_to_type(items) if isinstance(items, dict) else TAny())
+        return TList(
+            _json_schema_fragment_to_type(items) if isinstance(items, dict) else TAny()
+        )
     return TAny()
 
 
@@ -464,7 +476,9 @@ class TypeContext:
             return self._from_steps(rest, path)
         raise DefinitionError(f"unrecognised path root {root!r} in {path}", rule="V5")
 
-    def _from_input_map(self, inputs: Mapping[str, Any], rest: Sequence[Any], path: Path) -> Type:
+    def _from_input_map(
+        self, inputs: Mapping[str, Any], rest: Sequence[Any], path: Path
+    ) -> Type:
         if not rest or not isinstance(rest[0], str) or rest[0] not in inputs:
             raise DefinitionError(f"undeclared path: {path}", rule="V5")
         declared = parse_type(inputs[rest[0]].type)
@@ -472,37 +486,68 @@ class TypeContext:
             return self._drill_into_profile(declared, rest[1:], path)
         return declared
 
-    def _drill_into_profile(self, base: Type, remaining: Sequence[Any], path: Path) -> Type:
+    def _drill_into_profile(
+        self, base: Type, remaining: Sequence[Any], path: Path
+    ) -> Type:
         """One property deep into a profile-typed value's own JSON Schema — spec
         Appendix A reads `inputs.brief.question`, one level into `brief`'s schema,
         so this format's expressions clearly mean to allow it even though §8's
         grammar doesn't call it out. Only one level: a profile field that is
         itself another profile is not walked further (no fixture needs it yet)."""
 
-        if not isinstance(base, TProfile) or len(remaining) != 1 or not isinstance(remaining[0], str):
-            raise DefinitionError(f"cannot resolve path past a non-profile or nested field: {path}", rule="V5")
+        if (
+            not isinstance(base, TProfile)
+            or len(remaining) != 1
+            or not isinstance(remaining[0], str)
+        ):
+            raise DefinitionError(
+                f"cannot resolve path past a non-profile or nested field: {path}",
+                rule="V5",
+            )
         try:
             profile = self._registry.resolve("PROFILE", base.ref)
         except DefinitionError as exc:
-            raise DefinitionError(f"cannot resolve {path}: {exc.message}", rule="V5") from exc
-        properties = profile.schema.get("properties", {}) if isinstance(profile.schema, dict) else {}
+            raise DefinitionError(
+                f"cannot resolve {path}: {exc.message}", rule="V5"
+            ) from exc
+        assert isinstance(
+            profile, Profile
+        )  # registry.resolve("PROFILE", ...) guarantees this
+        properties = (
+            profile.schema.get("properties", {})
+            if isinstance(profile.schema, dict)
+            else {}
+        )
         field = remaining[0]
         if field not in properties:
-            raise DefinitionError(f"profile {base.ref!r} has no property {field!r} (path: {path})", rule="V5")
+            raise DefinitionError(
+                f"profile {base.ref!r} has no property {field!r} (path: {path})",
+                rule="V5",
+            )
         return _json_schema_fragment_to_type(properties[field])
 
     def _from_state(self, rest: Sequence[Any], path: Path) -> Type:
-        if not rest or not isinstance(rest[0], str) or rest[0] not in self._process.state:
-            raise DefinitionError(f"undeclared state channel in path: {path}", rule="V5")
+        if (
+            not rest
+            or not isinstance(rest[0], str)
+            or rest[0] not in self._process.state
+        ):
+            raise DefinitionError(
+                f"undeclared state channel in path: {path}", rule="V5"
+            )
         return parse_type(self._process.state[rest[0]].type)
 
     def _from_steps(self, rest: Sequence[Any], path: Path) -> Type:
         if len(rest) < 2 or not isinstance(rest[0], str):
-            raise DefinitionError(f"a steps.* path needs a node id and a field: {path}", rule="V5")
+            raise DefinitionError(
+                f"a steps.* path needs a node id and a field: {path}", rule="V5"
+            )
         node_id, field = rest[0], rest[1]
         node = self._process.nodes.get(node_id)
         if node is None:
-            raise DefinitionError(f"unknown node {node_id!r} in path: {path}", rule="V5")
+            raise DefinitionError(
+                f"unknown node {node_id!r} in path: {path}", rule="V5"
+            )
 
         if field == "attempt":
             return TInteger()
@@ -510,27 +555,42 @@ class TypeContext:
             return TString()
         if field == "controls":
             if len(rest) != 4 or rest[3] != "passed":
-                raise DefinitionError(f"steps.<node>.controls.<control>.passed is the only shape: {path}", rule="V5")
+                raise DefinitionError(
+                    f"steps.<node>.controls.<control>.passed is the only shape: {path}",
+                    rule="V5",
+                )
             return TBoolean()
         if field == "verdict":
             if isinstance(node, GateNode):
                 return TEnum(("PERMIT", "DENY", "INDETERMINATE"))
             raise DefinitionError(
-                f"steps.{node_id}.verdict has no declared type for a non-GATE node: {path}", rule="V5"
+                f"steps.{node_id}.verdict has no declared type for a non-GATE node: {path}",
+                rule="V5",
             )
         if field == "output":
             if len(rest) != 3 or not isinstance(rest[2], str):
-                raise DefinitionError(f"steps.<node>.output.<name> is the only shape: {path}", rule="V5")
+                raise DefinitionError(
+                    f"steps.<node>.output.<name> is the only shape: {path}", rule="V5"
+                )
             if not isinstance(node, StepNode):
-                raise DefinitionError(f"steps.{node_id}.output.* only exists on a STEP node: {path}", rule="V5")
+                raise DefinitionError(
+                    f"steps.{node_id}.output.* only exists on a STEP node: {path}",
+                    rule="V5",
+                )
             tool = self._registry.resolve("TOOL", node.tool)
+            assert isinstance(
+                tool, Tool
+            )  # registry.resolve("TOOL", ...) guarantees this
             output_name = rest[2]
             if output_name not in tool.output:
                 raise DefinitionError(
-                    f"tool {node.tool!r} has no output {output_name!r} (path: {path})", rule="V5"
+                    f"tool {node.tool!r} has no output {output_name!r} (path: {path})",
+                    rule="V5",
                 )
             return parse_type(tool.output[output_name].type)
-        raise DefinitionError(f"unrecognised steps.* field {field!r} in path: {path}", rule="V5")
+        raise DefinitionError(
+            f"unrecognised steps.* field {field!r} in path: {path}", rule="V5"
+        )
 
 
 # ----------------------------------------------------------------------- type checker --
@@ -556,13 +616,23 @@ def _literal_type(value: Any) -> Type:
     raise DefinitionError(f"not a representable literal: {value!r}", rule="V5")
 
 
-def _check_enum_membership(left: Expr, left_t: Type, right: Expr, right_t: Type) -> None:
-    for enum_expr, enum_t, other_expr in ((left, left_t, right), (right, right_t, left)):
-        if isinstance(enum_t, TEnum) and isinstance(other_expr, Literal) and isinstance(other_expr.value, str):
-            if other_expr.value not in enum_t.members:
-                raise DefinitionError(
-                    f"{other_expr.value!r} is not a member of enum[{', '.join(enum_t.members)}]", rule="V5"
-                )
+def _check_enum_membership(
+    left: Expr, left_t: Type, right: Expr, right_t: Type
+) -> None:
+    for enum_expr, enum_t, other_expr in (
+        (left, left_t, right),
+        (right, right_t, left),
+    ):
+        if (
+            isinstance(enum_t, TEnum)
+            and isinstance(other_expr, Literal)
+            and isinstance(other_expr.value, str)
+            and other_expr.value not in enum_t.members
+        ):
+            raise DefinitionError(
+                f"{other_expr.value!r} is not a member of enum[{', '.join(enum_t.members)}]",
+                rule="V5",
+            )
 
 
 def infer_type(expr: Expr, ctx: TypeContext) -> Type:
@@ -596,7 +666,9 @@ def infer_type(expr: Expr, ctx: TypeContext) -> Type:
         if expr.op in _EQUALITY_OPS:
             _check_enum_membership(expr.left, left_t, expr.right, right_t)  # type: ignore[arg-type]
         elif expr.op in _ORDERING_OPS:
-            both_numeric = isinstance(left_t, _NUMERIC_TYPES) and isinstance(right_t, _NUMERIC_TYPES)
+            both_numeric = isinstance(left_t, _NUMERIC_TYPES) and isinstance(
+                right_t, _NUMERIC_TYPES
+            )
             both_string = isinstance(left_t, TString) and isinstance(right_t, TString)
             if not (both_numeric or both_string):
                 raise DefinitionError(
@@ -604,12 +676,11 @@ def infer_type(expr: Expr, ctx: TypeContext) -> Type:
                     "this expression cannot be evaluated",
                     rule="V5",
                 )
-        elif expr.op == "in":
-            if not isinstance(right_t, TList):
-                raise DefinitionError(
-                    f"the right side of 'in' must be a list, got {right_t!r} — this expression cannot be evaluated",
-                    rule="V5",
-                )
+        elif expr.op == "in" and not isinstance(right_t, TList):
+            raise DefinitionError(
+                f"the right side of 'in' must be a list, got {right_t!r} — this expression cannot be evaluated",
+                rule="V5",
+            )
         return TBoolean()
     raise DefinitionError(f"not a recognised expression node: {expr!r}", rule="V5")
 
@@ -624,7 +695,9 @@ def _resolve_path_value(path: Path, state: Mapping[str, Any]) -> Any:
     current: Any = state
     for segment in path.segments:
         if isinstance(segment, int):
-            if not isinstance(current, (list, tuple)) or not (-len(current) <= segment < len(current)):
+            if not isinstance(current, (list, tuple)) or not (
+                -len(current) <= segment < len(current)
+            ):
                 return ABSENT
             current = current[segment]
         else:
@@ -663,13 +736,18 @@ def evaluate(expr: Expr, state: Mapping[str, Any]) -> Any:
     if isinstance(expr, Or):
         return bool(evaluate(expr.left, state)) or bool(evaluate(expr.right, state))
     if isinstance(expr, Compare):
-        left_value = _resolve_path_value(expr.left, state) if isinstance(expr.left, Path) else evaluate(
-            expr.left, state
+        left_value = (
+            _resolve_path_value(expr.left, state)
+            if isinstance(expr.left, Path)
+            else evaluate(expr.left, state)
         )
         if expr.op is None:
             return None if left_value is ABSENT else left_value
+        assert expr.right is not None  # the parser always sets `right` when `op` is set
         right_value = (
-            _resolve_path_value(expr.right, state) if isinstance(expr.right, Path) else evaluate(expr.right, state)
+            _resolve_path_value(expr.right, state)
+            if isinstance(expr.right, Path)
+            else evaluate(expr.right, state)
         )
         if left_value is ABSENT or right_value is ABSENT:
             return False

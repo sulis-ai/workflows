@@ -9,7 +9,9 @@ from pathlib import Path
 from sulis_workflows.definition.load import load_definition_file
 from sulis_workflows.definition.model import Profile
 
-BUILTIN = Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+BUILTIN = (
+    Path(__file__).parents[2] / "src" / "sulis_workflows" / "definition" / "builtin"
+)
 
 
 def test_control_result_profile_loads() -> None:
@@ -23,4 +25,8 @@ def test_decision_profile_loads() -> None:
     profile = load_definition_file(BUILTIN / "decision.profile.yaml")
     assert isinstance(profile, Profile)
     assert profile.header.id == "decision"
-    assert profile.schema["properties"]["verdict"]["enum"] == ["PERMIT", "DENY", "INDETERMINATE"]
+    assert profile.schema["properties"]["verdict"]["enum"] == [
+        "PERMIT",
+        "DENY",
+        "INDETERMINATE",
+    ]

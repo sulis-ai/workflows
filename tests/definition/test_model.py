@@ -41,7 +41,9 @@ def test_control_model_fields() -> None:
 
 
 def test_fitness_control_threshold_fields() -> None:
-    control = load_definition_file(FIXTURES / "accepted" / "control-fitness-with-threshold.yaml")
+    control = load_definition_file(
+        FIXTURES / "accepted" / "control-fitness-with-threshold.yaml"
+    )
     assert control.type == "FITNESS"
     assert control.threshold is not None
     assert control.threshold.metric == "coverage_ratio"

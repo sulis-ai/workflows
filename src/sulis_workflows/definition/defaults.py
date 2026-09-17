@@ -9,26 +9,26 @@ the same constants so the default it prints is never allowed to drift from this 
 from __future__ import annotations
 
 __all__ = [
+    "CONTROL_FAIL_THEN",
+    "ENGINE_ENDINGS",
+    "EXECUTION_POLICY",
+    "FOR_EACH_CONCURRENCY",
+    "GATE_DECIDERS",
+    "GATE_KIND",
+    "JOIN_POLICY",
     "LOOP_BUDGET",
     "LOOP_COUNTS",
     "LOOP_ON_EXHAUSTED",
-    "REPAIR_BUDGET",
-    "CONTROL_FAIL_THEN",
-    "RETRY_MAX",
-    "RETRY_BACKOFF_SECONDS",
-    "ON_ERROR",
-    "ON_FORBIDDEN",
     "MAX_DEPTH",
     "ON_DEPTH_EXHAUSTED",
-    "ON_PRECONDITION_FALSE",
-    "JOIN_POLICY",
+    "ON_ERROR",
+    "ON_FORBIDDEN",
     "ON_JOIN_FAILED",
-    "FOR_EACH_CONCURRENCY",
+    "ON_PRECONDITION_FALSE",
+    "REPAIR_BUDGET",
+    "RETRY_BACKOFF_SECONDS",
+    "RETRY_MAX",
     "STEP_CRITICALITY",
-    "EXECUTION_POLICY",
-    "GATE_KIND",
-    "GATE_DECIDERS",
-    "ENGINE_ENDINGS",
 ]
 
 # Loop budget (passes per loop, per scope) — every loop, including gate send-backs (D1).
@@ -61,7 +61,9 @@ STEP_CRITICALITY = "STANDARD"
 EXECUTION_POLICY = "STRICT"
 
 GATE_KIND = "APPROVAL"
-GATE_DECIDERS = "PERSON"  # a person holding the gate's permission, when deciders is absent
+GATE_DECIDERS = (
+    "PERSON"  # a person holding the gate's permission, when deciders is absent
+)
 
 # The four endings the engine adds to every process (spec §6).
 ENGINE_ENDINGS = ("ESCALATED", "FAILED", "FORBIDDEN", "CANCELLED")

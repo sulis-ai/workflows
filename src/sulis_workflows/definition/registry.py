@@ -9,15 +9,17 @@ No ``sulis.`` import, no vendor SDK (WP-01 A5).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from sulis_workflows.definition.errors import DefinitionError
 from sulis_workflows.definition.model import Definition
 
 __all__ = ["ParsedRef", "Registry", "parse_ref"]
 
-_REF_RE = re.compile(r"^(?P<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)@(?P<caret>\^?)(?P<version>\d+(?:\.\d+){0,2})$")
+_REF_RE = re.compile(
+    r"^(?P<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)@(?P<caret>\^?)(?P<version>\d+(?:\.\d+){0,2})$"
+)
 
 Version = tuple[int, int, int]
 
@@ -89,7 +91,9 @@ class Registry:
     def add(self, definition: Definition) -> None:
         header = definition.header
         version = tuple(int(p) for p in header.version.split("."))
-        assert len(version) == 3  # the schema already enforces a full X.Y.Z header version
+        assert (
+            len(version) == 3
+        )  # the schema already enforces a full X.Y.Z header version
         self._by_kind_id.setdefault((header.kind, header.id), {})[version] = definition
 
     def __contains__(self, item: tuple[str, str]) -> bool:
@@ -122,7 +126,9 @@ class Registry:
         key = (kind, parsed.id)
         versions = self._by_kind_id.get(key)
         if not versions:
-            raise DefinitionError(f"{kind} '{parsed.id}' is not registered (reference {ref!r})", rule="V2")
+            raise DefinitionError(
+                f"{kind} '{parsed.id}' is not registered (reference {ref!r})", rule="V2"
+            )
 
         is_exact_pin = not parsed.caret and len(parsed.version) == 3
         if not is_exact_pin:

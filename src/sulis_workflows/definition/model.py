@@ -12,8 +12,9 @@ No ``sulis.`` import, no vendor SDK (WP-01 A5).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence, Union
+from typing import Any
 
 from sulis_workflows.definition import defaults as fmt_defaults
 
@@ -64,7 +65,7 @@ class ErrorSpec:
 @dataclass(frozen=True, slots=True)
 class ComposeItem:
     tool: str
-    inputs: Mapping[str, str | Sequence[str]] = field(default_factory=dict)
+    inputs: Mapping[str, str | list[str]] = field(default_factory=dict)
     output: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -80,7 +81,7 @@ class Mechanism:
     ref: str | None = None
     allowed_tools: tuple[str, ...] = ()
     composes: tuple[ComposeItem, ...] = ()
-    inputs: Mapping[str, str | Sequence[str]] = field(default_factory=dict)
+    inputs: Mapping[str, str | list[str]] = field(default_factory=dict)
     path: str | None = None
     result: CallResult | None = None
 
@@ -154,7 +155,7 @@ class RouteTarget:
     next: str | None = None
     end: str | None = None
     call: str | None = None
-    loop: "LoopSpec | None" = None
+    loop: LoopSpec | None = None
     invalidates: tuple[str, ...] = ()
 
 
@@ -181,7 +182,7 @@ class ControlFail:
 class StepNode:
     id: str
     tool: str
-    in_: Mapping[str, str | Sequence[str]]
+    in_: Mapping[str, str | list[str]]
     out: Mapping[str, str]
     precondition: str | None = None
     criticality: str | None = None
@@ -277,7 +278,7 @@ class GateNode:
     type: str = "GATE"
 
 
-Node = Union[StepNode, RouteNode, ParallelNode, JoinNode, ForEachNode, GateNode]
+Node = StepNode | RouteNode | ParallelNode | JoinNode | ForEachNode | GateNode
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,7 +334,7 @@ class Process:
     execution_policy: str = fmt_defaults.EXECUTION_POLICY
 
 
-Definition = Union[Profile, Tool, Control, Process]
+Definition = Profile | Tool | Control | Process
 
 
 # ------------------------------------------------------------------------- builders --
@@ -343,7 +344,7 @@ def _input_spec(d: Mapping[str, Any]) -> InputSpec:
     return InputSpec(
         type=d["type"],
         required=d.get("required", True),
-        default=d["default"] if "default" in d else MISSING,
+        default=d.get("default", MISSING),
         description=d.get("description"),
     )
 
@@ -355,6 +356,14 @@ def _output_spec(d: Mapping[str, Any]) -> OutputSpec:
 def _route_target(d: Mapping[str, Any] | None) -> RouteTarget | None:
     if d is None:
         return None
+    return _route_target_required(d)
+
+
+def _route_target_required(d: Mapping[str, Any]) -> RouteTarget:
+    """Same shape as :func:`_route_target`, for call sites (a dict's *values*,
+    e.g. `on_error`/`on`) where the mapping is never itself absent — only used
+    to give mypy a non-Optional return type there."""
+
     return RouteTarget(
         next=d.get("next"),
         end=d.get("end"),
@@ -390,7 +399,9 @@ def _control_ref(d: Mapping[str, Any]) -> ControlRef:
     for kind in ("profile", "conventions", "fitness", "policy"):
         if kind in d:
             return ControlRef(kind=kind, ref=d[kind])
-    raise ValueError(f"control reference has none of profile/conventions/fitness/policy: {d!r}")
+    raise ValueError(
+        f"control reference has none of profile/conventions/fitness/policy: {d!r}"
+    )
 
 
 def _mechanism(d: Mapping[str, Any]) -> Mechanism:
@@ -399,13 +410,18 @@ def _mechanism(d: Mapping[str, Any]) -> Mechanism:
         ref=d.get("ref"),
         allowed_tools=tuple(d.get("allowed_tools", ())),
         composes=tuple(
-            ComposeItem(tool=c["tool"], inputs=c.get("inputs", {}), output=c.get("output", {}))
+            ComposeItem(
+                tool=c["tool"], inputs=c.get("inputs", {}), output=c.get("output", {})
+            )
             for c in d.get("composes", ())
         ),
         inputs=d.get("inputs", {}),
         path=d.get("path"),
         result=(
-            CallResult(outputs=d["result"].get("outputs", {}), endings=d["result"].get("endings", {}))
+            CallResult(
+                outputs=d["result"].get("outputs", {}),
+                endings=d["result"].get("endings", {}),
+            )
             if d.get("result") is not None
             else None
         ),
@@ -418,7 +434,9 @@ def _decider(d: Mapping[str, Any]) -> Decider:
     if "agent" in d:
         return Decider(kind="agent", ref=d["agent"])
     person = d["person"]
-    return Decider(kind="person", permission=person.get("permission"), role=person.get("role"))
+    return Decider(
+        kind="person", permission=person.get("permission"), role=person.get("role")
+    )
 
 
 def _node(node_id: str, d: Mapping[str, Any]) -> Node:
@@ -434,7 +452,9 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             destructive=d.get("destructive", False),
             retry=_retry_spec(d.get("retry")),
             on_control_fail=_control_fail(d.get("on_control_fail")),
-            on_error={k: _route_target(v) for k, v in d.get("on_error", {}).items()},
+            on_error={
+                k: _route_target_required(v) for k, v in d.get("on_error", {}).items()
+            },
             on_forbidden=_route_target(d.get("on_forbidden")),
             on_precondition_false=_route_target(d.get("on_precondition_false")),
             on_depth_exhausted=_route_target(d.get("on_depth_exhausted")),
@@ -475,7 +495,9 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             as_=d["as"],
             do=d["do"],
             max_concurrency=d.get("max_concurrency"),
-            collect=CollectSpec(output=collect["output"], into=collect["into"]) if collect else None,
+            collect=CollectSpec(output=collect["output"], into=collect["into"])
+            if collect
+            else None,
             join=d.get("join"),
             next=d.get("next"),
             end=d.get("end"),
@@ -492,7 +514,7 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             note_into=d.get("note_into"),
             answer_type=d.get("answer_type"),
             answer_into=d.get("answer_into"),
-            on={k: _route_target(v) for k, v in d.get("on", {}).items()},
+            on={k: _route_target_required(v) for k, v in d.get("on", {}).items()},
         )
     raise ValueError(f"unknown node type {node_type!r} for node {node_id!r}")
 
@@ -502,7 +524,7 @@ def _state_channel(d: Mapping[str, Any]) -> StateChannel:
         type=d["type"],
         reducer=d["reducer"],
         key=d.get("key"),
-        default=d["default"] if "default" in d else MISSING,
+        default=d.get("default", MISSING),
     )
 
 
@@ -569,7 +591,11 @@ def build(doc: Mapping[str, Any]) -> Definition:
             grounded_in=doc.get("grounded_in"),
             severity=doc.get("severity"),
             threshold=(
-                ThresholdSpec(metric=threshold["metric"], op=threshold["op"], value=threshold["value"])
+                ThresholdSpec(
+                    metric=threshold["metric"],
+                    op=threshold["op"],
+                    value=threshold["value"],
+                )
                 if threshold is not None
                 else None
             ),
@@ -582,22 +608,33 @@ def build(doc: Mapping[str, Any]) -> Definition:
             controls=tuple(_control_ref(c) for c in doc["controls"]),
             mechanism=_mechanism(doc["mechanism"]),
             effect=doc["effect"],
-            errors=tuple(ErrorSpec(code=e["code"], error_class=e["class"]) for e in doc.get("errors", ())),
-            checker_for=(doc["checker_for"]["control"] if doc.get("checker_for") else None),
+            errors=tuple(
+                ErrorSpec(code=e["code"], error_class=e["class"])
+                for e in doc.get("errors", ())
+            ),
+            checker_for=(
+                doc["checker_for"]["control"] if doc.get("checker_for") else None
+            ),
             examples=tuple(
-                Example(name=e["name"], inputs=e["inputs"], expect=e["expect"]) for e in doc.get("examples", ())
+                Example(name=e["name"], inputs=e["inputs"], expect=e["expect"])
+                for e in doc.get("examples", ())
             ),
         )
     if kind == "PROCESS":
         return Process(
             header=header,
             inputs={k: _input_spec(v) for k, v in doc.get("inputs", {}).items()},
-            host_inputs={k: _input_spec(v) for k, v in doc.get("host_inputs", {}).items()},
+            host_inputs={
+                k: _input_spec(v) for k, v in doc.get("host_inputs", {}).items()
+            },
             state={k: _state_channel(v) for k, v in doc.get("state", {}).items()},
             defaults=_process_defaults(doc.get("defaults")),
             start=doc["start"],
             nodes={node_id: _node(node_id, n) for node_id, n in doc["nodes"].items()},
-            endings={k: Ending(outcome=v["outcome"], says=v["says"]) for k, v in doc["endings"].items()},
+            endings={
+                k: Ending(outcome=v["outcome"], says=v["says"])
+                for k, v in doc["endings"].items()
+            },
             triggers=tuple(_trigger(t) for t in doc.get("triggers", ())),
             execution_policy=doc.get("execution_policy", fmt_defaults.EXECUTION_POLICY),
         )

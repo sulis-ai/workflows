@@ -22,7 +22,7 @@ from sulis_workflows.definition import model
 from sulis_workflows.definition.errors import DefinitionError
 from sulis_workflows.domain.yaml_input_limits import MAX_YAML_INPUT_BYTES
 
-__all__ = ["load_definition", "load_definition_file", "DefinitionError"]
+__all__ = ["DefinitionError", "load_definition", "load_definition_file"]
 
 _SCHEMA_DIR = Path(__file__).parent / "schema"
 
@@ -48,7 +48,9 @@ class _StrictBoolLoader(yaml.SafeLoader):
 
 
 _StrictBoolLoader.yaml_implicit_resolvers = {
-    first_char: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
+    first_char: [
+        (tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"
+    ]
     for first_char, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _StrictBoolLoader.add_implicit_resolver(
@@ -58,7 +60,7 @@ _StrictBoolLoader.add_implicit_resolver(
 )
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _schema(kind: str) -> dict[str, Any]:
     path = _SCHEMA_DIR / _SCHEMA_BY_KIND[kind]
     with path.open("r", encoding="utf-8") as f:
@@ -100,7 +102,9 @@ def load_definition(text: str, *, fmt: str = "yaml") -> model.Definition:
 
     doc = _parse(text, fmt=fmt)
     if not isinstance(doc, dict):
-        raise DefinitionError("a definition document must be a mapping at the top level", rule="V1")
+        raise DefinitionError(
+            "a definition document must be a mapping at the top level", rule="V1"
+        )
 
     kind = doc.get("kind")
     if kind not in _SCHEMA_BY_KIND:
@@ -130,5 +134,8 @@ def load_definition_file(path: str | Path) -> model.Definition:
         return load_definition(text, fmt=fmt)
     except DefinitionError as exc:
         raise DefinitionError(
-            f"{path}: {exc.message}", rule=exc.rule, schema_path=exc.schema_path, node=exc.node
+            f"{path}: {exc.message}",
+            rule=exc.rule,
+            schema_path=exc.schema_path,
+            node=exc.node,
         ) from exc
