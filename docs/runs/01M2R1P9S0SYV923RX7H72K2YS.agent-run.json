@@ -1,0 +1,153 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2R1P9S0SYV923RX7H72K2YS",
+  "started_at": "2026-09-17T15:50:00Z",
+  "completed_at": "2026-09-17T16:02:44Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-01 step 2 of 5",
+  "work_package": "docs/work-packages/WP-01-definition-model-and-validator.md",
+  "branch": "wp-01/step-2-registry-expressions",
+  "summary_for_principal": "Step 2 of 5: reference resolution (id@version) and the expression language definitions use for routing and conditions. Added a registry that resolves references between definitions, and a full parser/type-checker/evaluator for the small expression language (comparisons, and/or/not, exists(), len(), membership). Building the registry against the spec's own worked examples surfaced a real gap: every single example reference in the spec (e.g. `frame-question@1`) is a short, partial version with no version-range marker, but the spec as drafted only defined behaviour for a full exact version or an explicit range marker — as drafted, every example in the spec would have been an invalid reference. This is a technical resolution-rule question, not anything about how the product is used, so I decided it (matching the short form to the existing range behaviour, the option consistent with how every example is actually written) and corrected the spec itself, with the reasoning recorded there. 53 new tests, all passing on Python 3.10-3.12.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "CONTRACT_FORM",
+        "role": "ACTED_ON",
+        "reason": "Amended §1.2 and added §18 D10/D11 to close a reference-resolution gap this PR's registry work found — every worked reference example in the spec would otherwise have been unresolvable."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Work autonomously through the remaining WP-01 steps (2-5), opening a PR for each, per the same rules as step 1: tests first, run pytest before each PR, plain-language summary, run record, never merge, decide technical questions rather than deferring them.",
+    "read_as": "For this step (WP-01's step 2, 'Registry + expressions (V2, V5)'): build registry.py (resolves id@version and caret ranges over an in-memory set of documents; an unresolved reference is refused) and expressions.py (the §8 grammar: parser, type checker against declared inputs/host inputs/state channels/step outputs, and a pure evaluator). Nothing about the cross-cutting validator rules V3-V15 (PR3) or checkers/CLI (PR4).",
+    "filled_in": [
+      {
+        "gap": "spec §1.2 as drafted only defined an exact full version or an explicit caret range (`^1.2`); every worked reference example in the spec (frame-question@1, insight@1, grounded-inquiry-sign-off@1, ...) is a bare partial version with neither. Building the registry against those examples is what surfaced this — a strict reading would have refused every one of them.",
+        "assumed": "A bare partial reference (no `^`) resolves exactly like a caret range of the same precision — `echo@1` and `echo@^1` mean the same thing; `^` only changes behaviour in front of a full three-component version. Decided, not deferred, since it is a technical resolution-rule question with no bearing on the principal's world; written into the spec itself as D11 (§18) with the rejected alternatives and why.",
+        "basis": "MOST_REVERSIBLE",
+        "reversal_cost": "Two-way door, local to registry.py's Registry.resolve; no fixture in this repository needs to change either way since every reference is already written the short way.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "Caret-range references resolve by node-semver's caret semantics (spec §18 D10).",
+      "problem": "Spec §1.2 gives one example (`^1.2`) of a caret-range reference but never states the range semantics precisely, and the registry has to resolve one to an exact version.",
+      "options_rejected": [
+        "Invent a bespoke range rule: rejected — this format's version numbers are themselves plain SemVer 2.0.0 (spec §1.1), and node-semver is the widely-used convention for ranges over exactly that grammar; a bespoke rule would be a gratuitous divergence from the nearest fitting convention."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Local to registry.py's _caret_bounds; no fixture depends on the zero-major special cases yet.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "KNOWN",
+          "claim": "node-semver's caret-range algorithm, precisely: ^1.2.3 := >=1.2.3 <2.0.0; ^0.2.3 := >=0.2.3 <0.3.0; ^0.0.3 := >=0.0.3 <0.0.4; a version with fewer components (^1.2, ^0.0, ^0) widens the upper bound to the first omitted component.",
+          "source": "github.com/npm/node-semver, \"Caret Ranges\" section — precisely nameable and a widely documented, stable algorithm; not re-fetched during this run (no network access), hence KNOWN rather than VERIFIED."
+        }
+      ],
+      "revisit_if": "A registered definition uses a 0.x.y version and a real reference needs the zero-major narrowing to behave differently than tested here."
+    },
+    {
+      "headline": "A bare (non-caret) partial reference resolves identically to a caret range of the same precision, not as a refusal and not as an implicit `.0.0` pin (spec §18 D11).",
+      "problem": "Every worked reference example in the spec is written the short way (`frame-question@1`) with neither a full version nor a `^`. As spec §1.2 first read, this PR's own registry would have refused every one of them — found while building test fixtures against the spec's own examples, not invented speculatively.",
+      "options_rejected": [
+        "Refuse any reference that isn't a full version or explicitly `^`-prefixed: rejected — invalidates every reference this spec itself has ever shown, which is a much stronger signal about intent than a strict reading of one sentence.",
+        "Treat a bare partial reference as shorthand for `major.minor.0`/`major.0.0` (an implicit low pin): rejected — silently resolves to the *lowest* matching version even when a newer compatible one is registered, the opposite of what an author writing a short reference almost always wants, and inconsistent with how `^` already behaves at the same precision."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Local to registry.py's Registry.resolve (one boolean condition); no fixture needs to change either way since every reference is already written the short way.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Every Tool/Profile/Control/Process reference in spec Appendix A and every inline example (frame-question@1, classify-inquiry@1, insight@1, grounded-inquiry-sign-off@1, review-recommendations@1, ...) is written as a bare partial version, never a full version and never with `^`.",
+          "source": "docs/spec/process-definition.md, read in full for this PR"
+        }
+      ],
+      "revisit_if": "A future need arises for a reference to pin to major.minor.0 specifically, excluding a newer registered patch — the current rule cannot express that without a full three-component exact reference."
+    },
+    {
+      "headline": "Expression-language path identifiers (`ident` in spec §8's grammar) allow an internal hyphen.",
+      "problem": "spec §8's grammar never shows a hyphenated path segment (its own worked expressions only read `state.*` channels, which happen to be snake_case), but every node id in this format's own examples is kebab-case (`after-interrogate`, `choose-path`). Without hyphen support, `steps.<node>.*` paths could never reference most real node ids.",
+      "options_rejected": [
+        "Restrict `ident` to `[A-Za-z_][A-Za-z0-9_]*` (no hyphen), matching a conventional programming-language identifier: rejected — would make `steps.after-interrogate.output.x` unwritable for the majority of node ids in this format's own worked examples, a silent limitation nothing in the spec asks for."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One regex character class in expressions.py's tokenizer.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Node ids throughout spec Appendix A are kebab-case (frame, classify, choose-path, gather, interrogate, after-interrogate, converge, conclude, honest-stop, recommend, check-fidelity, after-fidelity, sign-off).",
+          "source": "docs/spec/process-definition.md, Appendix A"
+        }
+      ],
+      "revisit_if": "A future grammar change introduces an arithmetic operator (subtraction) that a bare hyphen inside an identifier would become ambiguous with."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Every reference example in spec Appendix A, resolved through the new Registry",
+      "method": "Built a Registry from minimal Tool/Profile/Control fixtures at the versions Appendix A references and resolved each `id@1`-style reference through it.",
+      "location": "tests/definition/test_registry.py",
+      "result": "All resolve correctly once D11 (bare partial = caret-equivalent) is applied; none resolved under the pre-D11 reading (every one raised V2)."
+    },
+    {
+      "subject": "pytest on Python 3.10, 3.11, 3.12",
+      "method": "Ran the full suite on the container's default 3.11; isolated venvs for 3.10 and 3.12 running tests/definition directly.",
+      "location": "N/A — command-line runs, not committed",
+      "result": "117/117 passing on 3.11 (full suite); 88/88 passing on 3.10 and 3.12 (tests/definition)."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "Before implementing a reference/versioning rule a spec states only by illustration, resolve every worked example the spec itself contains through the rule as drafted — an inconsistency between the stated rule and the spec's own examples is a more reliable signal than either one read alone.",
+      "incident": "spec §1.2's literal text (exact version, or an explicit `^` range) would have refused every reference example the spec itself shows, because all of them are bare partial versions. This was caught by writing registry tests against the spec's own Appendix A references rather than only against invented ones.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "future WP-01 PRs, and any future spec-conformance work in this repository",
+      "proposed_check": "tests/definition/test_registry.py::test_resolve_bare_partial_version_matches_caret_of_same_precision",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "src/sulis_workflows/definition/registry.py — Registry.resolve(kind, ref) resolves id@version references (exact, partial, or caret) over an in-memory set of loaded definitions, refusing (rule V2) anything unresolved.",
+      "src/sulis_workflows/definition/expressions.py — parse()/infer_type()/evaluate() for the full §8 grammar, type-checked against a Process's declared inputs/host inputs/state channels/step outputs (via the registry, for steps.<node>.output.*).",
+      "docs/spec/process-definition.md §1.2/§18 — reference resolution is now precisely defined (D10, D11), matching every worked example in the spec."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Proceed to the next PR (validator rules V3-V15 with fixtures)",
+        "action": "Start WP-01 step 3 (validate.py: named rule functions V3-V15, each with an accepted and refused fixture including the A3 bad-but-conformant cases) now.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Proceed to WP-01 step 3 next, per the WP's own suggested sequence.",
+      "reason": "Registry and expressions are exactly what the validator's cross-referencing rules (V2, V5-dependent rules) need; nothing blocks starting it.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
