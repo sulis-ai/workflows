@@ -1,0 +1,246 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2RAT8PW27T5TX08CH6WE7W3",
+  "started_at": "2026-09-17T01:00:00Z",
+  "completed_at": "2026-09-17T02:15:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 step 2 of 5",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-2-step-execution",
+  "summary_for_principal": "Made the engine actually run something for the first time: a single step of a process, for the kind of step that is deterministic (plain code, not an AI model or a person). Before it runs, it checks permission; if the step's output doesn't meet the quality bar the format requires, it says so rather than pretending it passed. While building this, found a real hole in the new format itself: it required checking permission before running anything, but never said which field on a step actually names the permission needed. Added that field and wrote up the decision, the same way earlier gaps were handled. Also found that many real steps declare more than one quality check, and this engine can currently only actually run one specific kind of check — so those steps correctly refuse to run for now rather than being let through only partly checked. Nothing changes for existing definitions; this is additive.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/domain/ports/code_tool.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New port for dispatching a CODE Tool's module:function ref, deliberately separate from the deprecated compiler's ToolDispatchPort."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/model.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added an optional `permission` field to Tool (D12) so the engine has something concrete to check before dispatch."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/tool.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Schema counterpart of the same `permission` field, optional so no existing fixture needs to change."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "S10.1 amended to name the `permission` field; D12 added to S18's decision log."
+      },
+      {
+        "coordinate": ".github/workflows/ci.yml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Extended lint/type-check coverage to engine/ and tests/engine/ wholesale, and to the new code_tool.py port file."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/checkers.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Confirmed profile_conformance's exact signature before calling it directly from engine/controls.py."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/appendix_a_corpus/interrogate.tool.yaml",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Confirmed, from a real fixture, that a `profile: X@v` control is matched to output fields by their declared type, not by a separate field-name convention."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Continue WP-02 (the execution engine) autonomously, PR by PR, same as WP-01 — this run picks up step 2 (STEP execution) of the 5-step sequence this session scoped in step 1's own run.",
+    "read_as": "Build the part of the engine that can actually dispatch a Tool for the deterministic (CODE) mechanism kind, since spec S12.1 splits step execution into an engine-run path (CODE/EXTERNAL/deterministic PROCESS) and a hand-off path (SKILL/AGENTIC, deferred to step 5's next()/report()) — narrowing step 2 to the engine-run, deterministic half is what makes it a genuinely testable, honest slice rather than a half-built version of the whole thing.",
+    "filled_in": [
+      {
+        "gap": "Spec S10.1 requires a permission check before every Tool dispatch but never names the field carrying which permission a given Tool's dispatch requires.",
+        "assumed": "Added an optional `permission: str | None` field to Tool, mirroring the shape a gate decider's `person.permission` already uses (S7.6); an absent value means the engine refuses to dispatch (fail closed), not that the check is skipped. Documented as D12 in the spec's own decision log (S18) and in S10.1 itself.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/spec/process-definition.md S7.6 (Decider.permission's existing shape); S4.4 (the precedent that an unresolved control refuses to run, applied here to an undeclared permission); ADR-024 (permission strings are the host's opaque grammar).",
+        "reversal_cost": "Cheap — additive field, no existing fixture references it, and D12 itself names tightening it to schema-required as a natural next step once real fixtures exist to migrate.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec S10.2 requires every non-policy control's checker to run after a step, but does not say what an engine should do when it has no way to actually call a given control's checker (e.g. a `conventions:`/`fitness:` control whose checker Tool isn't one this engine implements).",
+        "assumed": "Treat an uncheckable control the same as S4.4's unresolved-control case: the step refuses to dispatch rather than running with that control silently untested. Scoped this engine's actual checking to `profile:` controls only, since `profile_conformance` is the only non-gate-specific checker this repository implements as a real callable.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/spec/process-definition.md S4.4 (\"one that does not [resolve] refuses to run\"); CLAUDE.md's fail-closed principle.",
+        "reversal_cost": "Cheap — engine/controls.py is the only place this rule lives; adding dispatch for another checker kind widens `checkable`, it doesn't change this decision's shape.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "A Tool's dispatch permission is an optional, opaque `permission` field (D12); absent means refuse to dispatch.",
+      "problem": "engine/steps.py's permission check (S10.1) needs a concrete string to pass to PolicyPort.authorize(), and nothing in the format as drafted names where that string comes from.",
+      "options_rejected": [
+        "Derive a permission string automatically from the Tool's own id (e.g. `<tool-id>.dispatch`): rejected — invents a naming scheme ADR-024 reserves to the host; two hosts would derive two different strings from the same Tool, defeating the point of the host owning its own grammar.",
+        "Make `permission` a required field on every Tool now, enforced by the JSON Schema: rejected for this draft — would invalidate every Tool fixture already written against v1 (WP-01's Appendix A corpus included), a large, unrelated blast radius for a field this decision can add without it.",
+        "An optional field that, absent, means dispatch proceeds unchecked: rejected — silently defeats S10.1's own \"before it dispatches any Tool\", exactly the bad-but-conformant path this format's principles ask every rule to defeat."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Tightening `permission` to schema-required is additive once fixtures are updated to declare it; the engine-side refusal-on-absence rule is local to engine/steps.py and can be relaxed in one place.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "No `permission` field exists anywhere on Tool in model.py or tool.v1.schema.json before this PR; grep for \"permission\" in the spec turns up only the gate decider's `person.permission` and the trigger-permission and D5 (\"permission is checked\") mentions, never a Tool-level field.",
+          "source": "docs/spec/process-definition.md, grepped directly this session; src/sulis_workflows/definition/model.py and schema/tool.v1.schema.json, read directly."
+        }
+      ],
+      "load_bearing_assumptions": [
+        "No Tool fixture in this repository currently declares a `permission` field under a different name that this decision would collide with — verified false collision risk by grepping the Appendix A corpus, which has no such field anywhere."
+      ],
+      "revisit_if": "A future WP-01-style validator PR adds a rule requiring `permission` on every Tool, at which point every fixture needs updating together."
+    },
+    {
+      "headline": "Controls-checking is scoped to `profile:` controls only for this PR; a Tool with any `conventions:`/`fitness:`/`policy:` control refuses to dispatch.",
+      "problem": "S10.2 requires every non-policy control's checker to run after a step. This engine has no way to call a `conventions:`/`fitness:` control's checker Tool generically yet (no fixture or built-in defines one as a real callable), and S10.2 doesn't specify a runtime path for `policy:`-kind Tool controls at all (only GATE's `policy` decider is specified, S7.6).",
+      "options_rejected": [
+        "Treat an uncheckable control as passed by default so more real Tools can run: rejected — this is exactly the bad-but-conformant path CLAUDE.md's own principles name: a control that is never actually checked is indistinguishable, from the outside, from one that always passes.",
+        "Build a generic checker-Tool dispatch path now (resolve the Control's `.checker` Tool via Registry and call it through CodeToolPort) even though no such checker exists in any fixture yet: rejected — speculative against a shape nothing has exercised; the two real built-in checkers (profile_conformance, decision_evidence) have bespoke signatures, not a generic (inputs: dict) -> dict shape, so a generic dispatch path would need to be redesigned once a real second checker appears anyway."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Additive — a later PR can widen `check_controls` to dispatch more checker kinds without changing this PR's `profile:` path.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "checkers.py implements exactly two checkers: profile_conformance(value, control, *, registry) and decision_evidence(value, control, reviewing) — different signatures from each other and from a generic Tool-dispatch shape; decision_evidence is specific to gate decisions (S7.6), not a STEP control.",
+          "source": "src/sulis_workflows/definition/checkers.py, read in full this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The Appendix A corpus's own interrogate.tool.yaml declares both a `profile:` control and a `conventions:` control together on the same Tool — confirming real Tools mix checkable and (currently) unchecked kinds, so partial trust would be a real, not hypothetical, gap.",
+          "source": "tests/definition/fixtures/appendix_a_corpus/interrogate.tool.yaml, read directly."
+        }
+      ],
+      "revisit_if": "A real `conventions:`/`fitness:` checker Tool is added to any fixture corpus, giving this engine something concrete to dispatch against."
+    },
+    {
+      "headline": "A new CodeToolPort, not the existing ToolDispatchPort, dispatches a CODE Tool's `module:function` ref.",
+      "problem": "Whether to reuse the deprecated compiler's existing ToolDispatchPort (domain/ports/tool_dispatch.py) for calling a CODE-kind Tool's mechanism.",
+      "options_rejected": [
+        "Reuse ToolDispatchPort's `invoke(primitive, args, *, sandbox_root, ...)` generic escape hatch: rejected — `sandbox_root` is a mandatory keyword argument tied to that port's workspace-primitive concern (read_file/glob/ripgrep for a sandboxed filesystem); a CODE Tool's dotted `module:function` ref has no workspace path to supply, so every call site would need to invent a meaningless placeholder just to satisfy the signature."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "The two ports could be merged later if ToolDispatchPort's shape changes to make sandbox_root optional; nothing in this PR depends on them staying separate.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "ToolDispatchPort.invoke requires `sandbox_root: WorkspacePath` as a non-optional keyword argument on every call, per its own Protocol definition and docstring (\"Every method carries sandbox_root (NFR-14)\").",
+          "source": "src/sulis_workflows/domain/ports/tool_dispatch.py, read in full this session and in a prior turn."
+        }
+      ],
+      "revisit_if": "Never expected to need reversing — the two ports serve genuinely different concerns (workspace primitives vs. arbitrary CODE Tool dispatch)."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after adding attempt_step, check_controls, CodeToolPort and their tests.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "240 passed (220 pre-existing from step 1 + 20 new in tests/engine/), 0 failed."
+    },
+    {
+      "subject": "Lint, format and type-check of every file this PR touches, using the same invocation form ci.yml now uses.",
+      "method": "python -m ruff check / ruff format --check / mypy against the exact file/dir list in .github/workflows/ci.yml's updated steps.",
+      "location": ".github/workflows/ci.yml",
+      "result": "All clean: 0 ruff findings, 0 reformatting needed, mypy success on 17 source files."
+    },
+    {
+      "subject": "Whether adding the optional `permission` field to Tool broke any existing WP-01 fixture.",
+      "method": "python -m pytest tests/definition -q, run immediately after the model.py/schema change and before writing any engine code.",
+      "location": "tests/definition/",
+      "result": "171/171 passing, unchanged from before the field was added — confirms the field is genuinely additive."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "checkable-controls-narrow",
+      "location": "src/sulis_workflows/engine/controls.py",
+      "divergence": "This engine can only check `profile:` controls at runtime; `conventions:`/`fitness:`/`policy:` controls on any real Tool make that Tool refuse to dispatch entirely, even though S10.2 requires all non-policy controls to be checked.",
+      "governed_exception": false,
+      "why_not_now": "No `conventions:`/`fitness:` checker exists as a real callable anywhere in this repository yet to dispatch against; building generic dispatch speculatively, before a second real checker shape exists, risks designing against the wrong shape (documented in this run's own decisions above).",
+      "recorded_in": "docs/work-packages/WP-02-execution-engine.md does not yet name this explicitly; tracked here and in engine/controls.py's own module docstring."
+    },
+    {
+      "id": "gate-policy-tool-control-semantics-unspecified",
+      "location": "docs/spec/process-definition.md S10.2 / S7.6",
+      "divergence": "The spec fully specifies how a GATE's `policy:` decider works (S7.6) but never specifies what a Tool-level `policy:`-kind control means at STEP runtime, distinct from a gate decider. This engine currently treats any Tool with a `policy:` control the same as an uncheckable control (refuses to dispatch) rather than inventing a runtime meaning for it.",
+      "governed_exception": false,
+      "why_not_now": "Unlike the `permission` field gap (D12), this one did not have an obvious, safely-borrowable shape to decide from — inventing Tool-level policy-control semantics now risks getting permission-adjacent behaviour wrong, which is higher-stakes than most gaps this session has resolved unilaterally.",
+      "recorded_in": "this run record only; not yet a spec decision or a work-package line item."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Before writing a runtime dispatch function against a spec's declared field shapes, check a real fixture from the corpus that actually uses those fields together — a field's own schema type rarely says how it composes with a sibling field (here: which output field a `profile:` control actually applies to).",
+      "incident": "Nothing in Tool's model or schema states that a `profile: X@v` control is matched to an output field by that field's own declared type; this was only confirmed by reading tests/definition/fixtures/appendix_a_corpus/interrogate.tool.yaml directly and seeing `profile: insight@1` paired with `output.insights: list<profile:insight@1>`.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future PR in this repository building runtime logic against the definition/ model — check the Appendix A corpus fixtures before assuming a field's runtime meaning from its schema type alone.",
+      "proposed_check": "engine/controls.py's own test suite (tests/engine/test_controls.py) exercises exactly this pairing, bare and list-wrapped.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A deterministic (CODE-mechanism) STEP can be attempted end to end: permission checked, precondition evaluated, inputs resolved, the Tool dispatched, and its output checked against every `profile:` control it declares — nothing else in the running system depends on this yet."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "This engine can only check `profile:`-kind controls; a Tool with any other control kind currently refuses to dispatch.",
+        "untouched_id": "checkable-controls-narrow",
+        "trigger": "A real `conventions:`/`fitness:` checker Tool is added to any fixture corpus.",
+        "if_nothing_happens": "DECAYS",
+        "detail": "Every real Tool built against this format that declares a non-profile control (the norm, not the exception — S4.4 expects most Tools to have one) stays undispatchable by this engine until a checker-dispatch path is built; the gap doesn't widen on its own, but it blocks more real work the longer it's left."
+      },
+      {
+        "item": "Tool-level `policy:` controls have no specified runtime meaning distinct from a gate's policy decider.",
+        "untouched_id": "gate-policy-tool-control-semantics-unspecified",
+        "trigger": "A real Tool fixture declares a `policy:` control and needs to actually run.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "No fixture in this repository declares a Tool-level policy control today, so nothing is currently blocked by this; it only matters once one is authored."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Nothing needs deciding from you on this PR — continuing straight to routing (step 3).",
+        "action": "Proceed to WP-02 step 3 (ROUTE execution + durable loop budgets) on a branch stacked on wp-02/step-2-step-execution.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "MEDIUM"
+      },
+      {
+        "n": 2,
+        "label": "When you're ready, review and merge sulis-ai/workflows PR #18 (this step) — after PR #17 (WP-02 step 1) and WP-01's own 5 PRs, in that order.",
+        "action": "Review PR #18 and merge it after PR #17 and WP-01's PRs #12-#16 are merged, since #18 targets wp-02/step-1-policy-records-claims.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Keep going through steps 3-5 of WP-02 in this sitting, reporting after each, as before.",
+      "reason": "This PR only runs a narrow, deterministic slice; the engine becomes genuinely useful once routing, gates and the next/report/decide contract land, and nothing here needs a principal decision to keep moving.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
