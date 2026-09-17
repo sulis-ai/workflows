@@ -1,0 +1,1137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent-run.schema.json",
+  "title": "AgentRun",
+  "description": "The executor\u2192register return leg: what one agent run decided, measured, flagged and deliberately did not touch. WorkPackage is the register\u2192executor hand-off; this is its counterpart coming back. An AgentRun is NOT a register element and never authors target state \u2014 it is a measured execution record (provenance is always 'extracted' in the ADR-0015 sense), so instances live with the runs that produced them (alongside pipeline/runs/), not under topology/ or standards/. Its value is that the claims an agent makes about its own work become machine-checkable rather than prose a non-expert principal has to take on trust. Keys are snake_case per this register's file convention; the '_at' timestamp suffix and RFC 3339 UTC format defer to conventions/data.conventions.yaml rather than being restated here, and every enum is SCREAMING_SNAKE per the same document's enum convention.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "apiVersion",
+    "kind",
+    "id",
+    "started_at",
+    "agent",
+    "summary_for_principal",
+    "subjects",
+    "interpretation",
+    "conformance_claim",
+    "decisions",
+    "flags",
+    "measured",
+    "untouched",
+    "lessons",
+    "where_next"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "In-tree path to this schema."
+    },
+    "apiVersion": {
+      "const": "product-architecture/v1"
+    },
+    "kind": {
+      "const": "AgentRun"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "title": "Run id",
+      "description": "A ULID \u2014 sortable ordering is wanted for run records, per conventions/data.conventions.yaml (identifiers)."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Started at",
+      "description": "RFC 3339 / ISO 8601, UTC with a 'Z' offset (conventions/data.conventions.yaml \u2014 timestamps)."
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time",
+      "title": "Completed at",
+      "description": "Absent while the run is in flight. Its absence is a fact, not a formatting gap."
+    },
+    "agent": {
+      "type": "string",
+      "title": "Agent",
+      "description": "The agent definition that ran (e.g. a .claude/agents/*.md name), so a claim can be traced to the instructions that produced it."
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source"
+      ],
+      "title": "Execution telemetry",
+      "description": "What the run cost to produce. Bookkeeping on its own; a feedback loop when correlated with outcome \u2014 the question worth answering is whether runs with higher reasoning effort, or degraded context, produce different conformance_claim, flag and rework rates. If HIGH effort does not move those, the estate is overpaying; if DEGRADED context correlates with weaker claims, that is a reliability finding about the harness rather than the agent. Every figure here is only as good as `source`, which is why it is the one required field.",
+      "properties": {
+        "source": {
+          "title": "Telemetry source",
+          "description": "Where these figures came from, declared before any of them are read. HARNESS: supplied by the runtime and trustworthy. SELF_REPORTED: the model's own estimate \u2014 models cannot count their own tokens or judge their own effort, so treat every number in this block as ASSUMED evidence and do not aggregate it. MIXED: some of each; say which in `notes`. UNAVAILABLE: not obtainable in this environment, and the numeric fields are absent rather than guessed. Absent numbers are a fact; invented ones are the failure this field exists to prevent. no external standard applies; this register's own vocabulary for the provenance of a figure.",
+          "enum": [
+            "HARNESS",
+            "SELF_REPORTED",
+            "MIXED",
+            "UNAVAILABLE"
+          ]
+        },
+        "model_configured": {
+          "type": "string",
+          "title": "Model (configured)",
+          "description": "The model identifier the run was configured with. This is knowable; what SERVED the run may differ and may change mid-session (runtime fallback, or a switch), so this field claims configuration only and never identity."
+        },
+        "model_served": {
+          "type": "string",
+          "title": "Model (served)",
+          "description": "The model that actually served the run, where the runtime reports it. Usually unavailable \u2014 omit it rather than restating model_configured, since a served value copied from the configured one destroys the only signal this pair carries."
+        },
+        "reasoning_effort": {
+          "title": "Reasoning effort (configured)",
+          "description": "The effort or thinking level the run was CONFIGURED with \u2014 not the model's sense of how hard it worked, which is not a measurement. Where a numeric thinking-token budget is the real setting, record it in tokens.reasoning and leave this at the band it corresponds to. no external standard applies; these bands are this register's own.",
+          "enum": [
+            "MINIMAL",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "MAX",
+            "UNKNOWN"
+          ]
+        },
+        "permissions": {
+          "type": "object",
+          "additionalProperties": false,
+          "title": "Permission context",
+          "description": "What the run was allowed to do, and whether a person stood between it and the work. This is the register's own permission-first discipline (ADR-0011, policies/authorization.policy.yaml) turned back on the agent: a handler records the permission it was granted, and so should a run. It is also the field that qualifies every other claim in this record \u2014 a CONFORMS_TO_TARGET claim from a run that executed unattended with full access carries different audit weight from the same claim on a run where a person approved each write, and today nothing anywhere records which happened. Subject to `source` like the rest of this block: an agent may not reliably know its own approval mode, and UNKNOWN is the honest answer where it does not.",
+          "properties": {
+            "mode": {
+              "title": "Approval mode",
+              "description": "How much human gating stood between the run and its effects. PROMPT_EVERY_ACTION: a person approved each tool call. PROMPT_ON_WRITE: reads were free, writes were gated. AUTO_ACCEPT_EDITS: file changes proceeded without approval; other capabilities may still have been gated. UNATTENDED_FULL_ACCESS: no human gate at any point \u2014 the mode under which an agent's own claims about its work are the ONLY record that anything was checked, which is precisely why this schema exists. UNKNOWN: not reportable in this environment. no external standard applies; these bands are this register's own and describe gating, not vendor settings.",
+              "enum": [
+                "PROMPT_EVERY_ACTION",
+                "PROMPT_ON_WRITE",
+                "AUTO_ACCEPT_EDITS",
+                "UNATTENDED_FULL_ACCESS",
+                "UNKNOWN"
+              ]
+            },
+            "attended": {
+              "type": "boolean",
+              "title": "Attended",
+              "description": "Whether a person was actually present and answering during the run \u2014 distinct from `mode`, which is only what the configuration allowed. A run configured to prompt, whose prompts went unanswered for hours, was not attended. Bears directly on whether escalations in flags[] were seen or merely filed."
+            },
+            "actor": {
+              "type": "string",
+              "title": "Actor",
+              "description": "The identity the run acted as \u2014 whose credentials the writes carry. An agent acting as a named human is making changes attributable to a person who may not have read them; recording it is what makes that visible in a later audit."
+            },
+            "trust_tier": {
+              "type": "string",
+              "title": "Trust tier",
+              "description": "The actor's trust tier as the register already defines it (the second argument to evaluate_against_policy, ADR-0011). Register-native; not restated here."
+            },
+            "granted_scopes": {
+              "type": "array",
+              "title": "Granted scopes",
+              "items": {
+                "type": "string"
+              },
+              "description": "What the run could reach, coarsely \u2014 repositories or folders, tool families, network egress, credentials. Read against subjects.also: a run whose granted scope far exceeds what it touched had more authority than it needed, which is a finding about the grant rather than about the run."
+            },
+            "human_approvals": {
+              "type": "object",
+              "additionalProperties": false,
+              "title": "Human approvals",
+              "description": "How often a person was actually asked during the run, and what they said. The counts matter more than they look: a long run with zero approvals requested is either genuinely uncontentious or an agent that never surfaced anything, and the rest of this record is what distinguishes the two.",
+              "properties": {
+                "requested": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "title": "Requested"
+                },
+                "granted": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "title": "Granted"
+                },
+                "denied": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "title": "Denied",
+                  "description": "A denial is a signal worth keeping \u2014 it is the principal correcting the run's judgment in flight."
+                },
+                "unanswered": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "title": "Unanswered",
+                  "description": "Requests that timed out or were never answered. Where this is non-zero the run proceeded on its safe defaults, and the prose must say so."
+                }
+              }
+            }
+          }
+        },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": false,
+          "title": "Token counts",
+          "description": "The durable measurement. Tokens are a fact about the run; cost is a derivation from them that goes stale the moment pricing changes \u2014 so tokens are recorded even when cost is not, and cost is never recorded without them.",
+          "properties": {
+            "input": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Input tokens"
+            },
+            "output": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Output tokens"
+            },
+            "reasoning": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Reasoning tokens",
+              "description": "Where the runtime separates them. The honest effort measurement, as against the configured band."
+            },
+            "cache_read": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Cache read tokens"
+            },
+            "cache_write": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Cache write tokens"
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Total tokens"
+            }
+          }
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "amount_micro",
+            "currency",
+            "price_basis_at"
+          ],
+          "title": "Cost",
+          "description": "A DERIVED figure, not a measurement \u2014 tokens \u00d7 a price on a date. Recorded with its price basis so a stale number is visibly stale rather than quietly wrong. NOTE A DELIBERATE EXTENSION: conventions/data.conventions.yaml requires an integer in the currency's minor units paired with an ISO 4217 code, but a single run routinely costs a fraction of one minor unit, which that convention cannot express without rounding to zero. This block therefore uses integer MICRO-units (millionths of the currency unit) with the same ISO 4217 code. That is an extension of the money convention, not conformance to it, and it is stated here rather than applied silently \u2014 it needs an ADR before it spreads to any other kind.",
+          "properties": {
+            "amount_micro": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Amount (micro-units)",
+              "description": "Integer millionths of one currency unit \u2014 34700 = USD 0.0347. Never a floating-point number, per the money convention this extends."
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$",
+              "title": "Currency",
+              "description": "ISO 4217 code (conventions/data.conventions.yaml \u2014 money)."
+            },
+            "price_basis_at": {
+              "type": "string",
+              "format": "date",
+              "title": "Price basis date",
+              "description": "The date the rate applied. Without it the figure is uncheckable a quarter later."
+            },
+            "rate_source": {
+              "type": "string",
+              "title": "Rate source",
+              "description": "Where the price came from \u2014 a published rate card, an invoice, a configured constant."
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "title": "Context",
+          "description": "How much room the run had, and whether it kept it. The field that matters here is `degraded`: a run that compacted or truncated made some of its decisions with less than it started with, which is a reliability caveat on every claim in the record and should be visible without reading the transcript.",
+          "properties": {
+            "window_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Context window size"
+            },
+            "peak_used_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "title": "Peak context used"
+            },
+            "degraded": {
+              "title": "Context degradation",
+              "description": "NONE: the run held its full context throughout. COMPACTED: history was summarised mid-run, so earlier detail was reconstructed rather than read. TRUNCATED: content was dropped. TOOL_OUTPUT_ELIDED: a tool result was too large and was cut, so the run may have reasoned from a partial file \u2014 the quietest and most dangerous of the three, because nothing in the output looks different. UNKNOWN: the runtime does not report it. no external standard applies; this register's own vocabulary.",
+              "enum": [
+                "NONE",
+                "COMPACTED",
+                "TRUNCATED",
+                "TOOL_OUTPUT_ELIDED",
+                "UNKNOWN"
+              ]
+            },
+            "degradation_note": {
+              "type": "string",
+              "title": "Degradation note",
+              "description": "What was lost and at what point, where the run can tell. Which claims rest on reconstructed context is more useful than the fact that reconstruction happened."
+            }
+          }
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "title": "Wall-clock duration (ms)"
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "title": "Tool calls",
+          "description": "A cheap proxy for how much of the estate the run actually touched; read against subjects.also rather than alone."
+        },
+        "notes": {
+          "type": "string",
+          "title": "Notes",
+          "description": "Anything qualifying the figures above \u2014 which are HARNESS and which SELF_REPORTED under MIXED, a retry, a model switch mid-run."
+        }
+      }
+    },
+    "work_package": {
+      "type": "string",
+      "title": "Work package",
+      "description": "Optional reference to the WorkPackage this run executes \u2014 the outbound half of the hand-off this record returns against."
+    },
+    "branch": {
+      "type": "string",
+      "title": "Branch",
+      "description": "The branch the work landed on, if any."
+    },
+    "summary_for_principal": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Summary for the principal",
+      "description": "The human channel, carried here so the two channels cannot drift apart. Plain language, addressed to a non-technical principal: what changed, what it means for them, what is still open. It states what was achieved and does not imply coverage the run did not deliver. Jargon here is a defect \u2014 this field exists precisely because the rest of this document is unreadable to the person the work is for.",
+      "$comment": "Readability cannot be enforced by JSON Schema. Enforce it with a fitness function over this field, not by adding structure to it \u2014 structuring the prose is what destroys it."
+    },
+    "subjects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary"
+      ],
+      "title": "Subjects",
+      "description": "What this run was actually about, as register-native coordinates rather than free text. Deliberately NOT a 'topic' string: an uncontrolled classification vocabulary is precisely what this register exists to prevent, and a topic axis \u2014 if one is wanted \u2014 belongs in vocabulary/*.taxonomy.yaml, governed by an ADR, not invented per run. What is recorded here are ids the register already holds (a bounded context, a component, a contract form, a system). Separating the primary subject from everything else the run touched makes two things computable that are currently only visible by reading prose: whether a run stayed in its lane, and which areas keep getting pulled into unrelated work \u2014 a coupling signal, measured rather than felt.",
+      "properties": {
+        "primary": {
+          "$ref": "#/$defs/subject_ref",
+          "description": "The single subject the run was commissioned against. One, not several \u2014 a run that cannot name one primary subject was not scoped."
+        },
+        "also": {
+          "type": "array",
+          "title": "Also touched",
+          "description": "Everything else the run acted on, read, or observed something about. Reading widely is good practice; ACTING widely without being asked is the unrequested rewrite. Recording the role makes that distinction checkable: any entry with role ACTED_ON outside the primary subject is scope expansion and needs its reason stated.",
+          "items": {
+            "$ref": "#/$defs/subject_ref"
+          }
+        }
+      }
+    },
+    "interpretation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ask_as_given",
+        "read_as",
+        "filled_in"
+      ],
+      "title": "Interpretation",
+      "description": "How an ambiguous ask was read, and what was filled in to make it buildable. Distinct from decisions (technical choices made while building) and lessons (what the run learned): this answers the question a principal actually has, which is 'did you build what I meant?'. Requirement ambiguity is the common case, not the exception \u2014 a non-expert states outcomes, not specifications \u2014 and the correct response is to resolve it from convention and keep going, never to stall. Recording the resolution is what makes the guess correctable: an assumption stated is one the principal can overturn in a sentence, and an assumption merely acted on is one they discover months later.",
+      "properties": {
+        "ask_as_given": {
+          "type": "string",
+          "title": "Ask as given",
+          "description": "What the principal actually said, in their words, not paraphrased into specification language. The paraphrase is where the meaning quietly shifts."
+        },
+        "read_as": {
+          "type": "string",
+          "title": "Read as",
+          "description": "The interpretation the run built against, stated plainly enough that the principal can recognise it as right or wrong without knowing anything technical."
+        },
+        "filled_in": {
+          "type": "array",
+          "title": "Filled in",
+          "description": "Every gap between the ask and something buildable, and what was put there. Empty means the ask was genuinely complete, which is rare enough to be worth doubting.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "gap",
+              "assumed",
+              "basis"
+            ],
+            "properties": {
+              "gap": {
+                "type": "string",
+                "title": "Gap",
+                "description": "What the ask did not say \u2014 including the things it did not say because nobody thinks to say them."
+              },
+              "assumed": {
+                "type": "string",
+                "title": "Assumed",
+                "description": "What was filled in."
+              },
+              "basis": {
+                "title": "Basis",
+                "description": "Which rung of the ambiguity ladder this came from, in descending authority. PRINCIPAL_SAID: they said it, here or earlier. GOVERNED_DECISION: an accepted ADR, profile or written convention in this repo. EXTERNAL_STANDARD: a named specification that already solves it. STACK_IDIOM: the documented convention of the framework or platform in use. MOST_REVERSIBLE: nothing decided it, so the cheapest-to-undo option was taken. JUDGMENT: none of the above \u2014 the agent's own call. Aggregated, this is a diagnostic: a run whose fills are mostly JUDGMENT is not leaning on convention, whatever its prose claims. no external standard applies; this register's own ladder, ordered by descending authority.",
+                "enum": [
+                  "PRINCIPAL_SAID",
+                  "GOVERNED_DECISION",
+                  "EXTERNAL_STANDARD",
+                  "STACK_IDIOM",
+                  "MOST_REVERSIBLE",
+                  "JUDGMENT"
+                ]
+              },
+              "grounded_in": {
+                "type": "string",
+                "title": "Grounded in",
+                "description": "The specific decision, specification or idiom named. Required in practice for every basis above MOST_REVERSIBLE \u2014 the rung is a claim, and an unnamed source does not support it."
+              },
+              "reversal_cost": {
+                "type": "string",
+                "title": "Reversal cost",
+                "description": "What it costs if this reading is wrong. The field that decides whether the assumption is worth the principal's attention: cheap to reverse means proceed and mention it; expensive to reverse means it belongs in flags[]."
+              },
+              "confidence": {
+                "title": "Confidence",
+                "enum": [
+                  "HIGH",
+                  "MEDIUM",
+                  "LOW"
+                ],
+                "description": "How sure the run is that this reading is the right one. no external standard applies; this register's own bands, the same three used throughout this schema."
+              }
+            }
+          }
+        },
+        "proceeded_without_answer": {
+          "type": "boolean",
+          "title": "Proceeded without an answer",
+          "description": "True where a question was put to the principal, went unanswered, and the run continued on its stated safe default rather than waiting. This is correct behaviour, not an admission \u2014 silence is a default, not a stop signal \u2014 but it must be visible, because the principal needs to know a decision was taken in their absence and on what basis."
+        }
+      }
+    },
+    "conformance_claim": {
+      "title": "Conformance claim",
+      "description": "Which claim this run is actually making \u2014 the distinction a non-expert principal most needs disambiguated, and the one an agent is most likely to blur. 'I matched the existing patterns' reads as diligence and may describe propagating a divergence; the two are different claims and only one of them is conformance. no external standard applies \u2014 these values are this register's own, following the brownfield stance that observed code is measured current state and never a target.",
+      "enum": [
+        "CONFORMS_TO_TARGET",
+        "CONSISTENT_WITH_SURROUNDING_CODE",
+        "PARTIAL",
+        "NOT_ASSESSED"
+      ]
+    },
+    "decisions": {
+      "type": "array",
+      "title": "Decisions",
+      "description": "Every non-trivial decision this run made on the principal's behalf. Empty is a legitimate answer and must be stated as an empty array rather than omitted.",
+      "items": {
+        "$ref": "#/$defs/decision"
+      }
+    },
+    "flags": {
+      "type": "array",
+      "title": "Flags",
+      "description": "What the run could not resolve to high confidence, or what is not the agent's to decide. A flag is actionable or it is not a flag: it names the tension, the standards in play, the options, and the specific thing needed to resolve it.",
+      "items": {
+        "$ref": "#/$defs/flag"
+      }
+    },
+    "measured": {
+      "type": "array",
+      "title": "Measured",
+      "description": "What the run actually established by reading or running something, as distinct from what it assumed. The register's own target/measured split applied to the agent's own claims: an assertion with no entry here was not measured, whatever the prose says.",
+      "items": {
+        "$ref": "#/$defs/measurement"
+      }
+    },
+    "untouched": {
+      "type": "array",
+      "title": "Untouched divergences",
+      "description": "The anti-canonising record: divergences from target the run found and deliberately did not fix. Required \u2014 an empty array is a positive claim that none were found, and silence is not. This is what stops 'code you don't touch, you record' from degrading into 'code you don't touch, you forget', and what keeps the run from quietly starting a migration nobody authorised.",
+      "items": {
+        "$ref": "#/$defs/untouched_divergence"
+      }
+    },
+    "lessons": {
+      "type": "array",
+      "title": "Lessons",
+      "description": "Generalisable knowledge the run produced about HOW the work should be done \u2014 distinct from decisions (what was chosen), measurements (what is true of the estate) and candidate primitives (what shape recurs). Required, because a run that taught nothing generalisable is a legitimate and common outcome that should be stated rather than left ambiguous; an empty array is the honest default and the expected one. The failure mode this field invites is the platitude \u2014 'always check the code before assuming' \u2014 so a lesson is only admissible if it is grounded in a specific incident in THIS run and nominates a named artefact it would change. A maxim with no destination is a reflection, and a rule agreed in conversation and written down nowhere is exactly what this register exists to prevent.",
+      "items": {
+        "$ref": "#/$defs/lesson"
+      }
+    },
+    "where_next": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ready_now",
+        "waiting_on",
+        "parked",
+        "actions"
+      ],
+      "title": "Where next",
+      "description": "The forward view, and the last thing a principal reads. Mostly a projection of flags, untouched divergences and revisit triggers \u2014 deliberately so: nothing here may be new, and because waiting_on and parked reference those entries by id, that rule is mechanically checkable rather than merely exhorted. A forward-view item resolving to no flag and no untouched entry means the run either invented work or failed to record it, and CI can say which. The one genuinely new thing this block carries is `if_nothing_happens`: a revisit trigger says WHEN to look again, never what it costs to ignore, and a non-expert principal cannot tell 'fine indefinitely' from 'will bite you in three months'. Only the agent knows, so only the agent can say.",
+      "properties": {
+        "ready_now": {
+          "type": "array",
+          "title": "Ready now",
+          "items": {
+            "type": "string"
+          },
+          "description": "What the principal can use or rely on as of this run. Claims here must not exceed the conformance_claim."
+        },
+        "waiting_on": {
+          "type": "array",
+          "title": "Waiting on the principal",
+          "description": "The escalations, restated for the forward view. Empty is a positive and useful claim \u2014 'nothing needs deciding from you' is worth saying out loud.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "flag_id"
+            ],
+            "properties": {
+              "flag_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "title": "Flag id",
+                "description": "Must resolve to an entry in flags[]. A forward-view item with no flag behind it is invented work."
+              },
+              "restated_for_principal": {
+                "type": "string",
+                "title": "Restated for the principal",
+                "description": "The same decision in their language, if the flag's own wording is too technical to reuse verbatim."
+              }
+            }
+          }
+        },
+        "parked": {
+          "type": "array",
+          "title": "Parked",
+          "description": "What was found and deliberately left. Each entry carries the trigger that should reopen it and the cost of ignoring it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "item",
+              "if_nothing_happens"
+            ],
+            "properties": {
+              "item": {
+                "type": "string",
+                "title": "Item",
+                "description": "What is parked, in plain language."
+              },
+              "untouched_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "title": "Untouched id",
+                "description": "The untouched[] entry this corresponds to, where it is a divergence. Absent only where the parked item is not a divergence (an idea, a follow-on conversation)."
+              },
+              "trigger": {
+                "type": "string",
+                "title": "Trigger",
+                "description": "The concrete event that should reopen this."
+              },
+              "if_nothing_happens": {
+                "title": "If nothing happens",
+                "description": "The cost of inaction \u2014 the field a non-expert principal most needs and the one no other field carries. HOLDS_STEADY: no worse over time; genuinely fine to leave. DECAYS: gets more expensive the longer it waits (every new instance built on the divergent pattern widens the migration). BECOMES_URGENT_ON_EVENT: harmless until a specific thing happens, then not \u2014 name the event in `trigger`. ALREADY_COSTING: it is causing harm now and was left only because fixing it was out of this run's scope; anything here should also be a flag. no external standard applies; this register's own vocabulary. Aggregated across runs this is the estate's decay signal \u2014 DECAYS entries accumulating in one area is a measured argument for a migration, not a felt one.",
+                "enum": [
+                  "HOLDS_STEADY",
+                  "DECAYS",
+                  "BECOMES_URGENT_ON_EVENT",
+                  "ALREADY_COSTING"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "title": "Detail",
+                "description": "What the decay or urgency actually looks like, concretely \u2014 'each new screen built this way is another one to migrate later'."
+              }
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "title": "Numbered actions",
+          "description": "The principal-facing numbered list \u2014 the only part of where_next they actually read, and the mechanism that lets them reply with a bare number instead of describing what they want. Numbers are issued per reply and are NOT stable across runs: if a principal names a number from an earlier reply, the agent confirms which item they mean rather than resolving it against the current list. Each entry points back at the flag, parked item or recommendation it came from, so a number always resolves to something already in the record \u2014 the same rule as the rest of where_next, and the reason nothing here may be new.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "n",
+              "label",
+              "action",
+              "source_kind"
+            ],
+            "properties": {
+              "n": {
+                "type": "integer",
+                "minimum": 1,
+                "title": "Number",
+                "description": "The number shown to the principal, unique within this reply."
+              },
+              "label": {
+                "type": "string",
+                "title": "Label",
+                "description": "One line, in the principal's words \u2014 what this is, not how it works. This is the text they see next to the number."
+              },
+              "action": {
+                "type": "string",
+                "title": "Action",
+                "description": "The explicit thing the agent will do if this number is chosen, written as an instruction the agent can pick up with no further conversation. Imperative and specific \u2014 'Add validation to the approval route so an unrecognised verdict is rejected rather than accepted', not 'look at the approval route'. A number whose action is a topic rather than a task forces a clarifying exchange, which is the friction the numbering exists to remove."
+              },
+              "source_kind": {
+                "title": "Source kind",
+                "description": "Which part of the record this action projects. FLAG: a decision only the principal can make. PARKED: a divergence found and left. RECOMMENDATION: the agent's own opinion, and always listed last so it does not read as an obligation. no external standard applies; this register's own vocabulary.",
+                "enum": [
+                  "FLAG",
+                  "PARKED",
+                  "RECOMMENDATION"
+                ]
+              },
+              "source_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
+                "title": "Source id",
+                "description": "The flags[].id or untouched[].id behind it. Absent only for RECOMMENDATION, which has no id of its own."
+              },
+              "effort": {
+                "title": "Effort",
+                "description": "A rough size, so the principal can weigh a number against their week. Honest banding, not encouragement \u2014 LARGE is a legitimate and useful answer. no external standard applies; deliberately coarse bands, this register's own \u2014 a t-shirt size is a shared habit with no specification behind it.",
+                "enum": [
+                  "SMALL",
+                  "MEDIUM",
+                  "LARGE",
+                  "UNKNOWN"
+                ]
+              }
+            }
+          }
+        },
+        "recommended_next": {
+          "type": "object",
+          "title": "What I'd do next if this were mine",
+          "additionalProperties": false,
+          "required": [
+            "recommendation",
+            "reason",
+            "urgency"
+          ],
+          "description": "The agent's own opinion, labelled as opinion so it reads as advice rather than obligation. One recommendation with its reason \u2014 three options with no recommendation is a decision returned unmade. Optional as a whole: a run with no view on what comes next should omit this rather than manufacture one.",
+          "properties": {
+            "recommendation": {
+              "type": "string",
+              "title": "Recommendation"
+            },
+            "reason": {
+              "type": "string",
+              "title": "Reason",
+              "description": "Why this and not the alternatives, in one sentence."
+            },
+            "urgency": {
+              "title": "Urgency",
+              "description": "Honest, and usually NOT_URGENT. An agent that marks everything urgent has said nothing. no external standard applies; this register's own vocabulary.",
+              "enum": [
+                "URGENT",
+                "SOON",
+                "NOT_URGENT"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "candidate_primitives": {
+      "type": "array",
+      "title": "Candidate primitives",
+      "description": "Shared shapes observed across three or more independently measured implementations. An observation, never a proposal to unify and never a task \u2014 premature abstraction is the failure mode this field invites, so the schema requires the evidence (three measured instances) and the disconfirming check before the observation can be recorded at all. An agent instructed to look for primitives will find them everywhere; the threshold is what makes the finding worth reading.",
+      "items": {
+        "$ref": "#/$defs/candidate_primitive"
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "title": "Completeness policy",
+      "additionalProperties": false,
+      "properties": {
+        "fail_closed": {
+          "type": "boolean",
+          "title": "Fail closed",
+          "description": "Reject a run record missing a required field, rather than accepting it as provisional. A run that cannot state what it did not touch has not reported."
+        },
+        "required_fields": {
+          "type": "array",
+          "title": "Required fields",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "subject_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate",
+        "kind"
+      ],
+      "properties": {
+        "coordinate": {
+          "type": "string",
+          "title": "Coordinate",
+          "description": "A register-native id \u2014 a context id, component id, system id, contract form, or the <system>/<component>/<contract-id> coordinate (ADR-0022). Built from ids the register already holds; no new naming scheme, and no free-text label."
+        },
+        "kind": {
+          "title": "Coordinate kind",
+          "description": "Which register axis the coordinate names, so a consumer can resolve it without guessing. no external standard applies \u2014 these are this register's own element kinds.",
+          "enum": [
+            "CONTEXT",
+            "SYSTEM",
+            "COMPONENT",
+            "CONTRACT_FORM",
+            "CONTRACT_INSTANCE",
+            "PROCESS",
+            "DECISION"
+          ]
+        },
+        "role": {
+          "title": "Role",
+          "description": "What the run did here. ACTED_ON: changed it. READ: read it to inform the work. OBSERVED: noticed something about it without reading it in full \u2014 the weakest claim, and the one that must not be dressed up as the other two. Outside the primary subject, ACTED_ON is scope expansion and requires `reason`. no external standard applies; this register's own vocabulary.",
+          "enum": [
+            "ACTED_ON",
+            "READ",
+            "OBSERVED"
+          ],
+          "default": "READ"
+        },
+        "reason": {
+          "type": "string",
+          "title": "Reason",
+          "description": "Why the run reached here at all. Required by convention for any non-primary subject with role ACTED_ON \u2014 that is the unrequested-rewrite shape, and it needs a stated justification or it should not have happened."
+        }
+      }
+    },
+    "lesson": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxim",
+        "incident",
+        "applies_to"
+      ],
+      "properties": {
+        "maxim": {
+          "type": "string",
+          "title": "Maxim",
+          "description": "The generalisation, in one line, stated as a rule of conduct rather than an observation \u2014 'ask the principal only about their world, never about implementation', not 'asking technical questions was unhelpful'. It must be specific enough to be wrong."
+        },
+        "incident": {
+          "type": "string",
+          "title": "Incident",
+          "description": "What actually happened in THIS run that produced the maxim, concretely enough that someone could disagree with the generalisation drawn from it. Required \u2014 a maxim without an incident is a platitude, and one run is an anecdote until the incident is on the record and can be counted against others."
+        },
+        "applies_to": {
+          "title": "Applies to",
+          "description": "Where this lesson belongs, which is also the test of whether it is one. AGENT_INSTRUCTIONS: how the agent should work \u2014 the agent definition, prompt or skill. REGISTER: a target-architecture convention, profile or ADR. PRINCIPAL_CONTEXT: something learned about what this principal wants or means, belonging to their project context. NONE: worth recording, changes nothing yet \u2014 legitimate, but it must be chosen deliberately rather than left blank. no external standard applies; this register's own vocabulary.",
+          "enum": [
+            "AGENT_INSTRUCTIONS",
+            "REGISTER",
+            "PRINCIPAL_CONTEXT",
+            "NONE"
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "title": "Destination",
+          "description": "The named artefact this lesson should change \u2014 a file path, an ADR id, an agent definition. Required whenever applies_to is not NONE. This field is what separates a lesson from a reflection: a maxim that cannot name where it lands will not land."
+        },
+        "supersedes": {
+          "type": "string",
+          "title": "Supersedes",
+          "description": "An existing instruction, convention or belief this lesson CORRECTS rather than adds to. The most valuable kind of lesson and the easiest to lose: a run that discovers its own instructions were wrong ('I asked two technical questions I should have answered myself') is correcting the prompt, not learning a new tip, and filing that as an addition leaves the wrong instruction in place."
+        },
+        "proposed_check": {
+          "type": "string",
+          "title": "Proposed check",
+          "description": "The eval, fitness function or test that would prove this lesson stuck. Strongly recommended for AGENT_INSTRUCTIONS and REGISTER lessons: an instruction added with no check regresses silently, and this register's whole stance is that a rule is worth what its check is worth."
+        },
+        "confidence": {
+          "title": "Confidence",
+          "description": "How strongly one run supports the generalisation. LOW is the honest default for a maxim drawn from a single incident, and is not a reason to omit it \u2014 it is a reason to count it against later runs before acting on it. no external standard applies; this register's own bands.",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headline",
+        "reversibility",
+        "confidence",
+        "evidence"
+      ],
+      "properties": {
+        "decided_by": {
+          "type": "string",
+          "pattern": "^ADR-[0-9]{4}$",
+          "title": "Decided by",
+          "description": "The ADR this decision was written up as, where it warranted one. Present for one-way doors and anything escalated; legitimately absent for a two-way door, whose record is this entry."
+        },
+        "headline": {
+          "type": "string",
+          "title": "Headline",
+          "description": "What was decided, in plain language, true on its own. The line a principal will read instead of the rest."
+        },
+        "problem": {
+          "type": "string",
+          "title": "Problem",
+          "description": "What prompted the decision \u2014 the context and problem statement (MADR)."
+        },
+        "options_rejected": {
+          "type": "array",
+          "title": "Options rejected",
+          "items": {
+            "type": "string"
+          },
+          "description": "What else was considered and why it lost. A decision with no rejected options was not a decision."
+        },
+        "reversibility": {
+          "title": "Reversibility",
+          "description": "What it would cost to undo. no external standard applies \u2014 the one-way / two-way door distinction is a widely used convention, stated honestly as such. Governs how much research and record the decision warrants: TWO_WAY_DOOR decisions are made immediately and recorded in a line.",
+          "enum": [
+            "TWO_WAY_DOOR",
+            "HEAVY_DOOR",
+            "ONE_WAY_DOOR"
+          ]
+        },
+        "cost_to_change": {
+          "type": "string",
+          "title": "Cost to change",
+          "description": "Concretely \u2014 hours, a refactor, a migration, impossible."
+        },
+        "confidence": {
+          "title": "Confidence",
+          "description": "Stated plainly rather than hedged into vagueness. LOW combined with ONE_WAY_DOOR is an escalation, not a decision \u2014 that combination should appear in flags instead. no external standard applies; this register's own bands.",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "title": "Evidence",
+          "description": "What the decision rests on, each item tagged by how it is actually known. A decision resting only on ASSUMED evidence is a flag wearing a decision's clothes.",
+          "items": {
+            "$ref": "#/$defs/evidence_item"
+          }
+        },
+        "load_bearing_assumptions": {
+          "type": "array",
+          "title": "Load-bearing assumptions",
+          "items": {
+            "type": "string"
+          },
+          "description": "The assumptions that, if wrong, invalidate the decision \u2014 separated from incidental ones so a later reader knows which to re-check first."
+        },
+        "revisit_if": {
+          "type": "string",
+          "title": "Revisit if",
+          "description": "The concrete trigger that should reopen this. Turns the record from an archive into an early warning."
+        }
+      }
+    },
+    "evidence_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "claim"
+      ],
+      "properties": {
+        "tag": {
+          "title": "Evidence tag",
+          "description": "How this is known. VERIFIED: read this run and citable precisely. KNOWN: confident and precisely nameable, but not re-checked \u2014 never acceptable for versions, prices, current status, or anything post-dating training. INFERRED: reasoning from the above, not something a source states. ASSUMED: no evidence at all. no external standard applies \u2014 this register's own vocabulary, and the mechanical form of the grounded_in honesty the standards/*.profile.yaml files already practise.",
+          "enum": [
+            "VERIFIED",
+            "KNOWN",
+            "INFERRED",
+            "ASSUMED"
+          ]
+        },
+        "claim": {
+          "type": "string",
+          "title": "Claim",
+          "description": "What this evidence establishes."
+        },
+        "source": {
+          "type": "string",
+          "title": "Source",
+          "description": "Named precisely \u2014 specification and section, file and line, or a URL actually fetched. 'Best practice', 'industry standard' and 'the recommended approach' are not sources and must not appear here; that material is INFERRED and belongs to the agent's own judgment."
+        }
+      }
+    },
+    "flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "subject",
+        "need"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "title": "Flag id",
+          "description": "Stable within this run, so where_next.waiting_on can reference it and CI can check that no forward-view item is invented."
+        },
+        "kind": {
+          "title": "Flag kind",
+          "description": "ESCALATION: the decision is the principal's, not the agent's (money, personal data, legal exposure, irreversible data loss, a changed product promise, expensive lock-in) \u2014 and `alternatives_ruled_out` must show the cheaper paths were TESTED, not merely considered. IMPOSSIBILITY: a claim that something cannot be done, which carries the HIGHEST evidence bar in this schema \u2014 an agent asserting possibility can be corrected cheaply, but a false impossibility closes a door the principal cannot reopen, because they cannot evaluate it. STANDARDS_TENSION: two authoritative sources genuinely conflict. UNVERIFIED_ASSUMPTION: a load-bearing item is ASSUMED. LOW_CONFIDENCE_IRREVERSIBLE: the one combination that must never be decided alone. BLOCKED: the run could not proceed. no external standard applies; this register's own vocabulary.",
+          "enum": [
+            "ESCALATION",
+            "IMPOSSIBILITY",
+            "STANDARDS_TENSION",
+            "UNVERIFIED_ASSUMPTION",
+            "LOW_CONFIDENCE_IRREVERSIBLE",
+            "BLOCKED"
+          ]
+        },
+        "subject": {
+          "type": "string",
+          "title": "Subject",
+          "description": "The element, file or area the flag concerns."
+        },
+        "tension": {
+          "type": "string",
+          "title": "Tension",
+          "description": "What conflicts with what."
+        },
+        "standards_in_play": {
+          "type": "array",
+          "title": "Standards in play",
+          "items": {
+            "type": "string"
+          },
+          "description": "Cited specifically \u2014 the criterion or profile, not the vibe."
+        },
+        "options": {
+          "type": "array",
+          "title": "Options",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "option",
+              "consequence"
+            ],
+            "properties": {
+              "option": {
+                "type": "string",
+                "title": "Option"
+              },
+              "consequence": {
+                "type": "string",
+                "title": "Consequence",
+                "description": "Stated as something the principal can feel \u2014 cost, risk, effort, what breaks later \u2014 not as architecture."
+              }
+            }
+          }
+        },
+        "alternatives_ruled_out": {
+          "type": "array",
+          "title": "Alternatives ruled out",
+          "description": "What was tried before deciding this was the principal's problem. REQUIRED IN PRACTICE FOR kind=ESCALATION: an escalation is a claim that no cheaper path exists, and a claim needs evidence like any other. An escalation that cannot name what was tested is not an escalation \u2014 it is a technical question in costume, and it transfers the agent's risk to the one person who cannot evaluate it, which is precisely what the operating prompt forbids. The asymmetry is the argument: a test costs minutes, a principal's decision costs days of waiting and may still be wrong. Where an entry's `how_tested` reads as reasoning rather than an action taken, the escalation is premature and should be withdrawn.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "option",
+              "how_tested",
+              "result"
+            ],
+            "properties": {
+              "option": {
+                "type": "string",
+                "title": "Option",
+                "description": "The cheaper or free path that was considered \u2014 including the one the principal would obviously ask about."
+              },
+              "how_tested": {
+                "type": "string",
+                "title": "How tested",
+                "description": "The command run, the file read, the experiment performed. An action, not an inference. 'The build targets amd64, so nothing can install it' is reasoning; 'ran the amd64 image on this host and it started' is a test. Reasoning here is the tell that the escalation should not have been raised."
+              },
+              "result": {
+                "type": "string",
+                "title": "Result",
+                "description": "What actually happened, including a result that contradicts the escalation \u2014 in which case there is no escalation and this flag should not exist."
+              }
+            }
+          }
+        },
+        "recommendation": {
+          "type": "string",
+          "title": "Recommendation",
+          "description": "Present on every ESCALATION. Three options with no recommendation is a decision returned unmade."
+        },
+        "safe_default": {
+          "type": "string",
+          "title": "Safe default",
+          "description": "What happens if the principal does not answer. Silence must not block production work; the default must be the cheaper one to undo."
+        },
+        "need": {
+          "type": "string",
+          "title": "Need",
+          "description": "The specific decision or fact required to resolve this. Required \u2014 a flag that does not say what would close it is a note of unease."
+        }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "method",
+        "result"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "title": "Subject",
+          "description": "What was measured."
+        },
+        "method": {
+          "type": "string",
+          "title": "Method",
+          "description": "How \u2014 the file read, the command run, the test executed. Not 'checked'."
+        },
+        "location": {
+          "type": "string",
+          "title": "Location",
+          "description": "Where, precisely enough that someone else can repeat it."
+        },
+        "result": {
+          "type": "string",
+          "title": "Result",
+          "description": "What was found, including a negative result. A measurement that found nothing is still a measurement."
+        }
+      }
+    },
+    "untouched_divergence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "location",
+        "divergence",
+        "why_not_now"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "title": "Divergence id",
+          "description": "Stable within this run, so where_next.parked can reference it."
+        },
+        "location": {
+          "type": "string",
+          "title": "Location",
+          "description": "Precise enough to be picked up later without rediscovery."
+        },
+        "divergence": {
+          "type": "string",
+          "title": "Divergence",
+          "description": "What it does instead of the target, and which target."
+        },
+        "governed_exception": {
+          "type": "boolean",
+          "title": "Governed exception",
+          "description": "True when an accepted ADR authorises this divergence \u2014 in which case it is a decision someone made deliberately and is not debt. Check for the decision before calling something a gap; treating a governed exception as debt is the same error in reverse.",
+          "default": false
+        },
+        "why_not_now": {
+          "type": "string",
+          "title": "Why not now",
+          "description": "Why the run left it \u2014 out of the change's blast radius, untested route, or a migration that is the principal's call. 'Ran out of time' is an honest answer and better than an invented one."
+        },
+        "recorded_in": {
+          "type": "string",
+          "title": "Recorded in",
+          "description": "Where this landed as a backlog item, if anywhere. A divergence recorded only here is recorded nowhere durable."
+        }
+      }
+    },
+    "candidate_primitive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "instances",
+        "shared_shape",
+        "disconfirming_check"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Working name",
+          "description": "A working name, explicitly provisional \u2014 naming a primitive tends to make it feel more real than the evidence supports."
+        },
+        "instances": {
+          "type": "array",
+          "minItems": 3,
+          "title": "Measured instances",
+          "description": "Three or more, each actually read. The minItems is the Rule of Three made mechanical: resemblance does not count, and two instances is a coincidence. Each instance is a measurement, so an unmeasured instance cannot be listed.",
+          "items": {
+            "$ref": "#/$defs/measurement"
+          }
+        },
+        "shared_shape": {
+          "type": "string",
+          "title": "Shared shape",
+          "description": "What is genuinely common across every instance \u2014 the fields, the lifecycle, the invariant."
+        },
+        "only_apparently_shared": {
+          "type": "string",
+          "title": "Only apparently shared",
+          "description": "What looks common and is not. The field that stops six call sites collapsing into one wrong primitive \u2014 an authorization decision evaluated fresh each time and a durable recorded human judgment can share a verb and share nothing else."
+        },
+        "disconfirming_check": {
+          "type": "string",
+          "title": "Disconfirming check",
+          "description": "Required. The specific check that would show these are NOT one thing, and whether it was run. An observation that cannot be wrong is not an observation."
+        },
+        "existing_partial_implementations": {
+          "type": "array",
+          "title": "Existing partial implementations",
+          "items": {
+            "type": "string"
+          },
+          "description": "Where the estate already solves part of this \u2014 often the strongest evidence, and the reason the answer is usually 'author the contract form' rather than 'build the service'."
+        }
+      }
+    }
+  }
+}
