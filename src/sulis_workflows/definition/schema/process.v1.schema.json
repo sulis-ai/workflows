@@ -919,6 +919,10 @@
           "additionalProperties": {
             "$ref": "#/$defs/route_target"
           }
+        },
+        "permission": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

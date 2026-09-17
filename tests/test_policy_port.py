@@ -91,3 +91,61 @@ def test_tenancy_propagated_to_the_adapter():
 def test_verdict_is_the_adr_028_vocabulary_exactly():
     # ADR-028: PERMIT | DENY | INDETERMINATE — no fourth value, no boolean stand-in.
     assert {v.value for v in Verdict} == {"PERMIT", "DENY", "INDETERMINATE"}
+
+
+def test_default_stub_permits_a_policy_evaluation():
+    policy = StubPolicyAdapter()
+    decision = asyncio.run(
+        policy.evaluate_policy(
+            "grounded-inquiry-sign-off@1",
+            reviewing={"state": {"recommendations": []}},
+            identity="user:iain",
+            platform_id="tenant-1",
+            run_id="run-1",
+        )
+    )
+    assert decision == PolicyDecision(verdict=Verdict.PERMIT)
+
+
+def test_policy_evaluation_can_be_seeded_to_deny():
+    policy = StubPolicyAdapter(policy_denies={"grounded-inquiry-sign-off@1"})
+    decision = asyncio.run(
+        policy.evaluate_policy(
+            "grounded-inquiry-sign-off@1",
+            reviewing={},
+            identity="user:iain",
+            platform_id="tenant-1",
+            run_id="run-1",
+        )
+    )
+    assert decision.verdict == Verdict.DENY
+
+
+def test_policy_evaluation_can_be_seeded_indeterminate():
+    policy = StubPolicyAdapter(policy_indeterminate={"grounded-inquiry-sign-off@1"})
+    decision = asyncio.run(
+        policy.evaluate_policy(
+            "grounded-inquiry-sign-off@1",
+            reviewing={},
+            identity="user:iain",
+            platform_id="tenant-1",
+            run_id="run-1",
+        )
+    )
+    assert decision.verdict == Verdict.INDETERMINATE
+
+
+def test_authorize_and_evaluate_policy_seeds_do_not_collide():
+    # A permission string and a policy control ref share no namespace —
+    # seeding one must not affect the other.
+    policy = StubPolicyAdapter(denies={"same-name@1"})
+    decision = asyncio.run(
+        policy.evaluate_policy(
+            "same-name@1",
+            reviewing={},
+            identity="user:iain",
+            platform_id="tenant-1",
+            run_id="run-1",
+        )
+    )
+    assert decision.verdict == Verdict.PERMIT

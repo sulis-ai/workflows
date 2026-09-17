@@ -18,6 +18,14 @@ Permission strings are the host's grammar (ADR-024, e.g. platform strings
 follow `<service>.<resource>.<verb>`); this port carries them opaquely and
 never validates their shape — the host does that at publish time.
 
+`evaluate_policy` is the second, distinct use §7.6 names: a GATE's
+`policy:` decider, which asks the host to evaluate a *named policy*
+(a POLICY-kind Control document, §5.1 — "who or what may do or permit
+something") against the gate's `reviewing` values, rather than checking a
+bare permission string. Deliberately deferred until WP-02 step 4 needed
+it, rather than guessed at in step 1 (`docs/runs/` step 1's own decision
+record).
+
 Shape follows the established sibling ports (LLMPort, ToolDispatchPort,
 CheckpointingPort): a runtime_checkable Protocol extending
 IdentifiedAdapter, tenancy keys (platform_id/run_id) on every call, and an
@@ -26,9 +34,10 @@ in-memory stub for contract tests.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from sulis_workflows.domain.identity import (
     AdapterIdentity,
@@ -92,18 +101,33 @@ class PolicyPort(IdentifiedAdapter, Protocol):
         run_id: str,
     ) -> PolicyDecision: ...
 
+    async def evaluate_policy(
+        self,
+        ref: str,
+        *,
+        reviewing: Mapping[str, Any],
+        identity: str,
+        platform_id: str,
+        run_id: str,
+    ) -> PolicyDecision: ...
+
 
 @dataclass
 class StubPolicyAdapter:
     """In-memory stub for unit-mode contract tests.
 
-    Permits everything by default. ``denies`` and ``indeterminate`` seed
-    specific permission strings to the other two verdicts, so a test can
-    exercise the engine's fail-closed path without a real policy backend.
+    Permits everything by default. ``denies``/``indeterminate`` seed
+    specific permission strings for ``authorize``; ``policy_denies``/
+    ``policy_indeterminate`` do the same for ``evaluate_policy``'s control
+    refs — separate sets, since a permission string and a policy control
+    ref share no namespace and seeding them together would let a test pass
+    by accident.
     """
 
     denies: set[str] = field(default_factory=set)
     indeterminate: set[str] = field(default_factory=set)
+    policy_denies: set[str] = field(default_factory=set)
+    policy_indeterminate: set[str] = field(default_factory=set)
     observed_calls: list[tuple[str, str]] = field(default_factory=list)
     _identity: AdapterIdentity = field(init=False)
 
@@ -135,5 +159,23 @@ class StubPolicyAdapter:
             return PolicyDecision(
                 verdict=Verdict.INDETERMINATE,
                 rationale=f"stub-indeterminate:{permission}",
+            )
+        return PolicyDecision(verdict=Verdict.PERMIT)
+
+    async def evaluate_policy(
+        self,
+        ref: str,
+        *,
+        reviewing: Mapping[str, Any],
+        identity: str,
+        platform_id: str,
+        run_id: str,
+    ) -> PolicyDecision:
+        self.observed_calls.append((platform_id, run_id))
+        if ref in self.policy_denies:
+            return PolicyDecision(verdict=Verdict.DENY, rationale=f"stub-denied:{ref}")
+        if ref in self.policy_indeterminate:
+            return PolicyDecision(
+                verdict=Verdict.INDETERMINATE, rationale=f"stub-indeterminate:{ref}"
             )
         return PolicyDecision(verdict=Verdict.PERMIT)
