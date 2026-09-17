@@ -20,6 +20,12 @@ element and a conformance case.
 tested), **partial** (executed with known gaps), **declared** (in a schema or prose, not executed),
 **absent**.
 
+⚠️ **How status was established.** Status comes from reading each source's code and definitions on
+2026-09-17 (research reports and scenario authoring), **not** from running them, with two exceptions
+that were measured by execution: the platform guided engine's handling of the 21 sulis-brain
+workflows and of fd grounded-inquiry and recursive-refinement (the corpus walk). Treat every other
+status as *inferred from reading* until a conformance test measures it.
+
 Ids are stable; never renumber. A need is only listed once, under the source that states it most
 precisely; the others are cited.
 
@@ -81,7 +87,7 @@ precisely; the others are cited.
 | Id | Need | Required behaviour | Sources | Status today |
 |---|---|---|---|---|
 | UC-GATE-KINDS | Approval vs input | A human step either asks for a verdict (approval) or for an answer that becomes the step's output (input). | CS `guided/human_gate.py:28-78` | run (CS) |
-| UC-GATE-VOCAB | One decision vocabulary | A decision is an OASIS XACML 3.0 verdict: `permit`, `deny` or `indeterminate`. APPROVED/REJECTED, REVISE/REJECT, APPROVE/REVISE/ABANDON and proceed/revise/reject map onto it. What follows a verdict (send back, halt, pause, hand off) is a route on the gate, never a verdict value; who decided and why are provenance. | CS PERMIT/DENY/INDETERMINATE; ME APPROVED/REJECTED, `on_failure: REVISE|REJECT` | inconsistent |
+| UC-GATE-VOCAB | One decision vocabulary | Decisions use the vocabulary sulis-ai/platform ADR-028 governs (`PERMIT`, `DENY`, `INDETERMINATE`); APPROVED/REJECTED, REVISE/REJECT, APPROVE/REVISE/ABANDON and proceed/revise/reject map onto it. Where the run goes next is a route on the gate, never a verdict value; who decided and why are provenance. | CS PERMIT/DENY/INDETERMINATE; ME APPROVED/REJECTED, `on_failure: REVISE|REJECT` | inconsistent |
 | UC-GATE-ROUTE | Every decision routed | Each decision has a declared route or terminal verdict; a decision is never recorded and then ignored. | WL gates record and never route (`nodes/gate.py:28-59`, GV-05); CS send-back loop only | partial (CS); absent (WL) |
 | UC-GATE-SENDBACK | Send back within a budget | A send-back returns to a declared step with the person's note, within a redo budget; with none left the run waits on a person. | CS `service.py:273-286,347-397` (A0 fix); ME Type B loopbacks | run (CS) |
 | UC-GATE-HANDOFF | Send back elsewhere | A send-back may end this process and start another (e.g. an outcome review raising a new instruction). | CS `outcome_review_workflow.py:14-17,79` | run (CS, in Python) |
