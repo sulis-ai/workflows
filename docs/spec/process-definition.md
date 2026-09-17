@@ -12,14 +12,14 @@ A process is built from **four primitives**:
 |---|---|---|
 | **Tool** | A typed contract for one unit of work: typed **inputs**, the **controls** its output is held to, a typed **output**, and the **mechanism** that does the work (code, a skill, an agent, another process, a composite of Tools, an external service). | ICOM box: I, C, O, M |
 | **Step** | Binds one Tool into a process: maps run state onto the Tool's inputs and its output back into state. A step has no behaviour of its own. | Activity |
-| **Gateway** | A flow node between steps: choose a route, go round a loop, split and join parallel work, repeat for each item, or wait for a person's decision. | Gateway |
+| **Gateway** | A flow node between steps: choose a route, go round a loop, split and join parallel work, repeat for each item, or wait for a decision — by a policy, an agent or a person. | Gateway |
 | **Process** | Typed inputs and state, the steps and gateways, and its named endings (verdicts). A Process can be used as a Tool's mechanism, which is how one process calls another. | Process |
 
 Five rules hold everything together:
 
 1. **The engine only acts on data.** Routes, limits, preconditions and endings are expressions over typed state. Prose is for people and agents to read.
 2. **Every Tool has controls, and they are checked.** After each step the output is checked by the deterministic checker registered for each control; the result is routed on.
-3. **A person's decision is `permit`, `deny` or `indeterminate`.** What happens next is a route; who decided and why is provenance.
+3. **A decision is `permit`, `deny` or `indeterminate`, whoever makes it.** A gate names who may decide — a policy, an agent or a person — in order. What happens next is a route; who decided and why is provenance.
 4. **Every loop is bounded.** A loop allows **10 passes by default**, unless the process or the loop sets another limit.
 5. **Supported means as designed.** A process is supported only when each of its corpus scenarios visits exactly the expected steps, gates and verdict.
 
@@ -164,7 +164,7 @@ evaluation:
 | `process` | Another Process, run as a child | as the child | `process-id@version` |
 | `tool` | A composite: child Tools run in order over a shared set of values | as its children | — (uses `composes`) |
 | `external` | A service outside Sulis, through a host adapter | declared by the adapter | an adapter id |
-| `human` | A person, through a gate | no | — (used only by gates, §7.5) |
+| `human` | A person, through a gate | no | — (used only by gates, §7.6) |
 
 `composes` (for `kind: tool`):
 
@@ -382,7 +382,9 @@ A **loop** is any route option, gate route or `on_control_fail` route whose targ
 
 Each item runs in its own isolated scope. `collect` writes each item's output through the channel's reducer. Nesting `for_each` deeper than `defaults.max_depth` is refused.
 
-### 7.6 Gate — a person decides *(UC-GATE-KINDS, UC-GATE-VOCAB, UC-GATE-ROUTE, UC-GATE-SENDBACK, UC-GATE-HANDOFF, UC-REFUSAL-MODE, UC-APPROVAL-AUTO, UC-GATE-CRITERIA, UC-GATE-AUDIT)*
+### 7.6 Gate — a decision *(UC-GATE-KINDS, UC-GATE-VOCAB, UC-GATE-ROUTE, UC-GATE-SENDBACK, UC-GATE-HANDOFF, UC-REFUSAL-MODE, UC-APPROVAL-AUTO, UC-GATE-CRITERIA, UC-GATE-AUDIT)*
+
+A gate is a point where something must be **decided** before the run continues. The decider may be a **policy**, an **agent** or a **person**. All three give the same verdicts, are held to the same criteria, and leave the same provenance.
 
 ```yaml
   sign-off:
@@ -391,26 +393,45 @@ Each item runs in its own isolated scope. `collect` writes each item's output th
     criteria: >-
       Every recommendation rests on a surviving insight and serves the brief's outcome.
     reviewing: [state.recommendations, state.confidence]
-    policy: grounded-inquiry-sign-off@1     # who may decide; may permit automatically
-    note_into: state.revise_notes
+    deciders:                        # asked in order; the first definite verdict decides
+      - policy: grounded-inquiry-sign-off@1
+      - agent: review-recommendations@1
+        may: [permit, deny]          # verdicts this decider may give; default: all three
+      - person: { role: product_owner }
+    person_required_when: state.confidence == "insufficient"
+    note_into: state.notes
     on:
       permit:        { next: decompose-to-work }
       deny:          { next: recommend, loop: { budget: 3 } }     # send back within a limit
       indeterminate: { pause: true }                              # wait for a later decision
 ```
 
-- **Verdicts are `permit`, `deny`, `indeterminate`** (OASIS XACML 3.0). Every verdict MUST have a route. There is no `revise` or `send back` verdict; sending back is a `deny` routed to an earlier node, and it is a loop (§7.3).
-- A route on a verdict is one of: `next` (continue or send back), `end: <verdict>` (**halt**), `pause: true` (**pause** — the gate reopens and waits for a new decision), or `call: <process-id@v>` then `end` (**hand off** to another process).
-- `kind: input`: the person gives an answer of `answer_type` (a type), written through `answer_into`; routes are on `answered` and `indeterminate`.
-- `policy`: resolved by the host `PolicyPort` (§10.2) before the gate opens. The policy MAY return `permit` automatically. It MUST NOT permit automatically while any path named in `never_auto_when` is true (e.g. `state.confidence == "insufficient"`).
-- **Provenance** is recorded on every decision: the verdict, `decided_by` (a person, or the policy and its basis), the note, the time, and which asking of the gate it was.
-- A gate inside a called process is surfaced to the person through the top-level run (§9.3).
+**Verdicts.** `permit`, `deny`, `indeterminate` (OASIS XACML 3.0). Every verdict MUST have a route. There is no `revise` or `send back` verdict; sending back is a `deny` routed to an earlier node, and it is a loop (§7.3).
+
+**Routes on a verdict.** `next` (continue or send back), `end: <verdict>` (**halt**), `pause: true` (**pause** — the gate reopens and waits for a new decision), or `call: <process-id@v>` then `end` (**hand off** to another process).
+
+**Deciders** are asked in the listed order:
+
+| Decider | How it decides | Declared as |
+|---|---|---|
+| `policy` | The host's `PolicyPort` evaluates the named policy (trust tier, thresholds, grants) — §10.2 | `policy: <control-id@v>` |
+| `agent` | A Tool with `mechanism.kind: agentic` or `skill` whose output is `profile:decision@1` — `{ verdict, rationale, evidence[] }`. It is held to its controls like any Tool, and the gate's `criteria` and `reviewing` values are its inputs. | `agent: <tool-id@v>` |
+| `person` | A person the host resolves from a role or named subject, through the host's decision surface | `person: { role: <role> }` or `{ subject: <ref> }` |
+
+- A decider that returns `indeterminate`, is not permitted to give the verdict it reached (`may`), or cannot run, **passes the decision to the next decider**. The last decider's `indeterminate` is the gate's verdict.
+- If no decider is listed, the gate is decided by a person with the permission `<process>:<node>`.
+- `person_required_when` (an expression): while true, every decider before the first `person` is skipped. It replaces "never approve automatically when…": an agent or policy may still be asked for its view, but only a person's verdict counts.
+- **Separation of duties** (ANSI INCITS 359 RBAC SSD): an agent decider MUST NOT be the same Tool, or the same agent session, that produced any value in `reviewing`. The engine refuses the decision and passes to the next decider.
+- An agent decider's `decision` is checked by its controls **before** it counts; a decision that fails its controls is treated as `indeterminate`.
+- `kind: input`: the decider gives an answer of `answer_type` (a type), written through `answer_into`; routes are on `answered` and `indeterminate`. An agent decider for an input gate returns `{ answer, rationale }`.
+- **Provenance** is recorded on every decision, from every decider asked (not only the one that decided): the verdict, `decided_by` (`policy:<id>`, `agent:<tool>@<v>` with its session, or `person:<subject>`), the rationale or note, the evidence, the time, and which asking of the gate it was. `steps.<gate>.decided_by` exposes the decider kind to later routes.
+- A gate inside a called process is surfaced through the top-level run (§9.3); its deciders are the child's own.
 
 ---
 
 ## 8. Expressions
 
-Expressions appear in `if`, `precondition`, `never_auto_when` and fitness thresholds. They are pure: no calls, no I/O, no side effects.
+Expressions appear in `if`, `precondition`, `person_required_when` and fitness thresholds. They are pure: no calls, no I/O, no side effects.
 
 ```
 expr     := or
@@ -467,7 +488,7 @@ A call runs the child in a child scope. Depth counts calls on the current chain.
 
 ### 9.3 Nesting and gates
 
-Every answer the engine gives names the scope and definition it belongs to, at any depth. A gate in a child is surfaced to the person as a gate of the top-level run; deciding it resumes the child. A child MUST NOT permit its gates automatically unless its own policy says so.
+Every answer the engine gives names the scope and definition it belongs to, at any depth. A gate in a child is surfaced as a gate of the top-level run; deciding it resumes the child. A child's gates use the child's own deciders — a parent never decides them implicitly.
 
 ---
 
@@ -515,7 +536,7 @@ This section is normative for any engine that runs `v1`.
 
 A run is driven from outside, one call at a time:
 
-- `next(run, scope)` → the next thing to do: `tool_step` (a non-deterministic step for the caller's agent session, with its resolved inputs, instructions ref and controls), `awaiting_decision` (a gate), `step_running` (claimed by another caller), or `ended` (a verdict). Deterministic steps (`code`, `external`, `process` whose child is deterministic) are run by the engine itself before answering.
+- `next(run, scope)` → the next thing to do: `tool_step` (a non-deterministic step for the caller's agent session, with its resolved inputs, instructions ref and controls), `decision_step` (a gate whose current decider is an agent — run like a tool step, reported with `report`), `awaiting_decision` (a gate whose current decider is a person), `step_running` (claimed by another caller), or `ended` (a verdict). Policy deciders are evaluated by the engine before answering. Deterministic steps (`code`, `external`, `process` whose child is deterministic) are run by the engine itself before answering.
 - `report(run, scope, node, output | error)` → records the attempt, runs controls, and answers with `next`.
 - `decide(run, scope, gate, verdict, note, decided_by)` → records the decision and answers with `next`.
 
@@ -569,7 +590,7 @@ A definition is valid only when all of these hold. Each rule has a conformance c
 | V6 routes | a route without `otherwise` that is not proven exhaustive |
 | V7 reachability | a node that cannot be reached; a node with no way to end |
 | V8 loops | a loop budget that is not a positive integer (a missing budget takes the default of 10) |
-| V9 gates | a gate verdict with no route |
+| V9 gates | a gate verdict with no route; an agent decider whose Tool does not output `profile:decision@1`; an agent decider that could review its own output (§7.6); `person_required_when` with no `person` decider listed |
 | V10 calls | a child verdict not mapped; a call verdict not routed; a self-reachable call with no `on_depth_exhausted` |
 | V11 parallel | two branches writing one `replace` channel; a join not reachable from every branch |
 | V12 for-each | `over` not list-typed; nesting deeper than `max_depth` |
@@ -608,6 +629,7 @@ There is **no default** for a route's `otherwise`, a gate's verdict routes or a 
 | Tool as four arrows | IDEF0 / ICOM (FIPS 183) |
 | Gateways, parallel, join | BPMN 2.0 (ISO/IEC 19510) |
 | Decision verdicts | OASIS XACML 3.0 |
+| Separation of duties for deciders | ANSI INCITS 359 (RBAC, static separation of duty) |
 | Records and who did what | W3C PROV-O |
 | Profiles | JSON Schema 2020-12 |
 | Versions | Semantic Versioning 2.0.0 |
@@ -757,8 +779,11 @@ nodes:
     kind: approval
     criteria: Every recommendation rests on a surviving insight and serves the brief's outcome.
     reviewing: [state.conclusion, state.recommendations, state.confidence]
-    policy: grounded-inquiry-sign-off@1
-    never_auto_when: state.confidence == "insufficient"
+    deciders:
+      - policy: grounded-inquiry-sign-off@1
+      - agent: review-recommendations@1
+      - person: { role: product_owner }
+    person_required_when: state.confidence == "insufficient"
     note_into: state.notes
     on:
       permit:        { end: complete }
@@ -766,10 +791,10 @@ nodes:
       indeterminate: { pause: true }
 ```
 
-What this shows against the corpus walk: only one path runs; the revise and fidelity loops are bounded (2); a deny sends back within the default 10; "insufficient" ends honestly; no condition is prose; every step's output is checked by its Tool's controls before it reaches state.
+What this shows against the corpus walk: only one path runs; the revise and fidelity loops are bounded (2); sign-off is decided by policy, then an agent reviewer, then a person, and only a person may decide when confidence is insufficient; a deny sends back within the default 10; "insufficient" ends honestly; no condition is prose; every step's output is checked by its Tool's controls before it reaches state.
 
 ## Appendix B — open points for review
 
-1. **Default loop budget 10 applies to human send-backs too.** A person could be asked to re-decide ten times. Proposed: keep 10 as the single default, and templates such as `revise_loop` set their own (e.g. 3).
+1. **Default loop budget 10 applies to send-backs at gates too.** A person or an agent could be asked to re-decide ten times. Proposed: keep 10 as the single default, and templates such as `revise_loop` set their own (e.g. 3).
 2. **`guided` execution policy lets a person skip `standard` steps with a reason.** Proposed as the default for methodology sequences; `strict` for content processes.
 3. **Lease length (15 minutes) is a host setting**, not in the format, because it depends on the host's session model.
