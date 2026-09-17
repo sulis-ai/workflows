@@ -1,0 +1,13 @@
+# V1: `id` must be kebab-case (spec §1.1); this one is SCREAMING_SNAKE — the casing
+# rule applies to closed *values*, and an id that merely looks like a constant is the
+# bad-but-conformant case a naive "is this a string" check would accept.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: GROUNDED_INQUIRY
+version: 1.0.0
+title: Grounded inquiry
+start: frame
+nodes:
+  frame: { type: STEP, tool: frame-question@1, in: {}, out: {}, end: COMPLETE }
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }

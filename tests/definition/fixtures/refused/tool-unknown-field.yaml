@@ -1,0 +1,19 @@
+# V1: an unknown field is a validation error, not silently ignored (spec §1.4).
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate
+version: 1.0.0
+title: Attack the claims, keep what survives
+inputs:
+  question: { type: string }
+output:
+  verdict: { type: "enum[SURVIVED, DROPPED]" }
+controls:
+  - profile: insight@1
+mechanism:
+  kind: AGENTIC
+  ref: skills/interrogate
+effect: QUERY
+# Bad-but-conformant: a plausible-looking field nobody declared. A naive check that
+# only looks at the fields it expects would let this through unnoticed.
+experimental_hint: be extra careful

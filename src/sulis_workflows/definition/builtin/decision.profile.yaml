@@ -1,0 +1,37 @@
+# Built-in Profile — spec §7.6. What an `agent` gate decider returns; checked by
+# decision-evidence@1 (WP-01 step 4) before the verdict counts.
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: decision
+version: 1.0.0
+title: Decision
+summary: >-
+  An agent decider's verdict on a gate: PERMIT, DENY or INDETERMINATE, with the
+  rationale and the reviewed evidence it rests on.
+grounded_in: >-
+  sulis-ai/platform ADR-028 (accepted) for the verdict vocabulary; the rationale and
+  evidence shape is this format's own convention (spec §7.6) — no external standard
+  applies to those fields.
+checker: decision-evidence@1
+schema:
+  type: object
+  required: [verdict, rationale, evidence]
+  additionalProperties: false
+  properties:
+    verdict:
+      type: string
+      enum: [PERMIT, DENY, INDETERMINATE]
+    rationale:
+      type: string
+    evidence:
+      type: array
+      items:
+        type: object
+        required: [path, claim]
+        additionalProperties: false
+        properties:
+          path:
+            type: string
+            description: MUST be one of the gate's `reviewing` paths (spec §7.6).
+          claim:
+            type: string

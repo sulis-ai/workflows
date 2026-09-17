@@ -1,0 +1,19 @@
+# V1 casing (spec §1.5): a Tool output declared as `enum[survived, dropped]` in lower
+# case. Bad-but-conformant: the value set is otherwise well-formed (parses, resolves
+# to two options) and only the casing is wrong, which a check that only tests "is
+# this a legal enum[...] string" without checking case would let through.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate
+version: 1.0.0
+title: Attack the claims, keep what survives
+inputs:
+  question: { type: string }
+output:
+  verdict: { type: "enum[survived, dropped]" }
+controls:
+  - profile: insight@1
+mechanism:
+  kind: AGENTIC
+  ref: skills/interrogate
+effect: QUERY

@@ -1,0 +1,16 @@
+# spec §3 example, verbatim.
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: finding
+version: 1.0.0
+title: Finding
+grounded_in: "W3C PROV-O prov:wasDerivedFrom — every finding names its source"
+schema:
+  type: object
+  required: [id, claim, source]
+  properties:
+    id: { type: string }
+    claim: { type: string, minLength: 10 }
+    source: { type: string }
+  additionalProperties: false
+checker: profile-conformance@1

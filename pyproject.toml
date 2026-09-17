@@ -12,6 +12,12 @@ dependencies = [
     "networkx >= 3.0",        # compiler: DAG validation / cycle detection
     "pyyaml >= 6.0",          # kind/spec YAML parsing
     "prometheus-client >= 0.20",  # compiler metrics
+    "jsonschema >= 4.18",     # definition/: validates documents against the v1 format's
+                               # JSON Schema 2020-12 meta-schemas, and Profile.schema is
+                               # itself arbitrary JSON Schema 2020-12 — a general-purpose
+                               # standard implementation, the same class of dependency as
+                               # pydantic already is elsewhere in domain/ (not a vendor SDK;
+                               # see docs/runs/ for this WP-01 PR's decision record).
 ]
 # NOTE: the engine intentionally does NOT depend on an LLM SDK (e.g. anthropic).
 # LLM access is the injected LLMPort's job; a content node's call-time `import anthropic`

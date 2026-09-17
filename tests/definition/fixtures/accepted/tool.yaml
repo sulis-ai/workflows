@@ -1,0 +1,23 @@
+# spec §4.1 example, verbatim.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate
+version: 1.0.0
+title: Attack the claims, keep what survives
+inputs:
+  candidates: { type: "list<profile:finding@1>" }
+  question:   { type: string }
+output:
+  insights: { type: "list<profile:insight@1>" }
+  verdict:  { type: "enum[SURVIVED, DROPPED, REVISED]" }
+controls:
+  - profile: insight@1
+  - conventions: faithful-generation@1
+mechanism:
+  kind: AGENTIC
+  ref: skills/interrogate
+  allowed_tools: [ground-citations@1]
+effect: QUERY
+errors:
+  - { code: SOURCE_UNREACHABLE, class: TRANSIENT }
+  - { code: BRIEF_UNANSWERABLE, class: PERMANENT }

@@ -1,0 +1,253 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2R0MAH07XRXR85D41X2SW4H",
+  "started_at": "2026-09-17T15:20:00Z",
+  "completed_at": "2026-09-17T15:44:16Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-01 step 1 of 5",
+  "work_package": "docs/work-packages/WP-01-definition-model-and-validator.md",
+  "branch": "wp-01/step-1-schemas-model-loader",
+  "summary_for_principal": "Step 1 of 5 for the new process-definition format: the layer that reads a definition file and refuses it clearly when it's malformed (not the engine that runs it yet). Added JSON Schemas for the four definition kinds (Profile, Tool, Control, Process) enforcing the format's basic rules — no unknown fields, correct types, required capitalisation. Added a loader for YAML and JSON, and in building it found and fixed a real bug: a popular YAML library reads the bare word \"on\" as the boolean true, and the format uses \"on:\" as a real field name on every approval gate — unfixed, every gate's routing would have silently vanished. Added two small shared building blocks the format's own examples reference. 31 new tests, all passing on every Python version this project supports. Two small gaps in the spec I filled in with my own judgment rather than guessing in code — flagged below for confirmation before other work builds on them.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "CONTRACT_FORM",
+        "role": "READ",
+        "reason": "Normative source for every schema field and model shape in this PR."
+      },
+      {
+        "coordinate": "docs/use-cases/CATALOGUE.md",
+        "kind": "CONTEXT",
+        "role": "READ",
+        "reason": "Checked which catalogue ids this PR's shapes are expected to carry (spec §17 coverage table)."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      },
+      {
+        "coordinate": "pyproject.toml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added the jsonschema dependency the loader needs to validate documents against JSON Schema 2020-12."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Do docs/work-packages/WP-01-definition-model-and-validator.md in its suggested pull request order, one branch/PR per step, tests first, stop after each PR and report.",
+    "read_as": "For this first PR (WP-01's step 1, 'Schemas + model + loader (A1 for V1)'): build only the structural reading layer — JSON Schemas that enforce spec §1.4/§1.5 (closed objects, SCREAMING_SNAKE_CASE), typed model classes for every primitive and node type, and a loader that parses YAML/JSON and refuses anything the schema closes. Deliberately nothing about reference resolution (V2), expressions (V5), or the cross-cutting validator rules V3-V15 — those are named for later steps in the WP's own suggested sequence.",
+    "filled_in": [
+      {
+        "gap": "Whether Tool.output and Tool.controls must be non-empty is stated in the spec's prose ('at least one', §0 and §4.4) but §14's rule table places the controls check under V3 (a later PR), not V1.",
+        "assumed": "Enforced Tool.output non-emptiness (minProperties: 1) at the JSON-Schema/V1 layer now, since 'one or more outputs' is what makes something a Tool at all (spec §0), not a cross-referencing rule. Left Tool.controls unconstrained at the schema layer (no minItems) so the V3 validator (PR3) is the one that refuses an empty controls array and its fixture is unambiguously attributable to rule V3, not V1.",
+        "basis": "JUDGMENT",
+        "reversal_cost": "Cheap: relax/add one JSON Schema keyword and re-run the fixture suite.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "Profile.checker and Control.applies_to/checker requiredness: the spec's §3/§5.1 examples show these fields populated but no RFC 2119 MUST states they are mandatory, and V3 (later PR) governs 'a non-policy control with no checker'.",
+        "assumed": "Left both optional at the schema layer; V3 will decide checker-requiredness conditionally on control type (POLICY controls have none by design, §5.1).",
+        "basis": "JUDGMENT",
+        "reversal_cost": "Cheap: add to the schema's required[] array.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "Use the third-party `jsonschema` library (JSON Schema 2020-12) rather than hand-writing a validator.",
+      "problem": "The loader must both (a) validate definition documents against per-kind meta-schemas and (b) treat Profile.schema as arbitrary JSON Schema 2020-12 to be used later by the profile-conformance checker — a real implementation of the standard is needed either way, and CLAUDE.md's 'ports and adapters' principle forbids vendor SDKs in the domain.",
+      "options_rejected": [
+        "Hand-roll a minimal JSON-Schema-subset validator: rejected — re-implements a precisely specified standard, is the likelier source of a subtle bug, and still wouldn't cover arbitrary Profile.schema content correctly.",
+        "Defer schema validation to pydantic model validators only: rejected — pydantic validates against its own models, not against the arbitrary, standards-form JSON Schema a Profile document declares in its `schema` field."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Swapping validators means rewriting load.py's validation call and re-running the fixture suite; nothing else in the package depends on the jsonschema API directly.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "pyproject.toml's own comment defines 'vendor SDK' by example as a provider-specific client (anthropic) that the engine deliberately avoids — jsonschema is a general-purpose standard implementation, not that.",
+          "source": "pyproject.toml, dependencies list comment"
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Domain code already depends on a general-purpose third-party library (pydantic) for exactly this class of concern (typed validation).",
+          "source": "src/sulis_workflows/domain/models/batch_config.py:11"
+        }
+      ],
+      "revisit_if": "The library adds a hard runtime dependency of its own that conflicts with the domain's no-platform-imports rule."
+    },
+    {
+      "headline": "Keep JSON-Schema-enforceable structural checks and validate.py's named V3-V15 rules on separate sides of the WP's own PR boundary, even where the schema could enforce a V-rule locally.",
+      "problem": "Some V3-V15 rules (e.g. 'a loop budget that is not a positive integer', V8; 'a Tool with no control', V3) could technically be expressed directly in JSON Schema, which would make them pass in this PR instead of PR3.",
+      "options_rejected": [
+        "Enforce every rule that's schema-expressible now, for earlier fail-closed coverage: rejected — WP-01's acceptance criteria (A1, A3) want each V-rule's refusal attributable to a fixture that tests THAT rule; if the schema silently already refused it, PR3's dedicated fixture and finding (rule=V3/V8/etc.) would be untestable or misleading about which layer caught it."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Moving a check between the schema and validate.py is a small, local edit either direction.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "WP-01's suggested PR sequence places V3-V15 entirely in PR3, after schemas/model/loader (PR1) and registry/expressions (PR2).",
+          "source": "docs/work-packages/WP-01-definition-model-and-validator.md, 'Suggested PR sequence'"
+        }
+      ],
+      "revisit_if": "PR3 finds a V-rule that cannot be given an unambiguous fixture without this PR's schema also relaxing."
+    },
+    {
+      "headline": "Load YAML with a custom SafeLoader subclass that resolves only true/false as booleans (YAML 1.2 Core Schema), not PyYAML's YAML-1.1 default.",
+      "problem": "PyYAML's default SafeLoader treats bare on/off/yes/no (any case) as booleans. The v1 format's GATE node uses `on:` as a real mapping key (spec §7.6) on every example that has a gate, including spec Appendix A.",
+      "options_rejected": [
+        "Require authors to quote `\"on\":` in every gate: rejected — contradicts the spec's own literal examples, which use the bare key; would silently misparse every existing spec example and any future definition copied from the spec."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One class in load.py; already covered by a regression test.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Loading spec Appendix A's GATE `on:` mapping with plain `yaml.safe_load` produces a dict with boolean key `True`, not the string \"on\" — the PERMIT/DENY routes are silently unreachable under any code that looks up `doc[\"on\"]`.",
+          "source": "measured directly while building the fixture for tests/definition/test_model.py; reproduced by tests/definition/test_load.py::test_bare_on_key_is_not_swallowed_as_a_yaml_1_1_boolean with the fix removed"
+        }
+      ],
+      "revisit_if": "A future PyYAML major version changes its default boolean resolution to match YAML 1.2 (unlikely; PyYAML has kept YAML 1.1 booleans for its whole 1.x/5.x/6.x history)."
+    }
+  ],
+  "flags": [
+    {
+      "id": "fitness-threshold-shape",
+      "kind": "UNVERIFIED_ASSUMPTION",
+      "subject": "CONTROL documents of type FITNESS (spec §5.1)",
+      "tension": "Spec §5.1 says a FITNESS control is 'a measured threshold, with severity: ERROR | WARNING' but never shows or names the field(s) that carry the threshold value itself — only `severity` is given a field name and shape.",
+      "standards_in_play": ["docs/spec/process-definition.md §5.1"],
+      "need": "Confirm (or correct) a proposed `threshold` field shape for FITNESS controls before it's added to the spec and to control.v1.schema.json — proposed in this PR's description.",
+      "safe_default": "Left FITNESS controls without a schema-level threshold field for now (title/type/applies_to/checker/severity only, all this PR already implements); no fixture in this or later WP-01 PRs currently depends on a threshold field existing, so nothing is blocked."
+    },
+    {
+      "id": "retry-shape-unspecified",
+      "kind": "UNVERIFIED_ASSUMPTION",
+      "subject": "Step.retry and defaults.retry (spec §7.1, §15)",
+      "tension": "Spec §15's defaults table names 'Retries for TRANSIENT errors: 3, exponential backoff from 2s, override defaults.retry / step.retry' but no example anywhere in the spec shows the field names a retry override object would use.",
+      "standards_in_play": ["docs/spec/process-definition.md §7.1", "docs/spec/process-definition.md §15"],
+      "need": "Confirm (or correct) the proposed `{ max: integer, backoff_seconds: number }` shape — proposed in this PR's description — before more of the format is built on top of it.",
+      "safe_default": "Implemented the proposed shape in the JSON Schemas now (cheap to change: it's an optional field nothing else depends on yet) rather than leaving `retry` untyped, which would have meant accepting anything and refusing nothing there."
+    }
+  ],
+  "measured": [
+    {
+      "subject": "Every worked example in spec §3 (Profile), §4.1 (Tool), §5.1 (Control), §5.2 (checker Tool), and the full Appendix A process document",
+      "method": "Loaded each verbatim example through the new JSON Schemas with jsonschema's Draft202012Validator.",
+      "location": "tests/definition/fixtures/accepted/*.yaml, exercised by tests/definition/test_schema_v1.py and test_model.py",
+      "result": "All validate without modification (Appendix A's recursive-path stub aside, which the spec itself says isn't shown)."
+    },
+    {
+      "subject": "pytest on the Python versions this project's CI matrix covers (3.10, 3.11, 3.12)",
+      "method": "Ran the full suite on the container's default Python 3.11; built isolated venvs for 3.10 and 3.12 with the same runtime dependencies and ran tests/definition directly against them.",
+      "location": "N/A — command-line runs, not committed",
+      "result": "60/60 passing on 3.11 (full suite); 31/31 passing on 3.10 and 3.12 (tests/definition, the only tests this PR added)."
+    },
+    {
+      "subject": "PyYAML SafeLoader's resolution of the bare key `on:`",
+      "method": "Parsed a GATE node's `on:` mapping (from spec Appendix A) with plain `yaml.safe_load` and inspected the resulting dict's keys.",
+      "location": "tests/definition/test_load.py::test_bare_on_key_is_not_swallowed_as_a_yaml_1_1_boolean",
+      "result": "Resolves to boolean key `True`, not the string \"on\" — confirmed the defect exists before writing the fix, then confirmed the custom loader fixes it."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "package-data-not-declared",
+      "location": "pyproject.toml ([tool.setuptools.packages.find])",
+      "divergence": "src/sulis_workflows/definition/schema/*.json and src/sulis_workflows/definition/builtin/*.yaml are not declared as package data (no include-package-data / MANIFEST.in rule), so a built (non-editable) wheel or sdist may omit them even though load.py reads them at runtime relative to __file__.",
+      "governed_exception": false,
+      "why_not_now": "CI and this task both install with `pip install -e .[dev]` (editable), which reads the source tree directly — every test in this PR passes under that install. Packaging metadata only matters once this library is actually built and published as a wheel, which is out of WP-01's scope (CLAUDE.md: never release).",
+      "recorded_in": "this run record only"
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a spec is expressed as YAML examples, parse it with a loader whose boolean resolution matches the spec's own literal examples (YAML 1.2 Core Schema: true/false only) rather than a library default (PyYAML's YAML 1.1: on/off/yes/no too) — check this before trusting any field name that could collide with a YAML 1.1 scalar keyword.",
+      "incident": "Spec Appendix A's GATE node writes `on: { PERMIT: ..., DENY: ... }` as a real field name; under plain `yaml.safe_load` this becomes a dict entry keyed by the boolean `True`, so every gate's route table would have silently disappeared with no parse error and no schema violation (the schema would just see a GATE node missing `on`, if `on` weren't even declared as optional — and if it were required, a confusing 'missing on' refusal on a document that visibly has an `on:` line).",
+      "applies_to": "REGISTER",
+      "destination": "src/sulis_workflows/definition/load.py (_StrictBoolLoader) — already applied in this PR",
+      "proposed_check": "tests/definition/test_load.py::test_bare_on_key_is_not_swallowed_as_a_yaml_1_1_boolean",
+      "confidence": "HIGH"
+    },
+    {
+      "maxim": "When a work package names an exact rule-by-rule PR boundary (e.g. 'V1 now, V3-V15 later'), keep every check on the side of that boundary the WP put it on — even ones a lower layer (JSON Schema here) could enforce for free — so each later PR's fixture stays unambiguous about which named rule refused it.",
+      "incident": "TOOL.controls could have been given `minItems: 1` in this PR's JSON Schema, which would have made PR3's planned V3 fixture ('a Tool with no control') pass validation silently before ever reaching the V3 validator function, and its refusal would then be misattributed to schema/V1 instead of V3.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "later WP-01 PRs in this repository (PR3's validator work)",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "src/sulis_workflows/definition/{model.py, load.py, errors.py, defaults.py} and schema/*.v1.schema.json — load_definition()/load_definition_file() parse YAML or JSON and refuse anything the schema closes, naming rule V1, the schema path, and every violation found.",
+      "Two built-in Profile documents (control-result@1, decision@1) the spec's own checker/decision text refers to."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Proposed spec addition: a `threshold` field shape for FITNESS controls (spec §5.1).",
+        "trigger": "Spec text is accepted, rejected, or amended by whoever reviews this PR.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Nothing in WP-01's remaining PRs (2-5) currently needs a FITNESS threshold field to exist; it only becomes urgent once a real FITNESS control is authored."
+      },
+      {
+        "item": "Proposed spec addition: the `retry: { max, backoff_seconds }` field shape (spec §7.1/§15).",
+        "trigger": "Spec text is accepted, rejected, or amended by whoever reviews this PR.",
+        "if_nothing_happens": "DECAYS",
+        "detail": "Already encoded into tool.v1.schema.json/process.v1.schema.json; every process authored against the current schema before this is confirmed inherits whatever shape is decided, so later processes are cheaper to fix than earlier ones."
+      },
+      {
+        "item": "Package data (schema/*.json, builtin/*.yaml) not declared for a built distribution.",
+        "untouched_id": "package-data-not-declared",
+        "trigger": "This library is built as a wheel/sdist for publishing (out of WP-01's scope today).",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Editable installs (this task's and CI's) are unaffected either way."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Confirm the proposed \"threshold\" field for quality-check (FITNESS) controls, or tell me to change it",
+        "action": "If confirmed as proposed in the PR description, open a follow-up PR adding the `threshold` field to docs/spec/process-definition.md §5.1 and to control.v1.schema.json; if not, use whatever shape you specify instead.",
+        "source_kind": "FLAG",
+        "source_id": "fitness-threshold-shape",
+        "effort": "SMALL"
+      },
+      {
+        "n": 2,
+        "label": "Confirm the proposed \"retry\" settings shape (how many times, how long to wait), or tell me to change it",
+        "action": "If confirmed as proposed in the PR description, open a follow-up PR adding the `retry: { max, backoff_seconds }` shape to docs/spec/process-definition.md §7.1/§15; if not, update the already-implemented JSON Schemas to match whatever shape you specify instead.",
+        "source_kind": "FLAG",
+        "source_id": "retry-shape-unspecified",
+        "effort": "SMALL"
+      },
+      {
+        "n": 3,
+        "label": "Proceed to the next PR (registry + expressions) without waiting on the above",
+        "action": "Start WP-01 step 2 (registry.py resolving id@version references, expressions.py for the §8 grammar) now; neither touches the threshold or retry shapes, so there's nothing to wait for.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Proceed to WP-01 step 2 (registry + expressions) next, per the WP's own suggested sequence.",
+      "reason": "PR1 is self-contained and nothing in steps 2-5 depends on the two flagged spec gaps being resolved first.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

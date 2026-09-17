@@ -1,0 +1,97 @@
+# spec Appendix A ("grounded inquiry, single path, in v1"), verbatim except: the
+# recursive path is a stub here (`decompose` just ends DROPPED) since Appendix A
+# says "recursive path not shown" — WP-01 A2 wants the *shape* to validate, not a
+# real recursive-inquiry Tool set, which no fixture in this PR defines.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: grounded-inquiry
+version: 1.0.0
+title: Grounded inquiry
+inputs:
+  brief: { type: "profile:brief@1" }
+host_inputs:
+  topology_index: { type: any }
+state:
+  framed_question: { type: string, reducer: REPLACE }
+  path:            { type: "enum[SINGLE, RECURSIVE]", reducer: REPLACE }
+  findings:        { type: "list<profile:finding@1>", reducer: APPEND }
+  insights:        { type: "list<profile:insight@1>", reducer: UPSERT_BY_ID, key: id }
+  verdict:         { type: "enum[SURVIVED, DROPPED, REVISED]", reducer: REPLACE }
+  confidence:      { type: "enum[GROUNDED, PARTIAL, INSUFFICIENT]", reducer: REPLACE }
+  conclusion:      { type: "profile:conclusion@1", reducer: REPLACE }
+  recommendations: { type: "list<profile:recommendation@1>", reducer: REPLACE }
+  fidelity:        { type: "enum[ENTAILED, DROPPED, REVISED]", reducer: REPLACE }
+  notes:           { type: "list<string>", reducer: APPEND, default: [] }
+start: frame
+endings:
+  COMPLETE:     { outcome: SUCCESS, says: "Done: the recommendations are signed off." }
+  INSUFFICIENT: { outcome: SUCCESS, says: "Stopped honestly: the evidence does not support an answer." }
+  DROPPED:      { outcome: SUCCESS, says: "Nothing survived review, so there is nothing to recommend." }
+  DENIED:       { outcome: STOPPED, says: "Stopped: the recommendations were not approved." }
+nodes:
+  frame:
+    { type: STEP, tool: frame-question@1, in: { brief: inputs.brief },
+      out: { framed_question: state.framed_question }, next: classify }
+  classify:
+    { type: STEP, tool: classify-inquiry@1, in: { question: state.framed_question },
+      out: { path: state.path }, next: choose-path }
+  choose-path:
+    type: ROUTE
+    when:
+      - { if: 'state.path == "SINGLE"', next: gather }
+      - { if: 'state.path == "RECURSIVE"', next: decompose }
+  decompose:
+    { type: STEP, tool: frame-question@1, in: { brief: inputs.brief }, out: {}, end: DROPPED }
+  gather:
+    { type: STEP, tool: grounded-recon@1,
+      in: { question: [state.framed_question, inputs.brief.question], topology_index: host.topology_index },
+      out: { findings: state.findings }, next: interrogate }
+  interrogate:
+    { type: STEP, tool: interrogate@1,
+      in: { candidates: state.findings, question: state.framed_question },
+      out: { insights: state.insights, verdict: state.verdict }, next: after-interrogate }
+  after-interrogate:
+    type: ROUTE
+    when:
+      - { if: 'state.verdict == "SURVIVED"', next: converge }
+      - { if: 'state.verdict == "REVISED"', next: gather, loop: { budget: 2, on_exhausted: { next: converge } } }
+      - { if: 'state.verdict == "DROPPED"', end: DROPPED }
+  converge:
+    { type: STEP, tool: converge-confidence@1, in: { insights: state.insights },
+      out: { confidence: state.confidence }, next: conclude }
+  conclude:
+    { type: STEP, tool: conclude@1, in: { insights: state.insights, confidence: state.confidence },
+      out: { conclusion: state.conclusion }, next: honest-stop }
+  honest-stop:
+    type: ROUTE
+    when:
+      - { if: 'state.confidence == "INSUFFICIENT"', end: INSUFFICIENT }
+    otherwise: { next: recommend }
+  recommend:
+    { type: STEP, tool: recommend@1, in: { insights: state.insights, brief: inputs.brief },
+      out: { recommendations: state.recommendations }, next: check-fidelity }
+  check-fidelity:
+    { type: STEP, tool: check-recommendation-fidelity@1,
+      in: { recommendations: state.recommendations, insights: state.insights },
+      out: { recommendations: state.recommendations, verdict: state.fidelity }, next: after-fidelity }
+  after-fidelity:
+    type: ROUTE
+    when:
+      - { if: 'state.fidelity == "ENTAILED"', next: sign-off }
+      - { if: 'state.fidelity == "REVISED"', next: recommend, loop: { budget: 2, on_exhausted: { end: DROPPED } } }
+      - { if: 'state.fidelity == "DROPPED"', end: DROPPED }
+  sign-off:
+    type: GATE
+    kind: APPROVAL
+    asks: "Can these recommendations go ahead as work?"
+    criteria: Every recommendation rests on a surviving insight and serves the brief's outcome.
+    reviewing: [state.conclusion, state.recommendations, state.confidence]
+    deciders:
+      - policy: grounded-inquiry-sign-off@1
+      - agent: review-recommendations@1
+      - person: { permission: agents.recommendation.approve }
+    person_required_when: 'state.confidence == "INSUFFICIENT"'
+    note_into: state.notes
+    on:
+      PERMIT: { end: COMPLETE }
+      DENY:   { next: gather }

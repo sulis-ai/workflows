@@ -1,0 +1,16 @@
+# V1: wrong type — `effect` must be one of the closed enum values, not an integer.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate
+version: 1.0.0
+title: Attack the claims, keep what survives
+inputs:
+  question: { type: string }
+output:
+  verdict: { type: "enum[SURVIVED, DROPPED]" }
+controls:
+  - profile: insight@1
+mechanism:
+  kind: AGENTIC
+  ref: skills/interrogate
+effect: 1
