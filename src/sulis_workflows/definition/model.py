@@ -191,6 +191,7 @@ class StepNode:
     on_error: Mapping[str, RouteTarget] = field(default_factory=dict)
     on_forbidden: RouteTarget | None = None
     on_precondition_false: RouteTarget | None = None
+    on_depth_exhausted: RouteTarget | None = None
     next: str | None = None
     end: str | None = None
     type: str = "STEP"
@@ -436,6 +437,7 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             on_error={k: _route_target(v) for k, v in d.get("on_error", {}).items()},
             on_forbidden=_route_target(d.get("on_forbidden")),
             on_precondition_false=_route_target(d.get("on_precondition_false")),
+            on_depth_exhausted=_route_target(d.get("on_depth_exhausted")),
             next=d.get("next"),
             end=d.get("end"),
         )

@@ -669,6 +669,9 @@
         "on_precondition_false": {
           "$ref": "#/$defs/route_target"
         },
+        "on_depth_exhausted": {
+          "$ref": "#/$defs/route_target"
+        },
         "next": {
           "type": "string"
         },
@@ -871,10 +874,7 @@
           "const": "GATE"
         },
         "kind": {
-          "enum": [
-            "APPROVAL",
-            "INPUT"
-          ]
+          "type": "string"
         },
         "asks": {
           "type": "string"
@@ -985,8 +985,7 @@
           ]
         },
         "says": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       }
     },

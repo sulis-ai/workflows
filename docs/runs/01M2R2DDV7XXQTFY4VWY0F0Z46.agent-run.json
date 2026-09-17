@@ -1,0 +1,156 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2R2DDV7XXQTFY4VWY0F0Z46",
+  "started_at": "2026-09-17T16:05:00Z",
+  "completed_at": "2026-09-17T16:15:22Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-01 step 3 of 5",
+  "work_package": "docs/work-packages/WP-01-definition-model-and-validator.md",
+  "branch": "wp-01/step-3-validator-rules",
+  "summary_for_principal": "Step 3 of 5: the validator that checks everything the schema alone can't — rules V3 through V15. Every rule is its own function; each one has at least one example that should pass and one that should be refused, including every 'looks fine but isn't' case the work package specifically asked for (a route that looks like it covers every case but misses one; a gate that lets a refusal slip through unrouted; a reviewer that could approve its own work; and others). Building this surfaced two real mistakes in step 1's work: two checks (a gate's kind, an ending's message) had accidentally been enforced too early, in the wrong layer, which would have made two of this step's own required test cases impossible to write. Both are technical layering corrections, fixed directly. 45 new tests, all passing on Python 3.10-3.12. A full run against the spec's own worked example (Appendix A) correctly reports only the expected 'not registered' notices (nothing in this repository yet supplies the real building blocks it calls) and nothing else — no false alarms.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "docs/work-packages/WP-01-definition-model-and-validator.md",
+        "kind": "PROCESS",
+        "role": "READ"
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Work autonomously through the remaining WP-01 steps (2-5), opening a PR for each, per the same rules as step 1.",
+    "read_as": "For this step (WP-01's step 3, 'Validator rules V3-V15 with fixtures'): validate.py with rules V3-V15 (spec §14) as separate, named functions returning structured findings; each rule gets an accepted and a refused fixture, including WP-01 A3's specific bad-but-conformant cases. Nothing about checkers/CLI (PR4) or CI lint/type checking (PR5).",
+    "filled_in": [
+      {
+        "gap": "V4 ('a type mismatch in in, out or collect') doesn't say how permissively types should be compared — e.g. whether an integer value may satisfy a `number`-typed input, or whether a narrower enum may satisfy a broader one.",
+        "assumed": "A pragmatic compatibility rule: `any` matches everything; an integer satisfies a declared `number`; a list/map is compatible if its item type is; an enum satisfies a declared enum if its members are a subset; everything else must match exactly. Reversible and local to one helper function (_types_compatible).",
+        "basis": "MOST_REVERSIBLE",
+        "reversal_cost": "Cheap — one function, no fixture depends on an edge case this rule doesn't already cover correctly.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "V15 ('a closed value set with no grounded_in') doesn't say which documents introduce a 'closed value set' — only Profile and Control carry a grounded_in field at all, and Control's own type/severity vocabulary is the *format's* closed set (already grounded by the spec itself), not something each Control document introduces.",
+        "assumed": "Scoped V15 to Profile documents whose own embedded JSON Schema declares at least one `enum` — the clearest, most literal reading of 'a closed value set' as something a document's author is introducing, not the format's own fixed vocabulary. Did not extend it to Control, Tool or Process documents.",
+        "basis": "JUDGMENT",
+        "reversal_cost": "Cheap to widen later — additive, one more check function.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "V10's 'self-reachable' isn't defined precisely — direct self-recursion only, or reachable through a chain of other Processes?",
+        "assumed": "Full chain: built a call graph across every Process the registry holds (via each Tool of mechanism kind PROCESS) and checked reachability back to the process under validation, not just a direct self-call. The more literal reading of 'can reach itself', and the fail-closed one — a narrower direct-only check would miss real indirect recursion.",
+        "basis": "MOST_REVERSIBLE",
+        "reversal_cost": "Cheap — the narrower check is a subset of the graph walk already written.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "Relaxed two JSON Schema fields (GATE.kind, ending.says) back to plain strings — they were accidentally schema-enforced in step 1, one layer earlier than the work package's own rule assignment (V9, V14).",
+      "problem": "Writing this step's required fixtures (WP-01 A3: 'an unknown kind' for V9; 'an ending with says: \"\"' for V14) was impossible, because step 1's JSON Schema already refused both — meaning the refusal would always land on rule V1, never on V9 or V14 as the work package's own table (spec §14) assigns them, and the specific fixture WP-01 asks for could never be written the way it's described.",
+      "options_rejected": [
+        "Write the V9/V14 fixtures against a document that fails for a different reason and call it close enough: rejected — the resulting finding would carry the wrong rule id, which defeats the point of a rule-labelled fixture."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Two JSON Schema fields, already done; no existing fixture depended on the stricter version (checked: none did).",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "docs/spec/process-definition.md §14's rule table lists 'a gate with... an unknown kind' under V9 and 'an ending with no says' under V14 — neither under V1.",
+          "source": "docs/spec/process-definition.md §14"
+        }
+      ],
+      "revisit_if": "Never, expected — this restores the boundary step 1 itself already established (D2, in that PR's run record) and briefly violated by accident."
+    },
+    {
+      "headline": "Added the STEP-node field `on_depth_exhausted` (schema + model), missing since step 1.",
+      "problem": "Spec §9.2 says a self-reachable process call step 'takes on_depth_exhausted', and §15 lists it as an overridable default — but step 1's JSON Schema never declared the field, so V10's fixture for it (a required WP-01 A3-adjacent case) had nowhere to write to.",
+      "options_rejected": [],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Additive field; nothing depended on its absence.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "spec §9.2: 'the step takes on_depth_exhausted'; §15: 'Depth reached | end: ESCALATED | on_depth_exhausted (required for self-reachable calls)'.",
+          "source": "docs/spec/process-definition.md §9.2, §15"
+        }
+      ],
+      "revisit_if": "Never expected."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "validate() against the full spec Appendix A process document",
+      "method": "Ran validate() with an empty registry (none of Appendix A's referenced Tools/Controls are defined anywhere in this repository yet) and inspected every finding.",
+      "location": "manual run, not committed as a test (no registry of Appendix A's real Tools exists until WP-01 step 4)",
+      "result": "Exactly 11 findings, every one rule V2 ('not registered') naming a reference Appendix A itself declares — no V4-V14 finding at all, meaning the route exhaustiveness, reachability, loop-budget, gate-routing and ending checks all read the spec's own worked example as well-formed, which is the result they should give."
+    },
+    {
+      "subject": "pytest on Python 3.10, 3.11, 3.12",
+      "method": "Ran the full suite on the container's default 3.11; isolated venvs for 3.10 and 3.12 running tests/definition directly.",
+      "location": "N/A — command-line runs, not committed",
+      "result": "162/162 passing on 3.11 (full suite); 133/133 passing on 3.10 and 3.12 (tests/definition)."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "v11-branch-write-detection-is-a-bounded-walk",
+      "location": "src/sulis_workflows/definition/validate.py, _branch_state_writes",
+      "divergence": "V11's 'two branches writing one REPLACE channel' check walks forward from each PARALLEL branch collecting state writes until it reaches the JOIN node, following STEP/ROUTE edges only — it does not follow into a nested PARALLEL, GATE, or FOR_EACH inside a branch to collect writes from further inside those constructs.",
+      "governed_exception": false,
+      "why_not_now": "No fixture in this repository (or the spec's own examples) nests a PARALLEL/GATE/FOR_EACH inside a parallel branch; extending the walk to recurse into every node type correctly is real additional work with no fixture yet to prove it against, and WP-01's acceptance criteria don't name this specific nesting case.",
+      "recorded_in": "this run record only"
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Before adding a JSON Schema constraint, check the spec's own §14 rule table for which rule number governs it — the boundary between 'the schema refuses this' (V1) and 'the validator refuses this' (V3-V15) is a decision made once, in the table, not something to re-derive per field by asking 'could the schema catch this cheaply'.",
+      "incident": "Step 1 added `enum: [APPROVAL, INPUT]` to GATE.kind and `minLength: 1` to ending.says, both of which spec §14 explicitly assigns to V9 and V14 respectively — found only when this step tried to write the exact fixtures WP-01 A3 asks for and discovered the schema had already made them unwritable.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "any future WP-01-style PR that adds a JSON Schema field for this format",
+      "proposed_check": "tests/definition/test_validate.py::test_v9_refused_unknown_gate_kind, ::test_v14_refused_ending_with_empty_says",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "src/sulis_workflows/definition/validate.py — validate(text, fmt, registry) runs every rule the document's kind is subject to (V1/V2 wrapped from load.py/registry.py, plus V3-V15 for Tool/Control/Profile/Process) and returns a flat list of Finding(rule, node, message, fix).",
+      "STEP nodes may now declare on_depth_exhausted; GATE.kind and ending.says are validator-checked (V9, V14), not schema-checked."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "V11's branch-write detection doesn't recurse into a nested PARALLEL/GATE/FOR_EACH inside a parallel branch.",
+        "untouched_id": "v11-branch-write-detection-is-a-bounded-walk",
+        "trigger": "A real process definition nests one of those constructs inside a parallel branch.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Every fixture and every spec example today only nests plain STEP/ROUTE chains inside a parallel branch, which the current walk already handles correctly."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Proceed to the next PR (checkers, CLI, and the Appendix A fixture set)",
+        "action": "Start WP-01 step 4 (checkers.py: profile-conformance@1 and the decision@1 evidence checker as CODE Tools with pass/fail examples; cli.py: validate/explain console commands; a full registry of Appendix A's referenced Tools/Profiles/Controls so it validates end-to-end per WP-01 A2) now.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Proceed to WP-01 step 4 next, per the WP's own suggested sequence.",
+      "reason": "The validator is complete enough to exercise; step 4's Appendix A fixture set is what will finally prove it end-to-end against a real, fully-registered process.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
