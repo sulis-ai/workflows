@@ -75,6 +75,34 @@ def test_malformed_yaml_is_refused_not_raised_as_a_parser_crash() -> None:
         load_definition("kind: TOOL\n  bad indent: [unclosed\n", fmt="yaml")
 
 
+def test_step_retry_shape_is_max_and_backoff_seconds() -> None:
+    """spec §7.1/§15 D9 — retry: { max, backoff_seconds }, overriding the format
+    default (3 attempts, 2s backoff) rather than leaving `retry` untyped."""
+
+    doc_yaml = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: retrying
+version: 1.0.0
+title: Retrying
+start: fetch
+nodes:
+  fetch:
+    type: STEP
+    tool: fetch-page@1
+    in: {}
+    out: {}
+    retry: { max: 5, backoff_seconds: 4 }
+    end: COMPLETE
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }
+"""
+    process = load_definition(doc_yaml, fmt="yaml")
+    step = process.nodes["fetch"]
+    assert step.retry.max == 5
+    assert step.retry.backoff_seconds == 4
+
+
 def test_bare_on_key_is_not_swallowed_as_a_yaml_1_1_boolean() -> None:
     """PyYAML's default SafeLoader resolves bare `on:` to the boolean key `True`
     (YAML 1.1). Every GATE node in this format has an `on:` mapping (spec §7.6); if

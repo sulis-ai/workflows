@@ -129,6 +129,13 @@ class Tool:
 
 
 @dataclass(frozen=True, slots=True)
+class ThresholdSpec:
+    metric: str
+    op: str  # GTE | GT | LTE | LT | EQ
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
 class Control:
     header: Header
     type: str  # CONVENTIONS | FITNESS | POLICY
@@ -136,6 +143,7 @@ class Control:
     checker: str | None = None
     grounded_in: str | None = None
     severity: str | None = None  # ERROR | WARNING (FITNESS only)
+    threshold: ThresholdSpec | None = None  # FITNESS only (spec §5.1, D8)
 
 
 # ----------------------------------------------------------------------- Process bits --
@@ -550,6 +558,7 @@ def build(doc: Mapping[str, Any]) -> Definition:
             checker=doc.get("checker"),
         )
     if kind == "CONTROL":
+        threshold = doc.get("threshold")
         return Control(
             header=header,
             type=doc["type"],
@@ -557,6 +566,11 @@ def build(doc: Mapping[str, Any]) -> Definition:
             checker=doc.get("checker"),
             grounded_in=doc.get("grounded_in"),
             severity=doc.get("severity"),
+            threshold=(
+                ThresholdSpec(metric=threshold["metric"], op=threshold["op"], value=threshold["value"])
+                if threshold is not None
+                else None
+            ),
         )
     if kind == "TOOL":
         return Tool(

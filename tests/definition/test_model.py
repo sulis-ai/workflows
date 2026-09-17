@@ -37,6 +37,16 @@ def test_control_model_fields() -> None:
     control = load_definition_file(FIXTURES / "accepted" / "control.yaml")
     assert control.type == "CONVENTIONS"
     assert control.applies_to == "output.insights"
+    assert control.threshold is None
+
+
+def test_fitness_control_threshold_fields() -> None:
+    control = load_definition_file(FIXTURES / "accepted" / "control-fitness-with-threshold.yaml")
+    assert control.type == "FITNESS"
+    assert control.threshold is not None
+    assert control.threshold.metric == "coverage_ratio"
+    assert control.threshold.op == "GTE"
+    assert control.threshold.value == 0.8
 
 
 def test_process_model_nodes_and_endings() -> None:

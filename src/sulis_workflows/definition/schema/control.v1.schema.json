@@ -56,6 +56,33 @@
         "ERROR",
         "WARNING"
       ]
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "op",
+        "value"
+      ],
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "GTE",
+            "GT",
+            "LTE",
+            "LT",
+            "EQ"
+          ]
+        },
+        "value": {
+          "type": "number"
+        }
+      }
     }
   }
 }

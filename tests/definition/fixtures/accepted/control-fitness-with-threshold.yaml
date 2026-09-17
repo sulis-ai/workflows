@@ -1,0 +1,12 @@
+# spec §5.1 D8 — a FITNESS control's threshold shape.
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: coverage-floor
+version: 1.0.0
+type: FITNESS
+title: Insight coverage stays above the floor
+applies_to: output.insights
+checker: coverage-ratio@1
+severity: ERROR
+threshold: { metric: coverage_ratio, op: GTE, value: 0.8 }
+grounded_in: This format's own convention (spec §5.1, D8) — no external standard applies.

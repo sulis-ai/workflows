@@ -201,7 +201,11 @@ grounded_in: Ji et al., "Survey of Hallucination in Natural Language Generation"
 ```
 
 - `CONVENTIONS` — rules the content must follow.
-- `FITNESS` — a measured threshold, with `severity: ERROR | WARNING` (a two-value subset of RFC 5424 §6.2.1 severities).
+- `FITNESS` — a measured threshold, with `severity: ERROR | WARNING` (a two-value subset of RFC 5424 §6.2.1 severities) and a `threshold`:
+  ```yaml
+  threshold: { metric: coverage_ratio, op: GTE, value: 0.8 }
+  ```
+  `metric` names what the checker measures — the checker Tool registered for this control (§5.2) interprets it, the same way it interprets `applies_to`. `op` is one of `GTE | GT | LTE | LT | EQ`. This shape is this format's own convention (§16, D8) — no external standard defines a generic fitness-threshold shape to adopt instead.
 - `POLICY` — who or what may do or permit something; evaluated by the host's `PolicyPort` (§10.1), not by a checker.
 
 ### 5.2 Checkers
@@ -284,7 +288,11 @@ nodes:
 - `in` *(UC-IN-OPTIONAL, UC-IN-FALLBACK)*: every required Tool input MUST be mapped, to a path or an ordered list of paths (the first present, non-empty value is used). Each path is type-checked against the input.
 - `out`: maps Tool outputs to channels. Unmapped outputs are still recorded under `steps.<id>.output`.
 - `precondition` *(UC-PRECONDITION)*: when false, the step does not run and the run takes `on_precondition_false`. A step marked `destructive: true` MUST have a precondition.
-- `retry` applies to `TRANSIENT` errors only. `on_error` routes by error code. `on_control_fail` is in §10.2. `on_forbidden` is in §10.1. Defaults for all of these are in §15.
+- `retry` applies to `TRANSIENT` errors only, and MAY override the format default (§15):
+  ```yaml
+  retry: { max: 5, backoff_seconds: 4 }
+  ```
+  `max` is the greatest number of additional attempts; `backoff_seconds` is the starting delay before exponential backoff. `defaults.retry` (§6) takes the same shape. This format's own convention (§16, D9) — no external retry-policy standard is adopted, since the established ones (e.g. AWS SDK retry configuration, gRPC service config) are transport/SDK-specific, not a document-format concern. `on_error` routes by error code. `on_control_fail` is in §10.2. `on_forbidden` is in §10.1. Defaults for all of these are in §15.
 - A step MUST NOT carry instructions; they belong to the Tool's mechanism.
 
 ### 7.2 Route *(UC-ROUTE-EXPR, UC-ROUTE-DEFAULT, UC-DECIDE, UC-VERDICT-ROUTE, UC-PATHS)*
@@ -570,7 +578,7 @@ A definition is valid only when every rule holds. Each rule has a conformance ca
 | When a loop runs out | `end: ESCALATED` | `loop.on_exhausted` |
 | Repairs after a failed control | 1 | `defaults.repair_budget`; `on_control_fail.repair` |
 | After repairs run out | `end: FAILED` | `on_control_fail.then` |
-| Retries for `TRANSIENT` errors | 3, exponential backoff from 2 s | `defaults.retry`; `step.retry` |
+| Retries for `TRANSIENT` errors | 3, exponential backoff from 2 s | `defaults.retry`; `step.retry` (shape: §7.1) |
 | Unrouted `PERMANENT` error | `end: FAILED` | `step.on_error` |
 | Permission refused | `end: FORBIDDEN` | `step.on_forbidden` |
 | Call depth | 4 | `defaults.max_depth` |
@@ -609,6 +617,8 @@ Tags: **VERIFIED** — read in this work; **KNOWN** — precisely nameable, not 
 | Timer triggers | RFC 5545 §3.3.10 RRULE | KNOWN |
 | Normative keywords | RFC 2119 | KNOWN |
 | Expression grammar, endings, templates, validation rules, defaults | this format | OWN |
+| FITNESS control threshold shape (`metric`/`op`/`value`) | this format (D8) | OWN |
+| `retry` override shape (`max`/`backoff_seconds`) | this format (D9) | OWN |
 | Accessibility of any surface that shows these states | WCAG 2.2 SC 1.4.1 (use of colour) — the `says`/`asks` sentences exist so no surface has to rely on colour | KNOWN; applies to host UIs |
 
 ---
@@ -665,6 +675,10 @@ Recorded in MADR form (context, options, outcome, consequences) so each can be a
 **D6 — Every ending, gate and engine answer carries a sentence.** *Context:* states a person acts on must read as sentences, and never by colour alone (WCAG 2.2 SC 1.4.1). *Outcome:* `says` on endings and answers, `asks` on gates, refused when missing. *Reversal:* additive to relax; costly to add after processes are converted.
 
 **D7 — Agent decisions and checkers must be able to fail.** *Context:* an agent that always permits, or a checker that always passes, would satisfy a naive check. *Outcome:* agent decisions must cite reviewed evidence that resolves; checkers must ship failing examples. *Reversal:* relaxing is a one-line rule change; not recommended.
+
+**D8 — FITNESS threshold shape is `{ metric, op, value }`.** *Context:* §5.1 named FITNESS as "a measured threshold" without ever giving the field(s) that carry it — a gap found while building the v1 JSON Schemas (WP-01). *Options:* leave `threshold` untyped (accepts anything, refuses nothing — fails closed on nothing); a single numeric `threshold: 0.8` field with the comparison implied (ambiguous: GTE? GT?); `{ metric, op, value }` naming what is measured, how, and against what. *Outcome:* `{ metric, op, value }`, `op` a closed `GTE | GT | LTE | LT | EQ` set — consistent with how this format already names comparisons in kind (`ROUTE` expressions, §8) rather than leaving them implicit. *Consequences:* a checker Tool for a FITNESS control reads `control.threshold` the same way it reads `applies_to`; existing FITNESS controls authored before this decision (none yet exist in this repo's fixtures) are unaffected. *Reversal:* additive — a two-way door; changing the shape means updating `control.v1.schema.json` and any FITNESS control definitions, not a migration.
+
+**D9 — `retry` override shape is `{ max, backoff_seconds }`.** *Context:* §15 named the retry default ("3, exponential backoff from 2 s") and its override points (`defaults.retry`, `step.retry`) without giving their field shape — the same class of gap as D8, found at the same time. *Options:* leave `retry` untyped; adopt an external retry-policy standard (rejected — AWS SDK and gRPC service-config retry shapes are transport/SDK-specific, not something a document format should couple to); `{ max, backoff_seconds }`, naming exactly the two numbers §15's own default already states. *Outcome:* `{ max, backoff_seconds }`; `step.retry` and `defaults.retry` (§6) share the shape, so the override and the default it overrides are stated the same way. *Consequences:* none yet — no process definition in this repository overrides retry today. *Reversal:* additive — a two-way door, same cost as D8.
 
 ---
 
