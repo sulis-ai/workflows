@@ -1,0 +1,1164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tool.v1.schema.json",
+  "title": "Tool definition (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "version",
+    "title",
+    "output",
+    "controls",
+    "mechanism",
+    "effect"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "sulis.workflows/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    },
+    "kind": {
+      "const": "TOOL"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/input_spec"
+      }
+    },
+    "output": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/output_spec"
+      }
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/control_ref"
+      }
+    },
+    "mechanism": {
+      "$ref": "#/$defs/mechanism"
+    },
+    "effect": {
+      "enum": [
+        "QUERY",
+        "MUTATION",
+        "SIDE_EFFECT"
+      ]
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error_spec"
+      }
+    },
+    "checker_for": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control"
+      ],
+      "properties": {
+        "control": {
+          "enum": [
+            "PROFILE",
+            "CONVENTIONS",
+            "FITNESS"
+          ]
+        }
+      }
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/example"
+      }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@\\^?\\d+(\\.\\d+){0,2}$"
+    },
+    "type_string": {
+      "type": "string",
+      "pattern": "^(string|integer|number|boolean|any)$|^enum\\[[A-Z][A-Z0-9_]*(,\\s*[A-Z][A-Z0-9_]*)*\\]$|^list<.+>$|^map<.+>$|^profile:[a-z][a-z0-9]*(-[a-z0-9]+)*@\\^?\\d+(\\.\\d+){0,2}$"
+    },
+    "path_expr": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$"
+    },
+    "expression": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path_or_paths": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/path_expr"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path_expr"
+          },
+          "minItems": 1
+        }
+      ]
+    },
+    "input_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/type_string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": true,
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "host_input_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/type_string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "output_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/type_string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "error_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "class"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "class": {
+          "enum": [
+            "TRANSIENT",
+            "PERMANENT"
+          ]
+        }
+      }
+    },
+    "compose_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/ref"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_or_paths"
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_expr"
+          }
+        }
+      }
+    },
+    "call_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_expr"
+          }
+        },
+        "endings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mechanism": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "CODE",
+            "SKILL",
+            "AGENTIC",
+            "PROCESS",
+            "TOOL",
+            "EXTERNAL"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ref"
+          }
+        },
+        "composes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/compose_item"
+          },
+          "minItems": 1
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_or_paths"
+          }
+        },
+        "path": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/call_result"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "CODE"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "ref": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "SKILL"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "ref": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "AGENTIC"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "ref": true,
+              "allowed_tools": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "EXTERNAL"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "ref": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "PROCESS"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "ref": true,
+              "inputs": true,
+              "path": true,
+              "result": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "TOOL"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "composes"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "composes": true
+            }
+          }
+        }
+      ]
+    },
+    "control_ref": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "profile"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        },
+        {
+          "required": [
+            "conventions"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "conventions": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        },
+        {
+          "required": [
+            "fitness"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "fitness": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        },
+        {
+          "required": [
+            "policy"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        }
+      ]
+    },
+    "example": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "inputs",
+        "expect"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "object"
+        },
+        "expect": {
+          "type": "object"
+        }
+      }
+    },
+    "route_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "next": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        },
+        "call": {
+          "$ref": "#/$defs/ref"
+        },
+        "loop": {
+          "$ref": "#/$defs/loop_spec"
+        },
+        "invalidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "next"
+          ]
+        },
+        {
+          "required": [
+            "end"
+          ]
+        },
+        {
+          "required": [
+            "call"
+          ]
+        }
+      ]
+    },
+    "loop_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "type": "integer"
+        },
+        "on_exhausted": {
+          "$ref": "#/$defs/route_target"
+        },
+        "counts": {
+          "enum": [
+            "PASSES",
+            "FAILURES"
+          ]
+        }
+      }
+    },
+    "join_policy": {
+      "enum": [
+        "ALL_SUCCESS",
+        "ANY_SUCCESS",
+        "ALL_COMPLETE"
+      ]
+    },
+    "criticality": {
+      "enum": [
+        "TRIVIAL",
+        "STANDARD",
+        "CRITICAL"
+      ]
+    },
+    "control_fail": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repair": {
+          "type": "integer"
+        },
+        "then": {
+          "$ref": "#/$defs/route_target"
+        }
+      }
+    },
+    "decider": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "policy"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        },
+        {
+          "required": [
+            "agent"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/ref"
+            }
+          }
+        },
+        {
+          "required": [
+            "person"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "person": {
+              "type": "object",
+              "oneOf": [
+                {
+                  "required": [
+                    "permission"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "permission": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "role"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "node_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "tool",
+        "in",
+        "out"
+      ],
+      "properties": {
+        "type": {
+          "const": "STEP"
+        },
+        "tool": {
+          "$ref": "#/$defs/ref"
+        },
+        "in": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_or_paths"
+          }
+        },
+        "out": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/path_expr"
+          }
+        },
+        "precondition": {
+          "$ref": "#/$defs/expression"
+        },
+        "criticality": {
+          "$ref": "#/$defs/criticality"
+        },
+        "destructive": {
+          "type": "boolean"
+        },
+        "retry": {
+          "$ref": "#/$defs/retry_spec"
+        },
+        "on_control_fail": {
+          "$ref": "#/$defs/control_fail"
+        },
+        "on_error": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/route_target"
+          }
+        },
+        "on_forbidden": {
+          "$ref": "#/$defs/route_target"
+        },
+        "on_precondition_false": {
+          "$ref": "#/$defs/route_target"
+        },
+        "next": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        }
+      }
+    },
+    "retry_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "type": "integer"
+        },
+        "backoff_seconds": {
+          "type": "number"
+        }
+      }
+    },
+    "when_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "if"
+      ],
+      "properties": {
+        "if": {
+          "$ref": "#/$defs/expression"
+        },
+        "next": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        },
+        "call": {
+          "$ref": "#/$defs/ref"
+        },
+        "loop": {
+          "$ref": "#/$defs/loop_spec"
+        },
+        "invalidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "next"
+          ]
+        },
+        {
+          "required": [
+            "end"
+          ]
+        },
+        {
+          "required": [
+            "call"
+          ]
+        }
+      ]
+    },
+    "node_route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "when"
+      ],
+      "properties": {
+        "type": {
+          "const": "ROUTE"
+        },
+        "when": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/when_option"
+          },
+          "minItems": 1
+        },
+        "otherwise": {
+          "$ref": "#/$defs/route_target"
+        }
+      }
+    },
+    "node_parallel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "branches",
+        "join"
+      ],
+      "properties": {
+        "type": {
+          "const": "PARALLEL"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "join": {
+          "type": "string"
+        }
+      }
+    },
+    "node_join": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "JOIN"
+        },
+        "policy": {
+          "$ref": "#/$defs/join_policy"
+        },
+        "on_join_failed": {
+          "$ref": "#/$defs/route_target"
+        },
+        "next": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        }
+      }
+    },
+    "node_for_each": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "over",
+        "as",
+        "do"
+      ],
+      "properties": {
+        "type": {
+          "const": "FOR_EACH"
+        },
+        "over": {
+          "$ref": "#/$defs/path_expr"
+        },
+        "as": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "do": {
+          "type": "string"
+        },
+        "max_concurrency": {
+          "type": "integer"
+        },
+        "collect": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "output",
+            "into"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "into": {
+              "$ref": "#/$defs/path_expr"
+            }
+          }
+        },
+        "join": {
+          "$ref": "#/$defs/join_policy"
+        },
+        "next": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        }
+      }
+    },
+    "node_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "GATE"
+        },
+        "kind": {
+          "enum": [
+            "APPROVAL",
+            "INPUT"
+          ]
+        },
+        "asks": {
+          "type": "string"
+        },
+        "criteria": {
+          "type": "string"
+        },
+        "reviewing": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path_expr"
+          }
+        },
+        "deciders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decider"
+          }
+        },
+        "person_required_when": {
+          "$ref": "#/$defs/expression"
+        },
+        "note_into": {
+          "$ref": "#/$defs/path_expr"
+        },
+        "answer_type": {
+          "$ref": "#/$defs/type_string"
+        },
+        "answer_into": {
+          "$ref": "#/$defs/path_expr"
+        },
+        "on": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "PERMIT",
+              "DENY",
+              "INDETERMINATE",
+              "ANSWERED"
+            ]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/route_target"
+          }
+        }
+      }
+    },
+    "node": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/node_step"
+        },
+        {
+          "$ref": "#/$defs/node_route"
+        },
+        {
+          "$ref": "#/$defs/node_parallel"
+        },
+        {
+          "$ref": "#/$defs/node_join"
+        },
+        {
+          "$ref": "#/$defs/node_for_each"
+        },
+        {
+          "$ref": "#/$defs/node_gate"
+        }
+      ]
+    },
+    "state_channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "reducer"
+      ],
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/type_string"
+        },
+        "reducer": {
+          "enum": [
+            "REPLACE",
+            "MERGE",
+            "APPEND",
+            "UPSERT_BY_ID"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "default": true
+      }
+    },
+    "ending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "says"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "SUCCESS",
+            "STOPPED",
+            "FAILURE"
+          ]
+        },
+        "says": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "TIMER",
+            "EVENT",
+            "STATE_ENTRY",
+            "WEBHOOK",
+            "BRANCH_PUSH"
+          ]
+        },
+        "rrule": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "object"
+        },
+        "process": {
+          "$ref": "#/$defs/ref"
+        },
+        "ending": {
+          "type": "string"
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "TIMER"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "rrule"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "rrule": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "EVENT"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "event"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "event": true,
+              "inputs": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "STATE_ENTRY"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "process",
+              "ending"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "process": true,
+              "ending": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "WEBHOOK"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "adapter",
+              "event"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "adapter": true,
+              "event": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "BRANCH_PUSH"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "repository",
+              "branch"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "repository": true,
+              "branch": true
+            }
+          }
+        }
+      ]
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "loop_budget": {
+          "type": "integer"
+        },
+        "repair_budget": {
+          "type": "integer"
+        },
+        "retry": {
+          "$ref": "#/$defs/retry_spec"
+        },
+        "max_depth": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

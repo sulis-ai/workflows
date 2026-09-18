@@ -1,0 +1,10 @@
+# spec §5.1 example, verbatim.
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: faithful-generation
+version: 1.0.0
+type: CONVENTIONS
+title: Recommendations are entailed by the insights they cite
+applies_to: output.insights
+checker: check-entailment@1
+grounded_in: 'Ji et al., "Survey of Hallucination in Natural Language Generation", arXiv:2202.03629 (intrinsic/extrinsic)'

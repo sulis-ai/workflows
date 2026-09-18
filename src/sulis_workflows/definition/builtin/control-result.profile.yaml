@@ -1,0 +1,38 @@
+# Built-in Profile — spec §5.2. Every checker Tool returns a value of this shape;
+# it is what routes a step's control outcome after every step (spec §10.2).
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: control-result
+version: 1.0.0
+title: Control result
+summary: >-
+  What one control's checker found: which control, whether it passed, and every
+  finding raised against the checked value.
+grounded_in: >-
+  This format's own convention (spec §5.2) — no external standard applies; the shape
+  is normative here, not borrowed.
+schema:
+  type: object
+  required: [control, passed, findings]
+  additionalProperties: false
+  properties:
+    control:
+      type: string
+      description: The control's id@version.
+    passed:
+      type: boolean
+    findings:
+      type: array
+      items:
+        type: object
+        required: [path, message, severity]
+        additionalProperties: false
+        properties:
+          path:
+            type: string
+            description: The path in the checked value the finding concerns.
+          message:
+            type: string
+          severity:
+            type: string
+            enum: [ERROR, WARNING]

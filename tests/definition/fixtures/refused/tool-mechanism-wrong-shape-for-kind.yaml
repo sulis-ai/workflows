@@ -1,0 +1,21 @@
+# V1: mechanism shape is closed per its own `kind` (spec §4.3 table) — a CODE
+# mechanism has only `ref`; `composes` belongs to a TOOL (composite) mechanism.
+# Bad-but-conformant: every individual field is one the format knows about, just not
+# together on this kind.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate
+version: 1.0.0
+title: Attack the claims, keep what survives
+inputs:
+  question: { type: string }
+output:
+  verdict: { type: "enum[SURVIVED, DROPPED]" }
+controls:
+  - profile: insight@1
+mechanism:
+  kind: CODE
+  ref: "pkg.mod:fn"
+  composes:
+    - { tool: other-tool@1 }
+effect: QUERY

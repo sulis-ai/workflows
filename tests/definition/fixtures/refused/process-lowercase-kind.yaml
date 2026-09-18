@@ -1,0 +1,13 @@
+# V1 casing: every closed value is SCREAMING_SNAKE_CASE (spec §1.5). `kind: process`
+# is the bad-but-conformant case: a naive reader that lowercases before comparing
+# would accept this; the schema's `const` match is case-sensitive and refuses it.
+api_version: sulis.workflows/v1
+kind: process
+id: grounded-inquiry
+version: 1.0.0
+title: Grounded inquiry
+start: frame
+nodes:
+  frame: { type: STEP, tool: frame-question@1, in: {}, out: {}, end: COMPLETE }
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }

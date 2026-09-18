@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "control.v1.schema.json",
+  "title": "Control definition (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "version",
+    "title",
+    "type"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "sulis.workflows/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    },
+    "kind": {
+      "const": "CONTROL"
+    },
+    "type": {
+      "enum": [
+        "CONVENTIONS",
+        "FITNESS",
+        "POLICY"
+      ]
+    },
+    "applies_to": {
+      "type": "string"
+    },
+    "checker": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@\\^?\\d+(\\.\\d+){0,2}$"
+    },
+    "grounded_in": {
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "ERROR",
+        "WARNING"
+      ]
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "op",
+        "value"
+      ],
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "enum": [
+            "GTE",
+            "GT",
+            "LTE",
+            "LT",
+            "EQ"
+          ]
+        },
+        "value": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

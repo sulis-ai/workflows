@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "profile.v1.schema.json",
+  "title": "Profile definition (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "version",
+    "title",
+    "schema"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "sulis.workflows/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    },
+    "kind": {
+      "const": "PROFILE"
+    },
+    "grounded_in": {
+      "type": "string"
+    },
+    "schema": {
+      "type": "object"
+    },
+    "checker": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*@\\^?\\d+(\\.\\d+){0,2}$"
+    }
+  }
+}

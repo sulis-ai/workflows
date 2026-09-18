@@ -1,0 +1,9 @@
+# V1: a required header/body field missing. CONTROL requires `type` (spec §5.1); a
+# document that has everything else right but omits it is refused, not defaulted.
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: faithful-generation
+version: 1.0.0
+title: Recommendations are entailed by the insights they cite
+applies_to: output.insights
+checker: check-entailment@1
