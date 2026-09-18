@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from sulis_workflows.definition.errors import DefinitionError
-from sulis_workflows.definition.expressions import TypeContext, evaluate, infer_type, parse
+from sulis_workflows.definition.expressions import (
+    TypeContext,
+    evaluate,
+    infer_type,
+    parse,
+)
 from sulis_workflows.definition.load import load_definition
 from sulis_workflows.definition.registry import Registry
 
@@ -93,10 +98,10 @@ def test_well_formed_expressions_parse(text: str) -> None:
     [
         "",
         "state.path ==",
-        "state.path == \"SINGLE",  # unterminated string
-        "(state.path == \"SINGLE\"",  # unbalanced paren
+        'state.path == "SINGLE',  # unterminated string
+        '(state.path == "SINGLE"',  # unbalanced paren
         "state..path",
-        "state.path === \"SINGLE\"",
+        'state.path === "SINGLE"',
         "1 2",
     ],
 )
@@ -114,8 +119,13 @@ def test_declared_paths_type_check() -> None:
     assert infer_type(parse("state.path"), ctx).__class__.__name__ == "TEnum"
     assert infer_type(parse("inputs.brief"), ctx).__class__.__name__ == "TString"
     assert infer_type(parse("host.topology_index"), ctx).__class__.__name__ == "TAny"
-    assert infer_type(parse("steps.interrogate.output.verdict"), ctx).__class__.__name__ == "TEnum"
-    assert infer_type(parse("steps.sign-off.verdict"), ctx).__class__.__name__ == "TEnum"
+    assert (
+        infer_type(parse("steps.interrogate.output.verdict"), ctx).__class__.__name__
+        == "TEnum"
+    )
+    assert (
+        infer_type(parse("steps.sign-off.verdict"), ctx).__class__.__name__ == "TEnum"
+    )
 
 
 def test_can_drill_one_level_into_a_profile_typed_input() -> None:
@@ -156,9 +166,15 @@ endings:
 """,
         fmt="yaml",
     )
-    ctx = TypeContext(process, Registry([brief_profile, _registry().resolve("TOOL", "interrogate@1")]))
-    assert infer_type(parse("inputs.brief.question"), ctx).__class__.__name__ == "TString"
-    assert infer_type(parse("inputs.brief.priority"), ctx).__class__.__name__ == "TInteger"
+    ctx = TypeContext(
+        process, Registry([brief_profile, _registry().resolve("TOOL", "interrogate@1")])
+    )
+    assert (
+        infer_type(parse("inputs.brief.question"), ctx).__class__.__name__ == "TString"
+    )
+    assert (
+        infer_type(parse("inputs.brief.priority"), ctx).__class__.__name__ == "TInteger"
+    )
     with pytest.raises(DefinitionError):
         infer_type(parse("inputs.brief.nonexistent"), ctx)
 
@@ -246,9 +262,24 @@ def test_evaluate_comparison() -> None:
 
 def test_evaluate_and_or_not() -> None:
     state = {"state": {"path": "SINGLE", "confidence": "GROUNDED"}}
-    assert evaluate(parse('state.path == "SINGLE" and state.confidence == "GROUNDED"'), state) is True
-    assert evaluate(parse('state.path == "SINGLE" and state.confidence == "PARTIAL"'), state) is False
-    assert evaluate(parse('state.path == "RECURSIVE" or state.confidence == "GROUNDED"'), state) is True
+    assert (
+        evaluate(
+            parse('state.path == "SINGLE" and state.confidence == "GROUNDED"'), state
+        )
+        is True
+    )
+    assert (
+        evaluate(
+            parse('state.path == "SINGLE" and state.confidence == "PARTIAL"'), state
+        )
+        is False
+    )
+    assert (
+        evaluate(
+            parse('state.path == "RECURSIVE" or state.confidence == "GROUNDED"'), state
+        )
+        is True
+    )
     assert evaluate(parse('not (state.path == "RECURSIVE")'), state) is True
 
 

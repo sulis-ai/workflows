@@ -66,7 +66,9 @@ def test_non_mapping_document_is_refused() -> None:
 
 def test_unknown_kind_is_refused() -> None:
     with pytest.raises(DefinitionError) as excinfo:
-        load_definition("api_version: sulis.workflows/v1\nkind: NOT_A_KIND\n", fmt="yaml")
+        load_definition(
+            "api_version: sulis.workflows/v1\nkind: NOT_A_KIND\n", fmt="yaml"
+        )
     assert "kind" in str(excinfo.value)
 
 

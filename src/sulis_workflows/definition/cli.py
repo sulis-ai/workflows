@@ -46,7 +46,12 @@ def cmd_validate(paths: list[str]) -> int:
             definition = load_definition(_read(path), fmt=_fmt_for(path))
         except DefinitionError as exc:
             findings_by_path[path] = [
-                Finding(rule=exc.rule, message=exc.message, node=exc.node, fix=exc.schema_path)
+                Finding(
+                    rule=exc.rule,
+                    message=exc.message,
+                    node=exc.node,
+                    fix=exc.schema_path,
+                )
             ]
             continue
         registry.add(definition)
@@ -84,8 +89,11 @@ def _iter_loops(process: model.Process):
             for verdict, route in node.on.items():
                 if route.loop:
                     yield f"{node_id}.on.{verdict}", route.loop
-        elif isinstance(node, model.StepNode) and node.on_control_fail and node.on_control_fail.then and (
-            node.on_control_fail.then.loop
+        elif (
+            isinstance(node, model.StepNode)
+            and node.on_control_fail
+            and node.on_control_fail.then
+            and (node.on_control_fail.then.loop)
         ):
             yield f"{node_id}.on_control_fail", node.on_control_fail.then.loop
 
@@ -97,7 +105,9 @@ def cmd_explain(path: str) -> int:
         print(f"{path}: {exc.rule}: {exc.message}", file=sys.stderr)
         return 1
 
-    print(f"{definition.header.kind} {definition.header.id}@{definition.header.version} — {definition.header.title}")
+    print(
+        f"{definition.header.kind} {definition.header.id}@{definition.header.version} — {definition.header.title}"
+    )
 
     if not isinstance(definition, model.Process):
         print("(explain only describes PROCESS documents in detail)")
@@ -112,10 +122,15 @@ def cmd_explain(path: str) -> int:
     for where, loop in loops:
         print(f"  {where}: budget={_resolved_loop_budget(loop, definition)}")
 
-    gates = [(nid, n) for nid, n in definition.nodes.items() if isinstance(n, model.GateNode)]
+    gates = [
+        (nid, n) for nid, n in definition.nodes.items() if isinstance(n, model.GateNode)
+    ]
     print("\ngates:" if gates else "\ngates: (none)")
     for node_id, gate in gates:
-        deciders = ", ".join(d.ref or d.permission or d.role or "?" for d in gate.deciders) or "(a person, by default)"
+        deciders = (
+            ", ".join(d.ref or d.permission or d.role or "?" for d in gate.deciders)
+            or "(a person, by default)"
+        )
         print(f"  {node_id} ({gate.kind}): {gate.asks!r} — deciders: {deciders}")
 
     print("\nendings:")
@@ -131,10 +146,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sulis-workflows")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    validate_parser = subparsers.add_parser("validate", help="validate one or more definition files")
+    validate_parser = subparsers.add_parser(
+        "validate", help="validate one or more definition files"
+    )
     validate_parser.add_argument("files", nargs="+")
 
-    explain_parser = subparsers.add_parser("explain", help="explain a single PROCESS definition file")
+    explain_parser = subparsers.add_parser(
+        "explain", help="explain a single PROCESS definition file"
+    )
     explain_parser.add_argument("file")
 
     args = parser.parse_args(argv)
@@ -142,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_validate(args.files)
     if args.command == "explain":
         return cmd_explain(args.file)
-    raise AssertionError(f"unreachable: unknown command {args.command!r}")  # pragma: no cover
+    raise AssertionError(
+        f"unreachable: unknown command {args.command!r}"
+    )  # pragma: no cover
 
 
 if __name__ == "__main__":
