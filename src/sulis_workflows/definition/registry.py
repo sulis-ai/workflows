@@ -95,6 +95,15 @@ class Registry:
     def __contains__(self, item: tuple[str, str]) -> bool:
         return item in self._by_kind_id
 
+    def all(self, kind: str) -> Iterable[Definition]:
+        """Every registered definition of `kind`, all versions. Used by checks
+        that need the whole registered set rather than one resolved reference —
+        e.g. V10's cross-process call-graph walk."""
+
+        for (registered_kind, _id), versions in self._by_kind_id.items():
+            if registered_kind == kind:
+                yield from versions.values()
+
     def resolve(self, kind: str, ref: str) -> Definition:
         """Resolve `ref` (`id@version`, `id@partial`, or `id@^partial`) to the
         definition of the given `kind`. Refuses (rule V2) an unparseable
