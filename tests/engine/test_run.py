@@ -640,6 +640,156 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     assert second.ending == "COMPLETE"
 
 
+def test_decide_is_refused_when_the_person_decider_declares_no_permission():
+    """§10.1: "...or accepts any decision, it asks the host's PolicyPort"
+    — decide() previously recorded any verdict from any caller with no
+    authorization check at all. Mirrors the STEP/GATE-agent fixes."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(Decider(kind="person", permission=None),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        }
+    )
+    records = StubRecordsAdapter()
+    ctx = _fresh_ctx(records=records)
+    _run(
+        next_(
+            process,
+            "run-decide-1",
+            "root",
+            ctx,
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+
+    answer = _run(
+        decide(
+            process,
+            "run-decide-1",
+            "root",
+            "sign-off",
+            _fresh_ctx(records=records),
+            inputs={"question": "why"},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note=None,
+            subject="user-42",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FORBIDDEN"
+
+
+def test_decide_is_refused_when_the_person_deciders_permission_is_denied():
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(Decider(kind="person", permission="approve.thing"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        }
+    )
+    records = StubRecordsAdapter()
+    policy = StubPolicyAdapter(denies={"approve.thing"})
+    _run(
+        next_(
+            process,
+            "run-decide-2",
+            "root",
+            _fresh_ctx(records=records, policy=policy),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+
+    answer = _run(
+        decide(
+            process,
+            "run-decide-2",
+            "root",
+            "sign-off",
+            _fresh_ctx(records=records, policy=policy),
+            inputs={"question": "why"},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note=None,
+            subject="user-42",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FORBIDDEN"
+
+
+def test_decide_uses_the_gates_own_permission_when_no_deciders_are_declared():
+    """D13: "If `deciders` is absent, the gate is decided by a person
+    holding the gate's permission" — proven by granting only the GATE's
+    own permission, not any (non-existent) decider's."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(),
+                permission="gate-level.approve",
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        }
+    )
+    records = StubRecordsAdapter()
+    policy = StubPolicyAdapter()  # permits everything, including gate-level.approve
+    _run(
+        next_(
+            process,
+            "run-decide-3",
+            "root",
+            _fresh_ctx(records=records, policy=policy),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    answer = _run(
+        decide(
+            process,
+            "run-decide-3",
+            "root",
+            "sign-off",
+            _fresh_ctx(records=records, policy=policy),
+            inputs={"question": "why"},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note=None,
+            subject="user-42",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "COMPLETE"
+
+
 def test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission():
     """§10.1/D12: permission is checked before ANY dispatch — a `TOOL_STEP`
     hand-off is the dispatch for a `SKILL`/`AGENTIC` Tool, so a Tool with no

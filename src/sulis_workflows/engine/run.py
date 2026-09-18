@@ -328,6 +328,19 @@ async def decide(
     """§12.1: `decide(run, scope, gate, verdict, note)` — records a
     person's decision (identity from the caller) and continues driving
     forward.
+
+    §10.1: "...or accepts any decision, it asks the host's `PolicyPort`" —
+    checked here before recording, the same as `_advance_step`'s STEP
+    dispatch and `_advance_gate`'s agent-decider vote. Which permission:
+    if `decide()` is satisfying a declared `person`-kind decider at its
+    rightful sequence position, that decider's own `permission` (§7.6:
+    `person: { permission: <host permission> }`); otherwise (no deciders
+    declared, or every declared decider already answered INDETERMINATE)
+    the gate's own `permission` (D13's fallback, §7.6: "the gate stays
+    open for a person with the gate's permission"). A `person` decider
+    declared with `role` instead of `permission` is refused outright —
+    `PolicyPort.authorize()` has no way to check a role, only an opaque
+    permission string, and nothing here invents one.
     """
     node = process.nodes[gate_id]
     if not isinstance(node, GateNode):
@@ -339,6 +352,39 @@ async def decide(
         run_id, scope, gate_id, platform_id=ctx.platform_id, run_id=run_id
     )
     decider_index = len(attempts)
+
+    permission: str | None
+    if (
+        decider_index < len(node.deciders)
+        and node.deciders[decider_index].kind == "person"
+    ):
+        decider = node.deciders[decider_index]
+        if decider.permission is None and decider.role is not None:
+            return _forbidden(
+                process,
+                f"gate {gate_id!r}: person decider declares `role`, which "
+                "this engine's PolicyPort cannot check (permission strings "
+                "only) — refusing rather than accepting an unchecked decision.",
+            )
+        permission = decider.permission
+    else:
+        # D13: no declared decider at this slot — either none were
+        # declared at all, or every declared decider has already answered
+        # (the pause state) — the gate's own permission is who may decide.
+        permission = node.permission
+
+    if permission is None:
+        return _forbidden(
+            process,
+            f"gate {gate_id!r} declares no permission for a person to "
+            "decide it here — refusing rather than accepting it unchecked.",
+        )
+    decision = await ctx.policy.authorize(
+        permission, identity=ctx.identity, platform_id=ctx.platform_id, run_id=run_id
+    )
+    if decision.verdict is not Verdict.PERMIT:
+        return _forbidden(process, decision.rationale or "decision permission refused")
+
     key = AttemptKey(run=run_id, scope=scope, node=gate_id, attempt=decider_index + 1)
     record = AttemptRecord(
         key=key,
