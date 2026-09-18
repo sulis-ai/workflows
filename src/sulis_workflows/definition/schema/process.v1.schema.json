@@ -81,10 +81,10 @@
         "$ref": "#/$defs/trigger"
       }
     },
-    "execution_policy": {
+    "skip_policy": {
       "enum": [
         "STRICT",
-        "GUIDED"
+        "ADVISORY"
       ]
     },
     "permission": {

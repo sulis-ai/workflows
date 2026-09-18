@@ -713,7 +713,7 @@ def test_control_fail_repair_receives_the_failures_as_input():
     ]  # the first attempt's findings, non-empty
 
 
-def test_skip_a_trivial_step_under_guided_policy_reaches_the_end():
+def test_skip_a_trivial_step_under_advisory_policy_reaches_the_end():
 
     tool = Tool(
         header=_header("optional-check", "TOOL"),
@@ -727,7 +727,7 @@ def test_skip_a_trivial_step_under_guided_policy_reaches_the_end():
         header=_header("guided-process", "PROCESS"),
         start="optional",
         permission="workflows.guided.start",
-        execution_policy="GUIDED",
+        skip_policy="ADVISORY",
         nodes={
             "optional": StepNode(
                 id="optional",
@@ -784,7 +784,7 @@ def test_skip_is_refused_without_permission_being_granted():
         header=_header("guided-process-2", "PROCESS"),
         start="optional",
         permission="workflows.guided.start",
-        execution_policy="GUIDED",
+        skip_policy="ADVISORY",
         nodes={
             "optional": StepNode(
                 id="optional",
@@ -825,13 +825,13 @@ def test_skip_is_refused_without_permission_being_granted():
     assert answer.ending == "FORBIDDEN"
 
 
-def test_skip_a_standard_step_is_refused_even_under_guided():
+def test_skip_a_standard_step_is_refused_even_under_advisory():
 
     process = Process(
         header=_header("guided-process-3", "PROCESS"),
         start="required",
         permission="workflows.guided.start",
-        execution_policy="GUIDED",
+        skip_policy="ADVISORY",
         nodes={
             "required": StepNode(
                 id="required",
@@ -870,13 +870,13 @@ def test_skip_a_standard_step_is_refused_even_under_guided():
         )
 
 
-def test_skip_is_refused_when_the_process_is_strict_not_guided():
+def test_skip_is_refused_when_the_process_is_strict_not_advisory():
 
     process = Process(
         header=_header("strict-process", "PROCESS"),
         start="optional",
         permission="workflows.strict.start",
-        execution_policy="STRICT",
+        skip_policy="STRICT",
         nodes={
             "optional": StepNode(
                 id="optional",
@@ -921,7 +921,7 @@ def test_skip_is_refused_when_the_step_declares_no_skip_permission():
         header=_header("guided-process-4", "PROCESS"),
         start="optional",
         permission="workflows.guided.start",
-        execution_policy="GUIDED",
+        skip_policy="ADVISORY",
         nodes={
             "optional": StepNode(
                 id="optional",
@@ -959,12 +959,12 @@ def test_skip_is_refused_when_the_step_declares_no_skip_permission():
         )
 
 
-def test_guided_process_that_is_never_skipped_runs_normally():
+def test_advisory_process_that_is_never_skipped_runs_normally():
     process = Process(
         header=_header("guided-process-5", "PROCESS"),
         start="optional",
         permission="workflows.guided.start",
-        execution_policy="GUIDED",
+        skip_policy="ADVISORY",
         nodes={
             "optional": StepNode(
                 id="optional",
@@ -1000,4 +1000,4 @@ def test_guided_process_that_is_never_skipped_runs_normally():
     assert answer.ending == "done"
     assert (
         code_tool.observed_calls
-    )  # the Tool WAS dispatched — GUIDED alone doesn't skip anything
+    )  # the Tool WAS dispatched — ADVISORY alone doesn't skip anything

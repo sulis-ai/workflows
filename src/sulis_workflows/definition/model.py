@@ -334,7 +334,7 @@ class Process:
     state: Mapping[str, StateChannel] = field(default_factory=dict)
     defaults: ProcessDefaults | None = None
     triggers: tuple[Trigger, ...] = ()
-    execution_policy: str = fmt_defaults.EXECUTION_POLICY
+    skip_policy: str = fmt_defaults.SKIP_POLICY  # §6, D16: STRICT | ADVISORY
     permission: str | None = None  # host's opaque grammar (ADR-024); spec §10.1, D14
 
 
@@ -643,7 +643,7 @@ def build(doc: Mapping[str, Any]) -> Definition:
                 for k, v in doc["endings"].items()
             },
             triggers=tuple(_trigger(t) for t in doc.get("triggers", ())),
-            execution_policy=doc.get("execution_policy", fmt_defaults.EXECUTION_POLICY),
+            skip_policy=doc.get("skip_policy", fmt_defaults.SKIP_POLICY),
             permission=doc.get("permission"),
         )
     raise ValueError(f"unknown kind {kind!r}")

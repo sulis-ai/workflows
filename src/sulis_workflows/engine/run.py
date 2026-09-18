@@ -290,18 +290,27 @@ async def skip(
     reason: str,
     subject: str,
 ) -> NextAnswer:
-    """§6: `GUIDED` execution policy — "a person with permission MAY skip a
+    """§6: `ADVISORY` skip policy — "a person with permission MAY skip a
     step whose `criticality` is `TRIVIAL`, recording a reason." Not part
     of §12.1's own three named calls (the spec's engine-semantics section
     predates this being wired up); shaped the same way as `decide()` since
     it is the same kind of act — a person's recorded decision, checked
     against a permission, that changes what the run does next.
 
+    Note the terminology: `skip_policy` (`STRICT`/`ADVISORY`) is a
+    narrower thing than "guided" in the sense the format's own callers
+    use it (an agent driving the run step by step via `next()`/`report()`,
+    as opposed to the deprecated `compiler/` path executing a whole run
+    internally) — that property holds for every run regardless of
+    `skip_policy`. D16 renamed `execution_policy` to `skip_policy` and
+    `GUIDED` to `ADVISORY` for exactly this reason: freeing "guided" to
+    keep its one meaning instead of naming two different things.
+
     Fails closed on every one of D2/D15's conditions, not just the
     permission check: refuses a step that is not a `STEP` node, a process
-    that is not `GUIDED`, a step whose `criticality` is not `TRIVIAL`
-    (`STANDARD`/`CRITICAL` are never skippable, §6), a step with no
-    `skip_permission` declared (D15), and a call with no `reason`.
+    whose `skip_policy` is not `ADVISORY`, a step whose `criticality` is
+    not `TRIVIAL` (`STANDARD`/`CRITICAL` are never skippable, §6), a step
+    with no `skip_permission` declared (D15), and a call with no `reason`.
 
     Callable at any point before this step's own first attempt (i.e.
     before anything has called `next()`/`report()` far enough to dispatch
@@ -313,9 +322,10 @@ async def skip(
     node = process.nodes[node_id]
     if not isinstance(node, StepNode):
         raise EngineRefusal(f"skip() called for {node_id!r}, which is not a STEP node")
-    if process.execution_policy != "GUIDED":
+    if process.skip_policy != "ADVISORY":
         raise EngineRefusal(
-            f"process {process.header.id!r} is not GUIDED — steps cannot be skipped (§6)"
+            f"process {process.header.id!r} has skip_policy "
+            f"{process.skip_policy!r} — steps cannot be skipped (§6)"
         )
     criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
     if criticality != "TRIVIAL":
@@ -566,7 +576,7 @@ async def _advance_step(
     if attempts:
         last = attempts[-1]
         if last.verdict == "SKIPPED":
-            # §6: a GUIDED skip() call already recorded this — proceed as
+            # §6: an ADVISORY skip() call already recorded this — proceed as
             # the step's own declared route says, without ever dispatching
             # the Tool or writing anything into state (there is no output).
             return _Advance(next_node_id=_success_target(node))
@@ -796,13 +806,13 @@ def _success_target(node: StepNode) -> str:
 
 
 def _is_skippable(process: Process, node: StepNode) -> bool:
-    """§6: structurally eligible for `skip()` — GUIDED policy, TRIVIAL
-    criticality. Does not check `skip_permission`/authorization; `skip()`
-    itself enforces that at the point of the actual call, the same way a
-    GATE's `on` routes are shown regardless of whether this particular
-    caller holds the gate's permission."""
+    """§6: structurally eligible for `skip()` — `ADVISORY` skip policy,
+    TRIVIAL criticality. Does not check `skip_permission`/authorization;
+    `skip()` itself enforces that at the point of the actual call, the
+    same way a GATE's `on` routes are shown regardless of whether this
+    particular caller holds the gate's permission."""
     criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
-    return process.execution_policy == "GUIDED" and criticality == "TRIVIAL"
+    return process.skip_policy == "ADVISORY" and criticality == "TRIVIAL"
 
 
 def _resolve_inputs_preview(
