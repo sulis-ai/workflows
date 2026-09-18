@@ -19,6 +19,7 @@ from sulis_workflows.definition.model import (
     GateNode,
     Header,
     InputSpec,
+    LoopSpec,
     Mechanism,
     OutputSpec,
     Process,
@@ -428,7 +429,6 @@ def test_mutation_step_second_caller_told_step_running():
 
 
 def test_route_loop_budget_is_enforced_across_revisits():
-    from sulis_workflows.definition.model import Ending, LoopSpec
 
     process = Process(
         header=_header("loopy-process", "PROCESS"),
@@ -460,7 +460,6 @@ def test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time():
     # A STEP looped back to by a ROUTE must be re-dispatched each visit,
     # not resolved from a stale prior-visit record (the same class of bug
     # the ROUTE self-loop test above exists to catch, on the STEP side).
-    from sulis_workflows.definition.model import LoopSpec
 
     tally_tool = Tool(
         header=_header("tally", "TOOL"),
@@ -512,3 +511,120 @@ def test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time():
     answer = _run(next_(process, "run-loop-2", "root", ctx, inputs={}, host_inputs={}))
     assert answer.ending == "DONE"
     assert call_count["n"] == 3  # budget=2 allows 2 loop-backs -> 3 dispatches total
+
+
+def test_gate_deny_loop_budget_is_enforced_across_askings():
+    # spec S7.6's own worked example loops on DENY: DENY: { next: recommend, loop: { budget: N } }.
+
+    process = Process(
+        header=_header("gate-loop-process", "PROCESS"),
+        start="sign-off",
+        permission="workflows.gate-loop.start",
+        nodes={
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="always-deny@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="sign-off",
+                        loop=LoopSpec(
+                            budget=2, on_exhausted=RouteTarget(end="GAVE_UP")
+                        ),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(
+                outcome="STOPPED", says="Gave up after too many denials."
+            ),
+        },
+    )
+    policy = StubPolicyAdapter(policy_denies={"always-deny@1"})
+    ctx = EngineContext(
+        policy=policy,
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-gate-loop-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.ending == "GAVE_UP"
+    assert answer.outcome == "STOPPED"
+
+
+def test_control_fail_repair_gives_one_more_attempt_before_then():
+    from sulis_workflows.definition.model import ControlFail, ControlRef, Profile
+
+    tool = Tool(
+        header=_header("draft", "TOOL"),
+        output={"insight": OutputSpec(type="profile:insight@1")},
+        controls=(ControlRef(kind="profile", ref="insight@1"),),
+        mechanism=Mechanism(kind="CODE", ref="mod:draft"),
+        effect="QUERY",
+        permission="workflows.draft.dispatch",
+    )
+    process = Process(
+        header=_header("repair-process", "PROCESS"),
+        start="draft",
+        permission="workflows.repair.start",
+        nodes={
+            "draft": StepNode(
+                id="draft",
+                tool="draft@1",
+                in_={},
+                out={"insight": "state.insight"},
+                next="done",
+                on_control_fail=ControlFail(repair=1, then=RouteTarget(end="GAVE_UP")),
+            ),
+        },
+        endings={
+            "done": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(outcome="FAILURE", says="Could not fix it."),
+        },
+    )
+    profile = Profile(
+        header=_header("insight", "PROFILE"),
+        schema={
+            "type": "object",
+            "required": ["id", "claim"],
+            "properties": {"id": {"type": "string"}, "claim": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+
+    call_count = {"n": 0}
+
+    class RepairAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            call_count["n"] += 1
+            # Always fails the profile control (missing "claim").
+            return {"insight": {"id": f"i{call_count['n']}"}}
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=RepairAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([tool, profile]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-repair-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.ending == "GAVE_UP"
+    # repair=1 -> the original attempt plus exactly one repair attempt, then give up.
+    assert call_count["n"] == 2

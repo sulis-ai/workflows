@@ -25,20 +25,18 @@ honest, tested slice over a guessed-at complete one):
 - `PARALLEL`/`JOIN`/`FOR_EACH`, calling a process, triggers and templates
   are all out of WP-02's scope (`docs/work-packages/WP-02-execution-engine.md`)
   and refuse cleanly rather than being mishandled.
-- `on_control_fail`'s `repair` count is not tracked across attempts yet —
-  a failed control takes `then` on the first failure. Retries for
-  `TRANSIENT` errors ARE tracked (`retry.max`), since that only needs a
-  count of the same node's own attempts, already available here.
-- Loop budgets (`check_loop_budget`) are enforced for `ROUTE` targets,
-  using how many times this route has already matched as the taken
-  count. A `GATE`'s `DENY` route MAY also carry a `loop:` spec (§7.6's
-  own worked example does) — this is NOT yet enforced here: counting how
-  many times a specific verdict has sent a gate back, distinct from how
-  many *deciders* have been asked across however many askings, needs its
-  own well-tested counting rule this session ran out of room to build
-  correctly rather than guess at. A `GATE`-based send-back loop is
-  therefore currently unbounded; recorded as a known gap, not a silent
-  one.
+- `on_control_fail`'s `repair` count IS tracked (counting consecutive
+  `CONTROL_FAILED` attempts within the current visit, from the node's own
+  attempt records): up to `repair` further dispatches before `then`. The
+  repaired dispatch does NOT yet receive "the failures as input" (§10.2
+  step 5's own wording) — it re-runs with the same inputs, not fed the
+  prior control findings — a smaller, separately flagged gap.
+- Loop budgets (`check_loop_budget`) are enforced for both `ROUTE`
+  targets (counting how many times the route has matched) and a `GATE`'s
+  own looping verdict route (counting how many times THIS gate has
+  resolved to that specific looping verdict, tracked separately from how
+  many deciders were asked across however many askings — `_drive`'s
+  `gate_loop_taken`).
 """
 
 from __future__ import annotations
@@ -310,6 +308,12 @@ async def _drive(
     # earlier visit left behind).
     visit_baseline: dict[str, int] = {}
 
+    # A GATE's own looping verdict (S7.6's own worked example loops on
+    # DENY) needs its taken-count kept separately from `visit_baseline`,
+    # which counts DECIDER attempts, not full gate resolutions — several
+    # decider attempts can belong to one resolution, or one.
+    gate_loop_taken: dict[str, int] = {}
+
     try:
         while True:
             if node_id not in process.nodes:
@@ -357,11 +361,14 @@ async def _drive(
                     node_id,
                     visit_attempts,
                     baseline,
+                    gate_loop_taken.get(node_id, 0),
                     run_state,
                     run_id,
                     scope,
                     ctx,
                 )
+                if advance.took_loop:
+                    gate_loop_taken[node_id] = gate_loop_taken.get(node_id, 0) + 1
             else:
                 raise EngineRefusal(
                     f"node {node_id!r} is a {type(node).__name__} node — PARALLEL/JOIN/"
@@ -396,6 +403,7 @@ class _Advance:
     next_node_id: str | None = None
     state: dict[str, Any] | None = None
     step_record: Mapping[str, Any] | None = None
+    took_loop: bool = False
 
 
 def _resolve_tool(ref: str, registry: Registry) -> Tool:
@@ -490,8 +498,12 @@ async def _advance_step(
                 state=new_state,
                 step_record={"output": last.output, "attempt": len(attempts)},
             )
+        elif outcome is StepOutcome.CONTROL_FAILED:
+            if _repair_count(attempts) <= _repair_budget(node):
+                pass  # fall through to dispatch another (repair) attempt below
+            else:
+                return _Advance(next_node_id=_route_for_step_failure(node, last, tool))
         elif outcome in (
-            StepOutcome.CONTROL_FAILED,
             StepOutcome.CONTROLS_UNCHECKABLE,
             StepOutcome.FORBIDDEN,
             StepOutcome.PRECONDITION_FALSE,
@@ -593,6 +605,20 @@ async def _advance_step(
                 scope,
                 ctx,
             )
+    if result.outcome is StepOutcome.CONTROL_FAILED and _repair_count(
+        attempts + [record]
+    ) <= _repair_budget(node):
+        return await _advance_step(
+            process,
+            node,
+            node_id,
+            attempts + [record],
+            baseline,
+            run_state,
+            run_id,
+            scope,
+            ctx,
+        )
     return _Advance(next_node_id=_route_for_step_failure(node, record, tool))
 
 
@@ -601,6 +627,25 @@ def _parse_step_outcome(value: str) -> StepOutcome | None:
         return StepOutcome(value)
     except ValueError:
         return None
+
+
+def _repair_budget(node: StepNode) -> int:
+    control_fail = node.on_control_fail
+    if control_fail is not None and control_fail.repair is not None:
+        return control_fail.repair
+    return fmt_defaults.REPAIR_BUDGET
+
+
+def _repair_count(attempts: list[AttemptRecord]) -> int:
+    """§10.2 step 5: "up to `repair` further invocations." Counts every
+    `CONTROL_FAILED` attempt already made this visit — the repair budget
+    bounds how many of those are allowed before `then` is taken."""
+    return sum(
+        1
+        for a in attempts
+        if a.verdict is not None
+        and _parse_step_outcome(a.verdict) is StepOutcome.CONTROL_FAILED
+    )
 
 
 def _success_target(node: StepNode) -> str:
@@ -726,6 +771,7 @@ async def _advance_gate(
     node_id: str,
     attempts: list[AttemptRecord],
     baseline: int,
+    prior_loop_takes: int,
     run_state: Mapping[str, Any],
     run_id: str,
     scope: str,
@@ -745,6 +791,15 @@ async def _advance_gate(
                 f"gate {node_id!r}: no route declared for verdict "
                 f"{gate_decision.verdict.value!r}"
             )
+        if target.loop is not None:
+            budget_decision = check_loop_budget(
+                target.loop, taken_count=prior_loop_takes, process_default_budget=None
+            )
+            if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
+                return _Advance(
+                    next_node_id=_resolve_route_target(budget_decision.on_exhausted)
+                )
+            return _Advance(next_node_id=_resolve_route_target(target), took_loop=True)
         return _Advance(next_node_id=_resolve_route_target(target))
 
     if gate_decision.resolution is GateResolution.NEEDS_POLICY:
@@ -779,7 +834,15 @@ async def _advance_gate(
             record, platform_id=ctx.platform_id, run_id=run_id
         )
         return await _advance_gate(
-            node, node_id, attempts + [record], baseline, run_state, run_id, scope, ctx
+            node,
+            node_id,
+            attempts + [record],
+            baseline,
+            prior_loop_takes,
+            run_state,
+            run_id,
+            scope,
+            ctx,
         )
 
     if gate_decision.resolution is GateResolution.NEEDS_AGENT:
