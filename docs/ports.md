@@ -53,6 +53,22 @@ resp = await llm.complete(LLMRequest(prompt=prompt, model=model), ...)
 worker-pool). Each ships a `Stub*Adapter` so the engine is testable with no infrastructure.
 Adapters extend `IdentifiedAdapter` (they declare an `AdapterIdentity`).
 
+The newer `definition/` + `engine/` path (the v1 process-definition format) has its own three
+ports, following the same shape, used by `engine/run.py`'s `next()`/`report()`/`decide()`/
+`skip()`:
+
+- **`PolicyPort`** (`domain/ports/policy.py`) — asks whether an identity holds a named
+  permission; returns `PERMIT | DENY | INDETERMINATE` (sulis-ai/platform ADR-028).
+- **`RecordsPort`** (`domain/ports/records.py`) — write-once attempt records keyed by
+  `(run, scope, node, attempt)`; this is what makes `next()` genuinely stateless.
+- **`ClaimsPort`** (`domain/ports/claims.py`) — leases for `MUTATION`/`SIDE_EFFECT` steps, so a
+  resumed run cannot dispatch an already-in-progress effectful step twice.
+- **`CodeToolPort`** (`domain/ports/code_tool.py`) — dispatches a `CODE`-mechanism Tool (§4.3)
+  by its `ref`; distinct from the older `ToolDispatchPort` above, which the `compiler/` path uses.
+
+Each ships a `Stub*Adapter` too. See `docs/spec/process-definition.md` §10–§12 for the
+semantics they exist to satisfy.
+
 ## Injection seam — the `Adapters` bundle (one injection point)
 
 A runner injects **all** its port adapters once, as an `Adapters` bundle, at `compile()`;

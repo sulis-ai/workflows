@@ -22,8 +22,16 @@ A validated `definition.Process` runs to completion through the spec's own state
 `next(run, scope)` / `report(...)` / `decide(...)` (§12.1) — for `STEP`, `ROUTE` and `GATE` nodes,
 with permission checked before every dispatch (§10.1), every attempt durably recorded (§12.2),
 every `MUTATION`/`SIDE_EFFECT` step claimed under a lease (§12.3), and every loop budget enforced
-from those records rather than from memory (§7.3). `PARALLEL`/`JOIN`/`FOR_EACH` (§7.4–7.5),
-process-calls (§9), triggers (§11) and templates (§13) follow in WP-03.
+from those records rather than from memory (§7.3).
+
+**Update (step 5's own follow-up, same work package):** calling a process (§9) — both `ref`'d and
+inline (D18) forms — is also implemented, recursively driving a child scope and bubbling a
+nested hand-off up with its own scope for `report()`/`decide()` to target directly (§9.3). This
+was originally scoped to WP-03 (see "Out of scope" below, now stale on this one point) but was
+built here directly at the principal's request once WP-02 step 5 landed. §9.1's `path` override
+(forcing a called process's first branch) is the one part of §9 still not implemented — refused
+cleanly rather than silently ignored. `PARALLEL`/`JOIN`/`FOR_EACH` (§7.4–7.5), triggers (§11) and
+templates (§13) remain out of scope, genuinely deferred to WP-03.
 
 ## Scope
 
@@ -58,8 +66,10 @@ process-calls (§9), triggers (§11) and templates (§13) follow in WP-03.
 
 ## Out of scope
 
-`PARALLEL` / `JOIN` / `FOR_EACH` (§7.4–7.5), calling a process (§9), triggers (§11), templates
-(§13), observers (§12.5), any change to `compiler/`, releases.
+`PARALLEL` / `JOIN` / `FOR_EACH` (§7.4–7.5), triggers (§11), templates (§13), observers (§12.5),
+any change to `compiler/`, releases. Calling a process (§9) was originally scoped here too, but
+was in fact built as a follow-up within this same work package (see "Outcome" above) — the one
+piece of §9 still out of scope is its `path` override (§9.1).
 
 ## Acceptance criteria
 

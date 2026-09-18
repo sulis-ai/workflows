@@ -5,11 +5,15 @@ fresh) with the published `sulis-workflows` package, and wiring its adapters. Th
 path for the **platform** (the server runner, which has an in-app copy at
 `apps/api/sulis/shared/workflows`) and for any other consumer (the brain-runtime, agents).
 
+> This page covers adopting the `compiler/` path (a `Workflow` entity → a LangGraph graph). The
+> newer `definition/` + `engine/` path (the v1 process-definition format) has no equivalent
+> adoption guide yet — see `docs/spec/process-definition.md` and `docs/work-packages/`.
+
 ## 1. Depend on the published package
 
 ```toml
 # pyproject.toml
-dependencies = ["sulis-workflows @ git+https://github.com/sulis-ai/workflows.git@v0.3.0"]
+dependencies = ["sulis-workflows @ git+https://github.com/sulis-ai/workflows.git@v0.12.0"]
 ```
 
 Pin a tag. Server and client runners pin the **same** version — that's what "one engine"
