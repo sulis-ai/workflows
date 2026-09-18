@@ -124,6 +124,7 @@ class Tool:
     errors: tuple[ErrorSpec, ...] = ()
     checker_for: str | None = None
     examples: tuple[Example, ...] = ()
+    permission: str | None = None  # host's opaque grammar (ADR-024); spec §10.1, D12
 
 
 # --------------------------------------------------------------------------- Control --
@@ -619,6 +620,7 @@ def build(doc: Mapping[str, Any]) -> Definition:
                 Example(name=e["name"], inputs=e["inputs"], expect=e["expect"])
                 for e in doc.get("examples", ())
             ),
+            permission=doc.get("permission"),
         )
     if kind == "PROCESS":
         return Process(

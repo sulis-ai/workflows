@@ -27,22 +27,28 @@ jobs:
         run: >
           python -m ruff check
           src/sulis_workflows/definition/ tests/definition/
+          src/sulis_workflows/engine/ tests/engine/
           src/sulis_workflows/domain/ports/policy.py
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
+          src/sulis_workflows/domain/ports/code_tool.py
           tests/test_policy_port.py tests/test_records_port.py tests/test_claims_port.py
       - name: Format (ruff format --check)
         run: >
           python -m ruff format --check
           src/sulis_workflows/definition/ tests/definition/
+          src/sulis_workflows/engine/ tests/engine/
           src/sulis_workflows/domain/ports/policy.py
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
+          src/sulis_workflows/domain/ports/code_tool.py
           tests/test_policy_port.py tests/test_records_port.py tests/test_claims_port.py
       - name: Type check (mypy)
         run: >
           python -m mypy
           src/sulis_workflows/definition/
+          src/sulis_workflows/engine/
           src/sulis_workflows/domain/ports/policy.py
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
+          src/sulis_workflows/domain/ports/code_tool.py
