@@ -1,0 +1,184 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2RBGEA99F3Y7HXH3RXSMCFA",
+  "started_at": "2026-09-17T03:15:00Z",
+  "completed_at": "2026-09-17T04:30:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 step 4 of 5",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-4-gate-execution",
+  "summary_for_principal": "Built the part of the engine that handles a decision point — where a process pauses for an automated policy check, an AI reviewer, or a person before it continues. This is the highest-stakes piece of the engine so far, because it decides who gets to say yes. It now enforces two things precisely: an AI reviewer cannot approve something by citing evidence that doesn't actually exist in the run, and it cannot approve its own work. An approval with no evidence at all is rejected outright, even if the reviewer says everything looks fine. Found and closed a second gap in the format itself, the same shape as last time: a field the spec referred to twice but never actually defined. Nothing runs end to end yet — the last remaining piece ties everything built so far into something that can actually execute a full process.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/gates.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/domain/ports/policy.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added evaluate_policy(), the second PolicyPort method deferred from step 1's own run record specifically until GATE execution needed it."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/model.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added an optional `permission` field to GateNode (D13), mirroring D12's Tool field."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/process.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Schema counterpart of GateNode.permission, optional so no existing fixture needs to change."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "S7.6 amended to name the gate `permission` field and to clarify the undefined `may` list reference; D13 added to S18's decision log."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/checkers.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Re-confirmed decision_evidence's exact scope and its own docstring's explicit statement that run-state resolution is left for the engine, before building on top of it rather than duplicating or replacing it."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Continue WP-02 autonomously, PR by PR — this run picks up step 4 (GATE execution) of the 5-step sequence.",
+    "read_as": "Build the parts of gate decision-making the engine can run deterministically and synchronously (the policy decider, and checking an already-returned agent decision), applying the same CODE-vs-SKILL/AGENTIC scoping split step 2 used for STEP mechanisms — the agent/person hand-off state machine itself belongs to next()/report()/decide() in step 5, which owns the whole run's control flow.",
+    "filled_in": [
+      {
+        "gap": "Spec S7.6 references \"the gate's permission\" twice (deciding a gate with no `deciders`; the fallback pause state when the last decider isn't a person) but GateNode never declared a `permission` field — the same shape of gap as D12's, on a different node type.",
+        "assumed": "Added an optional `permission: str | None` field to GateNode, resolved identically to D12: absent means the engine cannot decide that gate via the implicit-person path, not that the check is skipped.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "This run's own D12 (spec S18) — \"hold conventions once\": two gaps of the same shape get the same answer rather than two different ones.",
+        "reversal_cost": "Cheap — additive field, same as D12.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec S7.6 says a decider \"gives a verdict outside its `may` list\" counts as INDETERMINATE, but no `may` field or list is defined anywhere in the spec, the schema, or the model for any decider kind.",
+        "assumed": "Read `may list` as the fixed, already-existing ADR-028 vocabulary (PERMIT/DENY/INDETERMINATE) itself, rather than inventing a new per-decider declared field with no worked example anywhere to base its shape on.",
+        "basis": "STACK_IDIOM",
+        "grounded_in": "decision@1's own verdict field is already drawn from exactly that enum (checkers.py, decision_evidence's caller contract) — reading `may list` as the same enum avoids introducing a second, undefined vocabulary.",
+        "reversal_cost": "Cheap — this is a documentation/interpretation choice with one small code consequence (engine/gates.py's Verdict(...) parse-or-INDETERMINATE check), not a schema commitment.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "resolve_gate() is pure and synchronous; only the policy decider is run inline, agent/person deciders always need a round trip owned by step 5.",
+      "problem": "Whether GATE execution should try to run agent/person deciders itself (e.g. by blocking on some kind of callback) or treat them as genuinely external.",
+      "options_rejected": [
+        "Give resolve_gate an async callback for asking an agent/person decider and block on it inline: rejected — S12.1 already specifies the answer shape for exactly this (`DECISION_STEP` for an agent decider, `AWAITING_DECISION` for a person), which only makes sense as part of the stateless next()/report()/decide() contract (S12.1: \"nothing is held in memory between calls\") — blocking inline here would either duplicate that contract badly or bypass it."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "None expected — mirrors step 2's attempt_step/caller split, which has already proven itself twice now (steps 2 and 3).",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S12.1 defines next()'s answer vocabulary as including DECISION_STEP (\"a gate whose current decider is an agent; reported like a tool step\") and AWAITING_DECISION (\"a gate whose current decider is a person\") — both hand-off states, not something resolve_gate could produce synchronously.",
+          "source": "docs/spec/process-definition.md S12.1, read directly."
+        }
+      ],
+      "revisit_if": "Step 5 finds this split genuinely awkward once it has to wire both together — not expected, given steps 2/3 already validated the same shape."
+    },
+    {
+      "headline": "An agent decision returning PERMIT with empty evidence is rejected (INDETERMINATE), even though checkers.decision_evidence trivially passes an empty evidence list.",
+      "problem": "checkers.decision_evidence only checks that every cited evidence path is one of the gate's reviewing paths; a decision with zero evidence items has nothing to fail that check, so it would incorrectly count as a valid PERMIT under decision_evidence alone.",
+      "options_rejected": [
+        "Trust decision_evidence's pass/fail as sufficient: rejected — proven wrong by this run's own test (test_agent_decision_with_no_evidence_at_all_is_indeterminate), which initially failed against the first implementation before this explicit empty-evidence-on-PERMIT check was added."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One `if` block, local to check_agent_decision.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S7.6 states explicitly: \"An agent that returns PERMIT with no grounded evidence cannot pass.\"",
+          "source": "docs/spec/process-definition.md S7.6, read directly."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Without this explicit check, a PERMIT decision with `evidence: []` passed check_agent_decision's other checks and returned PERMIT — reproduced directly by running the test suite before adding the fix.",
+          "source": "pytest run in this session, before vs. after the fix to engine/gates.py."
+        }
+      ],
+      "revisit_if": "Never expected — this is a direct, unambiguous spec requirement."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after adding gates.py, PolicyPort.evaluate_policy, GateNode.permission, and their tests.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "272 passed (252 pre-existing from steps 1-3 + 16 in tests/engine/test_gates.py + 4 new evaluate_policy contract tests in tests/test_policy_port.py), 0 failed."
+    },
+    {
+      "subject": "The initial implementation's handling of an ungrounded PERMIT (empty evidence list).",
+      "method": "Ran the newly written test suite before adding the explicit empty-evidence check.",
+      "location": "tests/engine/test_gates.py::test_agent_decision_with_no_evidence_at_all_is_indeterminate",
+      "result": "Failed: the decision was accepted as PERMIT. Fixed by adding an explicit check before the existing decision_evidence call; re-run confirmed all 16 gate tests then passed."
+    },
+    {
+      "subject": "Lint, format and type-check of every file this PR touches.",
+      "method": "python -m ruff check / ruff format --check / mypy against the file/dir set already covered by ci.yml (no CI change needed this step — engine/, tests/engine/ and domain/ports/policy.py were already covered from steps 2-3).",
+      "location": ".github/workflows/ci.yml",
+      "result": "All clean after one round of auto-fix (import style, line length): 0 ruff findings, 0 reformatting needed, mypy success on 7 source files."
+    },
+    {
+      "subject": "Whether adding GateNode.permission broke any existing WP-01 fixture.",
+      "method": "python -m pytest tests/definition -q, run immediately after the model.py/schema change.",
+      "location": "tests/definition/",
+      "result": "171/171 passing, unchanged — confirms the field is genuinely additive, same as D12's Tool.permission."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "A checker function's own docstring explicitly stating what it does NOT check (\"that half is an engine-time concern... left for whoever builds it\") is a precise, load-bearing scope boundary — read it as a literal task list for the next layer, not a vague caveat.",
+      "incident": "checkers.py's decision_evidence docstring names exactly the missing half (\"resolve to a value in the run\") this run needed to implement; building check_agent_decision directly against that stated gap, rather than re-deriving what was missing from the spec alone, made the composition (decision_evidence for membership, a new run-state-resolution loop for the rest) obvious and avoided re-implementing membership-checking logic that already existed.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future PR in this repository extending a function whose docstring names an explicit, intentional scope boundary.",
+      "proposed_check": "engine/gates.py's check_agent_decision composes decision_evidence rather than reimplementing its membership check.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "Gate deciders can be evaluated and sequenced correctly, including the two highest-stakes checks (grounded evidence, no self-review) — nothing in a running system depends on this yet."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Nothing needs deciding from you on this PR — continuing to the final step (5), which ties everything together.",
+        "action": "Proceed to WP-02 step 5 (next()/report()/decide() plus claims wiring) on a branch stacked on wp-02/step-4-gate-execution.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      },
+      {
+        "n": 2,
+        "label": "When you're ready, review and merge sulis-ai/workflows PR #20 (this step) — after PRs #17-#19 and WP-01's own 5 PRs, in that order.",
+        "action": "Review PR #20 and merge it after PR #19 (WP-02 step 3) and everything it stacks on.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Build step 5 next, then stop and give a full, honest account of what this engine can and cannot run end to end, rather than opening a 6th PR without pausing.",
+      "reason": "Step 5 is the point where the pieces built in steps 1-4 either genuinely compose into something that can drive a real process, or reveal a seam that needs rethinking — worth a deliberate checkpoint either way, since it's also the largest remaining piece.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

@@ -276,6 +276,7 @@ class GateNode:
     answer_type: str | None = None
     answer_into: str | None = None
     on: Mapping[str, RouteTarget] = field(default_factory=dict)
+    permission: str | None = None  # host's opaque grammar (ADR-024); spec §7.6, D13
     type: str = "GATE"
 
 
@@ -516,6 +517,7 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             answer_type=d.get("answer_type"),
             answer_into=d.get("answer_into"),
             on={k: _route_target_required(v) for k, v in d.get("on", {}).items()},
+            permission=d.get("permission"),
         )
     raise ValueError(f"unknown node type {node_type!r} for node {node_id!r}")
 
