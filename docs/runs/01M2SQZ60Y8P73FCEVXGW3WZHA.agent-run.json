@@ -1,0 +1,149 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2SQZ60Y8P73FCEVXGW3WZHA",
+  "started_at": "2026-09-18T00:00:00Z",
+  "completed_at": "2026-09-18T01:00:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 gap closure (post step 5)",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "Closed two of the three gaps flagged (not hidden) in the last report: a decision point that loops back on itself now has the same limit enforced as an ordinary repeated step does, and a step whose result fails the required quality check now gets one bounded extra attempt to fix itself before the process gives up, instead of giving up immediately. Both were explicitly promised as part of the work already reported done, so this is finishing that work, not starting something new. Both are proven with new tests, not just claimed. One gap remains, deliberately: a repair attempt does not yet get told exactly what was wrong before it tries again, only that it failed — closing that needs a small extension this session judged as its own, separate, smaller piece of work rather than folding it in here.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new regression tests proving both closed gaps, plus a small cleanup (consolidating a scattered inline import, removing dead code left in a prior draft of one test)."
+      },
+      {
+        "coordinate": "docs/runs/01M2RCJYPX0H56H4EKV2E3M6YW.agent-run.json",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "The prior run record this one follows up on — its `untouched`/`parked` entries `gate-loop-budget-unenforced` and `on-control-fail-repair-not-tracked` are exactly what this run closes; the third, `state-reducers-replace-only`, is left exactly as recorded there (genuinely blocked on PARALLEL/FOR_EACH, out of WP-02's own scope)."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "A standing operating reinforcement (decide technical matters, don't defer them, don't wait to be asked) reappeared with no new user message attached. No new instruction was given.",
+    "read_as": "Re-read my own prior report against the reinforcement's own test — \"done is done when the widest, broadest scope is designed and discussed, not the narrow phase.\" WP-02's own work-package document promised \"every loop budget enforced\" and step 2's own scope promised on_control_fail repair; the prior run shipped narrower than that and said so plainly, which is correct practice, but the gap itself was mine to close, not the principal's to prioritise — a completion of already-committed scope, not a new feature request needing their input on direction.",
+    "filled_in": [
+      {
+        "gap": "No user message specified which gap to close, or that any should be closed now, versus waiting for a reply to the priority question the prior turn ended on.",
+        "assumed": "Distinguished the still-open priority question (what to build next: PARALLEL/FOR_EACH vs. wiring a real model vs. something else — genuinely the principal's call, left open, not acted on) from the two flagged shortfalls against WP-02's own already-stated scope (mine to finish, not a new direction to choose). Closed the latter; did not act on the former.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/work-packages/WP-02-execution-engine.md's own Outcome (\"every loop budget enforced\") and Scope item 4 (\"controls-after-every-step with repair/on_control_fail\") — both already-written commitments, not new scope being invented now.",
+        "reversal_cost": "N/A — this is closing a stated gap, not a reversible design choice of its own.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": true
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "A GATE's own loop-taken count is tracked separately from decider-attempt counting (a new `gate_loop_taken` dict in `_drive`), not derived from the existing per-decider attempt records.",
+      "problem": "check_loop_budget needs \"how many times has this specific looping verdict been taken,\" but a GATE's attempt records are one-per-decider-asked, and several decider attempts (policy, then agent, then person) can belong to a single gate resolution — counting attempt records directly, the way ROUTE's loop budget does, would count decider-askings, not gate-resolutions, and overcount.",
+      "options_rejected": [
+        "Reuse ROUTE's exact counting approach (attempts-in-this-visit) unchanged: rejected — proven wrong by re-deriving the relationship between GATE's per-decider record shape and what \"one loop-take\" actually means; a gate asked via 3 deciders before resolving DENY is one loop-take, not three."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Localized to _drive's gate_loop_taken dict and the `prior_loop_takes` parameter threaded through _advance_gate; no change to the public contract.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "The new regression test (a GATE with a single policy decider that always DENYs, budget=2 on the DENY loop) reaches GAVE_UP after exactly the budgeted number of takes, confirmed by running the test to completion.",
+          "source": "tests/engine/test_run.py::test_gate_deny_loop_budget_is_enforced_across_askings, passing in this session."
+        }
+      ],
+      "revisit_if": "Never expected — this is the correct counting unit per spec S7.3's own definition of a loop as a route taken, not a decider asked."
+    },
+    {
+      "headline": "The repaired dispatch does not yet receive \"the failures as input\" (S10.2 step 5's literal wording) — it re-runs with the same inputs, only the repair COUNT is bounded and enforced.",
+      "problem": "Whether to also thread the prior control-check findings into the repair attempt's inputs, or scope this fix to just the repair count/looping mechanism.",
+      "options_rejected": [
+        "Build failures-as-input in the same pass: rejected — it needs extending attempt_step's input-resolution contract (engine/steps.py) to accept extra, attempt-specific context beyond the node's own declared `in` mapping, which is a real, separate design decision (where do the failures go — a synthetic input field? a reserved path?) deserving its own consideration rather than being folded hastily into a fix pass for a different, already-scoped gap."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Additive — engine/steps.py's attempt_step signature would need a new optional parameter; no change to what this fix already does.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S10.2 step 5 states: \"up to `repair` further invocations with the failures as input, then `then`.\"",
+          "source": "docs/spec/process-definition.md S10.2, read directly."
+        }
+      ],
+      "revisit_if": "A real Process's repair behaviour depends on seeing what specifically failed (likely, since that is presumably the entire point of `repair` existing) — this should be built before this engine is used for anything where repair quality matters."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after both fixes.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "287 passed (285 pre-existing + 2 new regression tests), 0 failed."
+    },
+    {
+      "subject": "Lint, format and type-check of the changed files.",
+      "method": "python -m ruff check / ruff format --check / mypy, scoped to engine/ and tests/engine/ (already covered wholesale by ci.yml since step 2 — no CI change needed).",
+      "location": "src/sulis_workflows/engine/run.py, tests/engine/test_run.py",
+      "result": "Clean after one SIM102 nested-if fix and one formatting pass: 0 ruff findings, 0 reformatting needed, mypy success on 7 source files."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "control-fail-repair-no-failures-as-input",
+      "location": "src/sulis_workflows/engine/run.py, _advance_step / src/sulis_workflows/engine/steps.py, attempt_step",
+      "divergence": "S10.2 step 5's repair invocation is meant to receive \"the failures as input\"; this engine's repair dispatch re-runs with the same original inputs, blind to what specifically failed last time.",
+      "governed_exception": false,
+      "why_not_now": "Needs a real design decision about how attempt_step's input contract carries attempt-specific context (a new decision, not a continuation of this fix's own scope) — deferred deliberately rather than folded in hastily."
+    },
+    {
+      "id": "state-reducers-replace-only",
+      "location": "src/sulis_workflows/engine/state.py",
+      "divergence": "Unchanged from the prior run's own record — only REPLACE is implemented; MERGE/APPEND/UPSERT_BY_ID still refuse.",
+      "governed_exception": false,
+      "why_not_now": "Still genuinely blocked on PARALLEL/FOR_EACH support (WP-03), which is what would produce a real, testable second-write-to-one-channel case — unchanged reasoning from docs/runs/01M2RCJYPX0H56H4EKV2E3M6YW.agent-run.json."
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "GATE-based send-back loops are now bounded, closing the one gap from the prior report with a real, ongoing risk profile (BECOMES_URGENT_ON_EVENT) once any real Process used that shape.",
+      "on_control_fail's repair count is enforced (bounded re-dispatch before `then`), though the repair attempt is not yet told what specifically failed."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "A control-fail repair attempt doesn't see what specifically failed — it just gets to try again blind.",
+        "untouched_id": "control-fail-repair-no-failures-as-input",
+        "trigger": "Any real Process whose repair step is meant to actually use the failure feedback to improve — right now it can only get lucky on a retry, not genuinely self-correct.",
+        "if_nothing_happens": "DECAYS",
+        "detail": "Every process authored assuming a repair attempt is informed by what failed will behave worse than intended under this engine until this is built."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Nothing needs deciding from you on this fix specifically — it completes work already reported, not a new direction.",
+        "action": "None — informational.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Still hold here rather than picking a direction myself — the priority question from the last report is real and unanswered, and guessing at it risks spending further session time on the wrong one.",
+      "reason": "Consistent with the same reasoning given last time: this is a business-priority call, not a technical one.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
