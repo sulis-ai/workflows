@@ -628,3 +628,76 @@ def test_control_fail_repair_gives_one_more_attempt_before_then():
     assert answer.ending == "GAVE_UP"
     # repair=1 -> the original attempt plus exactly one repair attempt, then give up.
     assert call_count["n"] == 2
+
+
+def test_control_fail_repair_receives_the_failures_as_input():
+    from sulis_workflows.definition.model import ControlFail, ControlRef, Profile
+
+    tool = Tool(
+        header=_header("draft", "TOOL"),
+        output={"insight": OutputSpec(type="profile:insight@1")},
+        controls=(ControlRef(kind="profile", ref="insight@1"),),
+        mechanism=Mechanism(kind="CODE", ref="mod:draft"),
+        effect="QUERY",
+        permission="workflows.draft.dispatch",
+        inputs={"prior_findings": InputSpec(type="any", required=False)},
+    )
+    process = Process(
+        header=_header("repair-process", "PROCESS"),
+        start="draft",
+        permission="workflows.repair.start",
+        nodes={
+            "draft": StepNode(
+                id="draft",
+                tool="draft@1",
+                in_={"prior_findings": "steps.draft.controls.insight.findings"},
+                out={"insight": "state.insight"},
+                next="done",
+                on_control_fail=ControlFail(repair=1, then=RouteTarget(end="GAVE_UP")),
+            ),
+        },
+        endings={
+            "done": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(outcome="FAILURE", says="Could not fix it."),
+        },
+    )
+    profile = Profile(
+        header=_header("insight", "PROFILE"),
+        schema={
+            "type": "object",
+            "required": ["id", "claim"],
+            "properties": {"id": {"type": "string"}, "claim": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+
+    received_inputs = []
+
+    class RepairAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            received_inputs.append(inputs)
+            if len(received_inputs) == 1:
+                return {"insight": {"id": "i1"}}  # missing "claim" -> fails the control
+            return {"insight": {"id": "i2", "claim": "now grounded"}}  # fixed on repair
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=RepairAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([tool, profile]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-repair-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.ending == "done"
+    assert len(received_inputs) == 2
+    assert "prior_findings" not in received_inputs[0]  # nothing to report yet
+    assert received_inputs[1][
+        "prior_findings"
+    ]  # the first attempt's findings, non-empty

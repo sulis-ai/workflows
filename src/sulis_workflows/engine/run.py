@@ -28,9 +28,13 @@ honest, tested slice over a guessed-at complete one):
 - `on_control_fail`'s `repair` count IS tracked (counting consecutive
   `CONTROL_FAILED` attempts within the current visit, from the node's own
   attempt records): up to `repair` further dispatches before `then`. The
-  repaired dispatch does NOT yet receive "the failures as input" (§10.2
-  step 5's own wording) — it re-runs with the same inputs, not fed the
-  prior control findings — a smaller, separately flagged gap.
+  repaired dispatch DOES receive "the failures as input" (§10.2 step 5's
+  own wording): before each repair (or retry) dispatch, the last
+  attempt's controls are written to `steps.<own-id>.controls` in run
+  state (§2.2's own reserved shape, `.controls.<control>.passed`,
+  extended here with `.findings` — a grounded but non-literal reading,
+  since §2.2 names no `.findings` sub-path itself), so the Step's own
+  `in:` mapping can read what failed last time.
 - Loop budgets (`check_loop_budget`) are enforced for both `ROUTE`
   targets (counting how many times the route has matched) and a `GATE`'s
   own looping verdict route (counting how many times THIS gate has
@@ -211,7 +215,11 @@ async def report(
             inputs={},
             output=dict(output or {}),
             control_results=[
-                {"control": o.control.ref, "passed": o.passed}
+                {
+                    "control": o.control.ref,
+                    "passed": o.passed,
+                    "findings": list(o.findings),
+                }
                 for o in controls_result.outcomes
             ],
             verdict=outcome.value,
@@ -514,6 +522,15 @@ async def _advance_step(
         # outcome is None (a hand-off record already exists, e.g. from report()) —
         # treated as resolved above via the branches; fall through only for TRANSIENT retry.
 
+        # §10.2 step 5: a repair (or retry) dispatch gets "the failures as
+        # input" — §2.2's own run-state shape already reserves
+        # `steps.<node>.controls.<control>.passed` for exactly this; `in:`
+        # can reference it (and `.findings`, this engine's extension of
+        # that shape to carry *why* a control failed, not just that it
+        # did — §2.2 names no `.findings` sub-path itself, so this is a
+        # grounded but non-literal reading, not a spec quotation).
+        run_state["steps"][node_id] = _step_record_from(last)
+
     if tool.mechanism.kind != "CODE":
         resolved_inputs, _missing = _resolve_inputs_preview(node, tool, run_state)
         return _Advance(
@@ -570,7 +587,11 @@ async def _advance_step(
         ),
         control_results=(
             [
-                {"control": o.control.ref, "passed": o.passed}
+                {
+                    "control": o.control.ref,
+                    "passed": o.passed,
+                    "findings": list(o.findings),
+                }
                 for o in result.controls.outcomes
             ]
             if result.controls
@@ -646,6 +667,35 @@ def _repair_count(attempts: list[AttemptRecord]) -> int:
         if a.verdict is not None
         and _parse_step_outcome(a.verdict) is StepOutcome.CONTROL_FAILED
     )
+
+
+def _step_record_from(record: AttemptRecord) -> dict[str, Any]:
+    """§2.2's `steps.<node>` shape: `.output.<name>`, `.verdict`,
+    `.controls.<control>.passed`, `.attempt` — populated from the last
+    attempt so a repair (or retry) dispatch's own `in:` mapping can read
+    "the failures as input" (§10.2 step 5) via `steps.<own-id>.controls`.
+
+    `<control>` is keyed by the control's bare id (`insight`), not its
+    full `id@version` ref (`insight@1`) — the expression grammar's path
+    syntax (§8, `path := ident ("." ident | "[" integer "]")*`) has no
+    room for `@` in an ident, so the versioned ref itself is not a
+    reachable path segment; a run only ever has one resolved version of
+    a control in play, so the bare id is unambiguous within it.
+    """
+    return {
+        "output": record.output
+        if record.verdict == StepOutcome.SUCCESS.value
+        else None,
+        "verdict": record.verdict,
+        "controls": {
+            cr["control"].split("@")[0]: {
+                "passed": cr["passed"],
+                "findings": cr.get("findings", []),
+            }
+            for cr in (record.control_results or [])
+        },
+        "attempt": record.key.attempt,
+    }
 
 
 def _success_target(node: StepNode) -> str:
