@@ -1,0 +1,114 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2RB20JXCT60HCQMHPPM1DE6",
+  "started_at": "2026-09-17T02:30:00Z",
+  "completed_at": "2026-09-17T03:00:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 step 3 of 5",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-3-route-execution",
+  "summary_for_principal": "Added the part of the engine that decides which way a process branches, and the part that stops a loop running forever. Both are small, pure pieces of logic: given the current facts about a run, they answer one question each (which path fires; has this loop been taken too many times) without touching anything else. The important property this step protects: if a routing decision genuinely has nowhere to go (which should never happen, but a badly written definition could still produce it), the engine stops and says so, rather than guessing and carrying on — the exact mistake found in the old, unused engine earlier in this work. Nothing here is wired up to actually run a process yet; that is the final step.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/routes.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/compiler/nodes/routing.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Re-confirmed the exact defect (default to first route on no match) this step's evaluate_route() is built to defeat, rather than relying on memory of it from an earlier turn."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/defaults.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Confirmed the exact constant names/values (LOOP_BUDGET=10, LOOP_ON_EXHAUSTED=ESCALATED) before citing them in check_loop_budget, rather than restating the defaults from memory."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Continue WP-02 autonomously, PR by PR — this run picks up step 3 (ROUTE execution + loop budgets) of the 5-step sequence.",
+    "read_as": "Build route evaluation and loop-budget checking as pure functions of state already resolved by the caller, following the same scoping pattern step 2 used for attempt_step: do the one well-specified thing this step owns, and leave what needs the whole Process graph or durable records (loop reachability, the actual counters) to next()/report() in step 5.",
+    "filled_in": [],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Loop reachability (which routes are loops) and the durable taken-count are next()/report()'s job, not routes.py's.",
+      "problem": "check_loop_budget needs to know how many times a loop has already been taken this run scope (S7.3: \"rebuilt from durable records\"), which requires reading RecordsPort and knowing the Process graph's structure (a loop is defined by reachability back to an earlier node) — neither of which routes.py has.",
+      "options_rejected": [
+        "Give check_loop_budget a RecordsPort and have it compute the taken-count itself: rejected — this would mean the function is no longer a pure function of its inputs, breaking the same easily-tested-unit property attempt_step (step 2) was deliberately built to have, and would require routes.py to also know about run/scope/node addressing it currently has no reason to know."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "None expected to be needed — this mirrors step 2's own attempt_step/caller split exactly, and that split has already proven itself once.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S7.3 defines a loop by graph reachability (\"any route ... whose target can reach the node it leaves from\") and its counter as \"rebuilt from durable records\" — both properties of the whole Process graph plus RecordsPort, not of a single route in isolation.",
+          "source": "docs/spec/process-definition.md S7.3, read directly."
+        }
+      ],
+      "revisit_if": "Step 5 (next/report/decide) finds this split awkward once it actually has to call both functions together — not expected, but the two are stacked PRs specifically so this could still be revisited before either merges."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after adding evaluate_route, check_loop_budget and their tests.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "252 passed (240 pre-existing from steps 1-2 + 12 new in tests/engine/test_routes.py), 0 failed."
+    },
+    {
+      "subject": "Lint, format and type-check of engine/routes.py and tests/engine/test_routes.py.",
+      "method": "python -m ruff check / ruff format --check / mypy, against the same file set ci.yml already covers (engine/ and tests/engine/ were added wholesale in step 2, so no CI change was needed this step).",
+      "location": "src/sulis_workflows/engine/routes.py, tests/engine/test_routes.py",
+      "result": "All clean after two rounds of auto-fix (unsorted __all__/import-order, line-length reformatting): 0 ruff findings, 0 reformatting needed, mypy success on 4 source files."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "The expression grammar's string literals are double-quoted only (spec S8's `literal := string | ...`, tokenizer regex requires `\"..\"`); a test fixture written with Python single-quoted strings containing single-quoted expression literals will parse in Python but fail at DefinitionError when the expression is actually parsed.",
+      "incident": "First draft of tests/engine/test_routes.py wrote `if_=\"state.verdict == 'A'\"` (single quotes inside a double-quoted Python string) — every route test failed with `[V5] unexpected character \"'\"` until the literals were rewritten as `if_='state.verdict == \"A\"'`.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future test in this repository that constructs an expression string literal — use double quotes for the expression's own string literals, single-quoted (or escaped double-quoted) Python strings to hold them.",
+      "proposed_check": "tests/engine/test_routes.py's own passing suite now exercises this correctly.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "Route evaluation and loop-budget checking are both implemented and tested in isolation — nothing in the running system depends on them yet."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Nothing needs deciding from you on this PR — continuing straight to GATE execution (step 4).",
+        "action": "Proceed to WP-02 step 4 (GATE execution: deciders, PERMIT/DENY/INDETERMINATE, evidence checks, provenance) on a branch stacked on wp-02/step-3-route-execution.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "MEDIUM"
+      },
+      {
+        "n": 2,
+        "label": "When you're ready, review and merge sulis-ai/workflows PR #19 (this step) — after PRs #17-#18 and WP-01's own 5 PRs, in that order.",
+        "action": "Review PR #19 and merge it after PR #18 (WP-02 step 2) and everything it stacks on, since #19 targets wp-02/step-2-step-execution.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue straight to step 4 (GATE) in this sitting, as before.",
+      "reason": "This step is small and self-contained with nothing open; no reason to pause before the next, larger step.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
