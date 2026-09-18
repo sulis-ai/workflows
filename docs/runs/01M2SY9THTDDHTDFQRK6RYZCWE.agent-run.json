@@ -1,0 +1,161 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2SY9THTDDHTDFQRK6RYZCWE",
+  "started_at": "2026-09-18T09:40:00Z",
+  "completed_at": "2026-09-18T10:10:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — fix: SKILL/AGENTIC Tool hand-off skipped the permission check",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "You asked to evaluate the engine with a real agent driving it. Before I'd even started reasoning through a process, that exercise found a real security-relevant bug: for any step whose work is done by an AI agent (as opposed to plain code), the engine was handing the work off to the agent without ever checking whether that agent is allowed to run it. The permission check existed in the code but was only wired up for the plain-code path — the agent-work path bypassed it entirely. This directly breaks a rule the rulebook states by name: nothing runs without a permission check. Fixed: the same check now runs before any hand-off, agent-performed steps included, and I added tests that specifically try to sneak past it (no permission declared; permission explicitly refused) to prove it can't be. Full test suite (296 tests) passes; nothing else changed behaviourally. This is exactly the kind of gap unit tests alone were unlikely to catch, since they test pieces in isolation — it only surfaced by trying to actually drive a real process start to finish.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new tests specifically constructed to exercise the gap directly: a SKILL/AGENTIC Tool with no permission declared, and one whose permission is explicitly denied — both must be refused before any TOOL_STEP hand-off, neither was previously covered."
+      },
+      {
+        "coordinate": "src/sulis_workflows/engine/steps.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "attempt_step()'s own permission check (used for CODE-mechanism Tools) is the pattern this fix mirrors for the non-CODE hand-off path; confirmed by reading it directly that the check was correctly implemented there but simply never reached for non-CODE tools."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "I feel like we need to evaluate this with an agent, which I'm assuming you could do using the guided flow?",
+    "read_as": "A request to actually drive a real process through the engine's own next()/report()/decide() contract with a real agent performing the work — not just running the existing unit tests, which already do that against synthetic stub fixtures. Confirmed as correct: this is exactly what next()/report() are for, and I proceeded to build a live evaluation using the spec's own worked example (Appendix A, \"grounded inquiry\") rather than asking a clarifying question first, since the mechanism to do this already existed and needed no principal decision to attempt.",
+    "filled_in": [
+      {
+        "gap": "The request did not specify which process to evaluate, or what to do if the evaluation surfaces a real defect mid-run rather than just confirming things work.",
+        "assumed": "Chose the spec's own Appendix A worked example (\"grounded inquiry, single path, in v1\") as the subject, since it is the format's own canonical worked process, already has a validated fixture corpus, and using anything else would mean writing a synthetic process anyway, without the benefit of the spec's own prose describing intended behaviour to check against. When the evaluation surfaced a real defect (this permission gap) before reaching the process's own logic, treated it as a bug to fix immediately — not a business decision — consistent with this session's whole established pattern of fixing verified technical gaps without waiting to be asked.",
+        "basis": "JUDGMENT",
+        "grounded_in": "CLAUDE.md: \"Survive the bad-but-conformant attack\" and \"Permission first: nothing runs, dispatches or decides without an authorization call through the policy port\" — this bug is a direct violation of a named principle, not a matter of interpretation.",
+        "reversal_cost": "None — the fix only adds a check that spec §10.1 and D12 already require; nothing that previously worked correctly now behaves differently, confirmed by the full existing suite (294 pre-existing tests) passing unchanged.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Extracted the CODE dispatch path's record-and-route logic into a shared `_record_step_result` helper, reused by the new non-CODE permission pre-check, rather than duplicating the retry/repair/routing branching.",
+      "problem": "The permission check needed to run before a `TOOL_STEP` hand-off, and its failure needed to be recorded as a durable `AttemptRecord` and routed via the node's own `on_forbidden` — exactly the same machinery the CODE dispatch path already had (built for `attempt_step`'s own `StepAttemptResult`), but that machinery was written inline, coupled to the CODE path's own call site.",
+      "options_rejected": [
+        "Duplicate the AttemptRecord-construction and outcome-branching logic inline in the new permission-check branch: rejected — the retry/repair/routing branching is exactly the kind of logic that silently drifts apart when copied, and this repository's own acceptance criteria (WP-02 A1, A4) depend on that logic staying correct for every dispatch path.",
+        "Route the non-CODE permission check through `attempt_step` itself (call it unconditionally for every mechanism kind, treating its existing `NOT_DISPATCHABLE` outcome as the hand-off signal): rejected — `attempt_step` also owns the MUTATION/SIDE_EFFECT claim-acquisition timing relative to dispatch (WP-02 A4), and merging the two call sites risked reordering claim acquisition relative to permission checking in a way I could not fully verify against A4 without a deeper, riskier refactor than this fix needed."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Localized to `engine/run.py`'s `_advance_step`/new `_record_step_result`; the extraction is behavior-preserving for the CODE path (proven by the full existing suite passing unchanged) and additive for the non-CODE path.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before this fix, `_advance_step` returned a `TOOL_STEP` `NextAnswer` for any non-CODE mechanism Tool unconditionally, without ever calling `ctx.policy.authorize()` — confirmed by reading the function directly and by a probe script that drove Appendix A's process-level permission through successfully (via an explicit override) and then observed a STEP-level dispatch stall on the *CODE* path's own D12 check, which does not exist on the non-CODE path at all.",
+          "source": "src/sulis_workflows/engine/run.py, read directly this session before the fix; confirmed absent by grep for `authorize` across engine/run.py and engine/steps.py, which found the check only inside `attempt_step` (CODE-only, per its own docstring)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "No existing test exercised a SKILL/AGENTIC Tool with no permission or a denied permission through `next()` — the one existing hand-off test (`test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_it`) happens to declare a permission that the default-permitting `StubPolicyAdapter` grants, so it passed both before and after this fix and never would have caught the gap.",
+          "source": "tests/engine/test_run.py, grep for `kind=\"AGENTIC\"`/`kind=\"SKILL\"` before adding the two new tests: exactly one prior test used a non-CODE mechanism, and it always granted permission."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The fix closes the gap: two new tests (a Tool with `permission=None`, a Tool whose permission is explicitly denied) both now reach `ending == \"FORBIDDEN\"` instead of a `TOOL_STEP` hand-off.",
+          "source": "tests/engine/test_run.py::test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission and ::test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied, both passing."
+        }
+      ],
+      "revisit_if": "A future work package (PARALLEL/FOR_EACH, process-calls, WP-03) adds another dispatch path outside `_advance_step`/`attempt_step` — the same permission-before-any-dispatch discipline needs to be applied there too, from the start, rather than found the same way again."
+    }
+  ],
+  "flags": [
+    {
+      "id": "gate-decider-tool-dispatch-unchecked",
+      "kind": "UNVERIFIED_ASSUMPTION",
+      "subject": "src/sulis_workflows/engine/gates.py — an `agent`-kind GATE decider's hand-off (`AnswerKind.DECISION_STEP`)",
+      "tension": "This fix closes the permission gap for a STEP's own `TOOL_STEP` hand-off. A GATE's `agent` decider is a structurally similar hand-off (a non-deterministic Tool handed to the caller's agent session, per gates.py's own docstring) but is driven by a completely separate code path in `_advance_gate`, which this fix did not touch or verify.",
+      "standards_in_play": [
+        "spec §10.1 (\"dispatches any Tool\")",
+        "CLAUDE.md \"Permission first\""
+      ],
+      "need": "Confirm whether `_advance_gate`'s `DECISION_STEP` hand-off for an `agent` decider checks that decider Tool's own `permission` before handing off, the same way `_advance_step` now does — I have not yet read `_advance_gate` closely enough this session to state this either way with the same confidence as the STEP-side finding, so this is flagged rather than fixed or asserted as safe."
+    }
+  ],
+  "measured": [
+    {
+      "subject": "Full test suite after the fix.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "296 passed (294 pre-existing + 2 new), 0 failed."
+    },
+    {
+      "subject": "The fix actually closes the gap it targets (not just adds passing tests).",
+      "method": "Reverted the fix locally, re-ran the two new tests, confirmed both fail (a TOOL_STEP hand-off is returned instead of FORBIDDEN); re-applied the fix, confirmed both pass.",
+      "location": "tests/engine/test_run.py",
+      "result": "Both new tests fail without the fix and pass with it, confirming they exercise the gap rather than passing vacuously."
+    },
+    {
+      "subject": "Lint, format and type-check of the changed files.",
+      "method": "ruff check / ruff format --check / mypy, scoped to the changed files.",
+      "location": "src/sulis_workflows/engine/run.py, tests/engine/test_run.py",
+      "result": "0 ruff findings, 0 reformatting needed, mypy clean after one signature-annotation fix (an inferred `StepAttemptResult` type needed an explicit `| None` annotation on the branching variable)."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "gate-decider-tool-dispatch-unchecked",
+      "location": "src/sulis_workflows/engine/gates.py",
+      "divergence": "Not yet confirmed whether the GATE `agent` decider hand-off checks permission before dispatch — see flags[] above.",
+      "governed_exception": false,
+      "why_not_now": "Out of the bounded scope of this specific fix (the STEP-side TOOL_STEP hand-off); needs its own read-then-fix-if-needed pass rather than being asserted safe without verification."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "A permission check written once inside a shared helper function is only as strong as every call site that is supposed to reach it — a new short-circuit branch added later (here: the non-CODE hand-off) can silently route around it without any single line looking wrong in isolation. Actually driving the system end to end, not just unit-testing each piece, is what catches this class of gap.",
+      "incident": "`attempt_step`'s own permission check was correctly written and correctly ordered (\"permission, then precondition, then inputs, then dispatch\") from WP-02 step 2 onward, and every CODE-path test correctly exercised it. But WP-02 step 5's `_advance_step` added an earlier return for non-CODE tools that never reached `attempt_step` at all — a structurally invisible gap from the perspective of any test that only checked \"does the hand-off happen\" (it did) without ever checking \"is it gated the same way CODE dispatch is\" (it wasn't). Found only by actually trying to drive a real process end to end with a real agent, exactly the exercise the principal asked for.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future work package that adds a new dispatch or hand-off path to this engine: explicitly test that path's own permission gate with a dedicated refusal test, not just its happy path — and periodically drive a real process (not just synthetic stub fixtures) end to end, since that is what surfaced this.",
+      "proposed_check": "tests/engine/test_run.py::test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission and ::test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "SKILL/AGENTIC Tool dispatch (the TOOL_STEP hand-off) is now permission-gated identically to CODE Tool dispatch — closes a real gap against spec §10.1/D12/CLAUDE.md's own named \"permission first\" principle."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Whether a GATE's `agent` decider hand-off (DECISION_STEP) is permission-gated the same way — not yet verified.",
+        "untouched_id": "gate-decider-tool-dispatch-unchecked",
+        "trigger": "The next pass through engine/gates.py, or before claiming this engine fully satisfies §10.1 for every dispatch path.",
+        "if_nothing_happens": "BECOMES_URGENT_ON_EVENT",
+        "detail": "If unchecked, it is the same class of bug as the one just fixed, in the gate-decision path instead of the step-dispatch path — harmless until an agent gate decider with no or denied permission is actually exercised, then a real gap."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The priority question from several reports back is still open and still yours: build out the missing pieces (parallel work, loops over lists, one process calling another), wire in a real AI model for the steps this engine currently only pauses on, or something else.",
+        "action": "No code action until you answer; I will scope whichever direction you name into a work package once you do.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue the live evaluation now in progress: verify the flagged GATE decider permission question, then keep driving the Appendix A process through the engine as a real agent to find whatever else only shows up when the whole thing actually runs.",
+      "reason": "This fix is proof the exercise is worth finishing, not stopping partway — the same method just found a real security-relevant gap that no amount of additional unit testing in isolation was going to surface.",
+      "urgency": "URGENT"
+    }
+  }
+}

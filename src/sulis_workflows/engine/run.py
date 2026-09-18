@@ -79,7 +79,7 @@ from sulis_workflows.engine.routes import (
     evaluate_route,
 )
 from sulis_workflows.engine.state import apply_output
-from sulis_workflows.engine.steps import StepOutcome, attempt_step
+from sulis_workflows.engine.steps import StepAttemptResult, StepOutcome, attempt_step
 
 __all__ = [
     "AnswerKind",
@@ -628,6 +628,51 @@ async def _advance_step(
         run_state["steps"][node_id] = _step_record_from(last)
 
     if tool.mechanism.kind != "CODE":
+        # §10.1/D12: permission is checked before ANY dispatch, hand-off
+        # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`/
+        # `AGENTIC` Tool (the caller's agent session performs it next), so
+        # refusing this check here rather than only inside `attempt_step`
+        # (CODE-only) closes a gap where a permission-less or refused
+        # non-CODE Tool was previously handed off uncontrolled.
+        precheck: StepAttemptResult | None
+        if tool.permission is None:
+            precheck = StepAttemptResult(
+                outcome=StepOutcome.FORBIDDEN,
+                rationale=(
+                    f"Tool {tool.header.id!r} declares no `permission` — refusing "
+                    "to dispatch rather than skip the check (spec §10.1, D12)."
+                ),
+            )
+        else:
+            decision = await ctx.policy.authorize(
+                tool.permission,
+                identity=ctx.identity,
+                platform_id=ctx.platform_id,
+                run_id=run_id,
+            )
+            precheck = (
+                None
+                if decision.verdict is Verdict.PERMIT
+                else StepAttemptResult(
+                    outcome=StepOutcome.FORBIDDEN, rationale=decision.rationale
+                )
+            )
+        if precheck is not None:
+            return await _record_step_result(
+                process,
+                node,
+                node_id,
+                tool,
+                precheck,
+                attempts,
+                baseline,
+                run_state,
+                run_id,
+                scope,
+                ctx,
+                performed_by=f"AGENT:{tool.mechanism.ref}",
+            )
+
         resolved_inputs, _missing = _resolve_inputs_preview(node, tool, run_state)
         return _Advance(
             answer=NextAnswer(
@@ -670,6 +715,47 @@ async def _advance_step(
         code_tool=ctx.code_tool,
         registry=ctx.registry,
     )
+    return await _record_step_result(
+        process,
+        node,
+        node_id,
+        tool,
+        result,
+        attempts,
+        baseline,
+        run_state,
+        run_id,
+        scope,
+        ctx,
+        performed_by=f"CODE:{tool.mechanism.ref}",
+    )
+
+
+async def _record_step_result(
+    process: Process,
+    node: StepNode,
+    node_id: str,
+    tool: Tool,
+    result: StepAttemptResult,
+    attempts: list[AttemptRecord],
+    baseline: int,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    *,
+    performed_by: str,
+) -> _Advance:
+    """Turns one `StepAttemptResult` — whether from `attempt_step` (a real
+    CODE dispatch) or a permission pre-check for a non-CODE hand-off — into
+    a durable `AttemptRecord` and the resulting `_Advance`: success,
+    TRANSIENT retry, CONTROL_FAILED repair, or routed failure. Shared so
+    both dispatch paths get identical recording/retry/repair/routing
+    semantics rather than two copies that could drift apart.
+    """
+    key = AttemptKey(
+        run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
+    )
     record = AttemptRecord(
         key=key,
         inputs={},
@@ -695,7 +781,7 @@ async def _advance_step(
             else []
         ),
         verdict=result.outcome.value,
-        performed_by=f"CODE:{tool.mechanism.ref}",
+        performed_by=performed_by,
         started_at=_now(),
         ended_at=_now(),
     )

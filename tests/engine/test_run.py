@@ -365,6 +365,76 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     assert second.ending == "COMPLETE"
 
 
+def test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission():
+    """§10.1/D12: permission is checked before ANY dispatch — a `TOOL_STEP`
+    hand-off is the dispatch for a `SKILL`/`AGENTIC` Tool, so a Tool with no
+    declared `permission` must never reach the caller as a hand-off, the
+    same as a CODE Tool never reaches `code_tool.call()`."""
+    agentic_tool = Tool(
+        header=_header("classify", "TOOL"),
+        output={"verdict": OutputSpec(type="enum[A, B]")},
+        controls=(),
+        mechanism=Mechanism(kind="AGENTIC", ref="skills/classify"),
+        effect="QUERY",
+        inputs={"question": InputSpec(type="string")},
+        permission=None,
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([agentic_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(
+            _process(),
+            "run-forbid-skill-1",
+            "root",
+            ctx,
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FORBIDDEN"
+
+
+def test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied():
+    agentic_tool = Tool(
+        header=_header("classify", "TOOL"),
+        output={"verdict": OutputSpec(type="enum[A, B]")},
+        controls=(),
+        mechanism=Mechanism(kind="AGENTIC", ref="skills/classify"),
+        effect="QUERY",
+        inputs={"question": InputSpec(type="string")},
+        permission="workflows.classify.dispatch",
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(denies={"workflows.classify.dispatch"}),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([agentic_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(
+            _process(),
+            "run-forbid-skill-2",
+            "root",
+            ctx,
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FORBIDDEN"
+
+
 def test_transient_error_retries_then_succeeds():
     process = _process()
     records = StubRecordsAdapter()
