@@ -15,6 +15,7 @@ import asyncio
 import pytest
 
 from sulis_workflows.definition.model import (
+    ControlRef,
     Decider,
     Ending,
     ErrorSpec,
@@ -614,6 +615,8 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     )
     assert first.kind is AnswerKind.TOOL_STEP
     assert first.node_id == "classify"
+    assert first.instructions_ref == "skills/classify"
+    assert first.controls == ()
 
     ctx2 = EngineContext(
         policy=StubPolicyAdapter(),
@@ -638,6 +641,52 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     )
     assert second.kind is AnswerKind.ENDED
     assert second.ending == "COMPLETE"
+
+
+def test_tool_step_hand_off_carries_instructions_ref_and_controls():
+    """§12.1: `TOOL_STEP` carries "resolved inputs, instructions ref,
+    controls" — previously only `resolved_inputs` reached the caller; the
+    Tool's own mechanism `ref` (§4.3: "a skill document" for SKILL, "a
+    skill or agent definition" for AGENTIC) and its declared `controls`
+    were only reachable by the caller looking the Tool up itself."""
+    skill_tool = Tool(
+        header=_header("classify", "TOOL"),
+        output={"verdict": OutputSpec(type="enum[A, B]")},
+        controls=(
+            ControlRef(kind="profile", ref="verdict-shape@1"),
+            ControlRef(kind="conventions", ref="output-present@1"),
+        ),
+        mechanism=Mechanism(kind="SKILL", ref="skills/classify-inquiry"),
+        effect="QUERY",
+        inputs={"question": InputSpec(type="string")},
+        permission="workflows.classify.dispatch",
+    )
+    process = _process()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([skill_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(
+            process,
+            "run-instructions-1",
+            "root",
+            ctx,
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.instructions_ref == "skills/classify-inquiry"
+    assert answer.controls == (
+        {"kind": "profile", "ref": "verdict-shape@1"},
+        {"kind": "conventions", "ref": "output-present@1"},
+    )
 
 
 def test_decide_is_refused_when_the_person_decider_declares_no_permission():

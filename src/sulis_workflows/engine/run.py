@@ -133,6 +133,8 @@ class NextAnswer:
     says: str
     node_id: str | None = None
     resolved_inputs: Mapping[str, Any] | None = None
+    instructions_ref: str | None = None
+    controls: tuple[Mapping[str, str], ...] | None = None
     ending: str | None = None
     outcome: str | None = None
     skippable: bool = False
@@ -848,6 +850,14 @@ async def _advance_step(
                 says=f"Waiting on {node.tool} to run.",
                 node_id=node_id,
                 resolved_inputs=resolved_inputs,
+                # §12.1: "TOOL_STEP ... resolved inputs, instructions ref,
+                # controls" — `instructions_ref` is the mechanism's own
+                # `ref` (§4.3: "a skill document" for SKILL, "a skill or
+                # agent definition" for AGENTIC), previously only
+                # reachable by the caller looking the Tool up itself via
+                # `node.tool` and the registry, not carried on the answer.
+                instructions_ref=tool.mechanism.ref,
+                controls=tuple({"kind": c.kind, "ref": c.ref} for c in tool.controls),
                 skippable=_is_skippable(process, node),
             )
         )
