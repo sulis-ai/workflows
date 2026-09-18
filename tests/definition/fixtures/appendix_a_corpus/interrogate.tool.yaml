@@ -16,4 +16,5 @@ controls:
 mechanism:
   kind: AGENTIC
   ref: skills/interrogate
+permission: workflows.grounded-inquiry.interrogate
 effect: QUERY

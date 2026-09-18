@@ -148,7 +148,14 @@ async def attempt_step(
             rationale=str(exc),
         )
 
-    controls_result = check_controls(tool, output, registry=registry)
+    controls_result = await check_controls(
+        tool,
+        output,
+        registry=registry,
+        code_tool=code_tool,
+        platform_id=platform_id,
+        run_id=run_id,
+    )
     if not controls_result.checkable:
         names = ", ".join(f"{c.kind}:{c.ref}" for c in controls_result.unsupported)
         return StepAttemptResult(

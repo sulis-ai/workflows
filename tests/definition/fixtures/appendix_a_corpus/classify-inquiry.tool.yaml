@@ -9,4 +9,5 @@ output:
   path: { type: "enum[SINGLE, RECURSIVE]" }
 controls: [ { conventions: output-present@1 } ]
 mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:classify_inquiry" }
+permission: workflows.grounded-inquiry.classify
 effect: QUERY

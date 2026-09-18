@@ -222,7 +222,14 @@ async def report(
     else:
         from sulis_workflows.engine.controls import check_controls
 
-        controls_result = check_controls(tool, output or {}, registry=ctx.registry)
+        controls_result = await check_controls(
+            tool,
+            output or {},
+            registry=ctx.registry,
+            code_tool=ctx.code_tool,
+            platform_id=ctx.platform_id,
+            run_id=run_id,
+        )
         if not controls_result.checkable:
             outcome = StepOutcome.CONTROLS_UNCHECKABLE
         elif controls_result.all_passed:

@@ -10,4 +10,5 @@ output:
   findings: { type: "list<profile:finding@1>" }
 controls: [ { conventions: output-present@1 } ]
 mechanism: { kind: AGENTIC, ref: skills/grounded-recon }
+permission: workflows.grounded-inquiry.gather
 effect: QUERY
