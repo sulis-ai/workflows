@@ -8,8 +8,12 @@ server-side or on a client machine; only the adapters differ.
 ## Install
 
 ```bash
-pip install "git+https://github.com/sulis-ai/workflows.git@v0.3.0"
+pip install "git+https://github.com/sulis-ai/workflows.git@v0.12.0"
 ```
+
+> This page covers the `compiler/` path (a `Workflow` entity → a LangGraph graph). For the newer
+> declarative process-definition format and its execution engine, see
+> `docs/spec/process-definition.md` and `docs/work-packages/`.
 
 ## The four things you work with
 

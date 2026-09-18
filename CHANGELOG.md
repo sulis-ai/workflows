@@ -5,6 +5,41 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-09-18
+
+### Added — the v1 process-definition format and its execution engine (`definition/`, `engine/`)
+- A new system alongside `compiler/` (untouched, still the LangGraph `Workflow`-entity path): a
+  declarative process-definition format (`docs/spec/process-definition.md`, v1) with its own JSON
+  Schemas, a typed model, a YAML/JSON loader, an `id@version` registry, an expression language,
+  a validator (rules V1–V15, each with an accepted and a refused fixture), built-in checkers, and
+  a CLI (`sulis-workflows validate|explain`).
+- A real, tested execution engine on top of it: `next()` / `report()` / `decide()` / `skip()`
+  (spec §12.1) drive a `Process` through `STEP` (deterministic `CODE` dispatch, `SKILL`
+  hand-off), `ROUTE`, and `GATE` (policy/agent/person deciders) nodes — permission checked before
+  every dispatch, every attempt durably recorded, `MUTATION`/`SIDE_EFFECT` steps claimed under a
+  lease, loop budgets enforced from records rather than memory.
+- **Calling a process** (spec §9): a `PROCESS`-mechanism STEP recursively drives a child scope —
+  either a separately named, independently governed process (`ref:`) or a small sequence
+  declared inline just for that Tool (`process:`, D18). A hand-off inside a nested call bubbles up
+  carrying its own scope and resumes the same way a top-level one does. Depth-limited (default
+  4); a called process with no permission is refused before it is ever entered.
+- New ports: `PolicyPort`, `RecordsPort`, `ClaimsPort` (`domain/ports/`), each with a stub
+  adapter and contract tests.
+- **Known gaps, refused rather than silently mishandled:** `PARALLEL` / `JOIN` / `FOR_EACH`,
+  triggers, and templates are not yet executable; a process call's `path` override (forcing a
+  called process's first branch) is spec-valid but not yet supported by the engine.
+
+## [0.11.0] — 2026-08-13
+
+### Added — the `route_decider` node type (real conditional branching)
+- `VALID_NODE_TYPES` declared `"route_decider"` since `dag_parser.py`'s first cut, but nothing
+  ever implemented it: `NodeResolver` had no branch for it, `_wire_edges` only recognised
+  `"routing"`, and GV-01's cycle check didn't count it as a conditional exit. A `route_decider`
+  node is a step node (real dispatch, writes its own `step_outputs[node.id]`) whose computed
+  output `_wire_edges` then reads back to pick a conditional edge.
+- Closes the gap blocking real DAG-mode branching on a Workflow's own guarded transitions.
+- 4 new tests; full existing suite (29) green.
+
 ## [0.10.0] — 2026-08-01
 
 ### Added — `ToolDispatchPort.invoke` sees this run's own accumulated `step_outputs`
