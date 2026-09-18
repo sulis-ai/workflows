@@ -57,6 +57,7 @@ class StepOutcome(str, Enum):
     CONTROLS_UNCHECKABLE = "CONTROLS_UNCHECKABLE"
     CONTROL_FAILED = "CONTROL_FAILED"
     ERROR = "ERROR"
+    DEPTH_EXHAUSTED = "DEPTH_EXHAUSTED"  # §9.2 — a PROCESS-mechanism call chain
 
 
 @dataclass(frozen=True)

@@ -3,11 +3,12 @@
 "Starting and resuming are the same call. Nothing is held in memory
 between calls." This module honours that literally: every call
 reconstructs the run's current position and state by replaying every
-node's durable attempt records from `process.start` forward
-(`_drive`), rather than reading any state this process instance might
-still be holding from an earlier call. A second process calling `next()`
-against the same `RecordsPort` backend reaches the same answer — that is
-the property this module exists to prove, not merely assert.
+node's durable attempt records from `process.start` (or, for a nested
+scope, the child scope's own `start`) forward (`_drive_scope`), rather
+than reading any state this process instance might still be holding
+from an earlier call. A second process calling `next()` against the
+same `RecordsPort` backend reaches the same answer — that is the
+property this module exists to prove, not merely assert.
 
 Scope (mirrors steps 2-4's own narrowing, for the same reason — an
 honest, tested slice over a guessed-at complete one):
@@ -19,12 +20,18 @@ honest, tested slice over a guessed-at complete one):
 - `GATE`: the `policy` decider runs inline; `agent`/`person` deciders are
   handed off as `DECISION_STEP`/`AWAITING_DECISION` for `report()`/
   `decide()` to complete.
+- Calling a process (§9): both `ref`'d and inline (D18) `PROCESS`-
+  mechanism STEPs are driven recursively (`_advance_process_call`,
+  `_drive_scope`) — a nested scope's own hand-off bubbles up with its
+  own `scope` (§9.3) for `report()`/`decide()` to target directly. §9.1's
+  `path` override is not yet supported and refuses cleanly rather than
+  being silently ignored.
 - State writes: `REPLACE` reducer only (`engine/state.py`).
 - Loop budgets: `engine/routes.py`'s `check_loop_budget`, with the taken
   count read from how many attempts the looping node already has.
-- `PARALLEL`/`JOIN`/`FOR_EACH`, calling a process, triggers and templates
-  are all out of WP-02's scope (`docs/work-packages/WP-02-execution-engine.md`)
-  and refuse cleanly rather than being mishandled.
+- `PARALLEL`/`JOIN`/`FOR_EACH`, triggers and templates are all out of
+  WP-02's scope (`docs/work-packages/WP-02-execution-engine.md`) and
+  refuse cleanly rather than being mishandled.
 - `on_control_fail`'s `repair` count IS tracked (counting consecutive
   `CONTROL_FAILED` attempts within the current visit, from the node's own
   attempt records): up to `repair` further dispatches before `then`. The
@@ -39,7 +46,7 @@ honest, tested slice over a guessed-at complete one):
   targets (counting how many times the route has matched) and a `GATE`'s
   own looping verdict route (counting how many times THIS gate has
   resolved to that specific looping verdict, tracked separately from how
-  many deciders were asked across however many askings — `_drive`'s
+  many deciders were asked across however many askings — `_drive_scope`'s
   `gate_loop_taken`).
 """
 
@@ -52,12 +59,16 @@ from enum import Enum
 from typing import Any
 
 from sulis_workflows.definition import defaults as fmt_defaults
+from sulis_workflows.definition.expressions import evaluate, parse
 from sulis_workflows.definition.model import (
     Ending,
     GateNode,
+    Mechanism,
+    Node,
     Process,
     RouteNode,
     RouteTarget,
+    StateChannel,
     StepNode,
     Tool,
 )
@@ -132,6 +143,13 @@ class NextAnswer:
     kind: AnswerKind
     says: str
     node_id: str | None = None
+    # §9.3: "every answer names the scope and definition it belongs to, at
+    # any depth" — the scope this answer's `node_id` is relative to, so a
+    # caller resuming a hand-off bubbled up from a nested PROCESS call
+    # knows which scope to target `report()`/`decide()` at, rather than
+    # assuming the top-level one. Unset on an `ENDED` answer (no node to
+    # target).
+    scope: str | None = None
     resolved_inputs: Mapping[str, Any] | None = None
     instructions_ref: str | None = None
     controls: tuple[Mapping[str, str], ...] | None = None
@@ -143,8 +161,8 @@ class NextAnswer:
 class EngineRefusal(Exception):
     """Raised internally for a shape this engine cannot run (out of WP-02's
     scope, or a structural failure with nowhere declared to route it) —
-    always caught at the top of `_drive` and turned into a `FAILED` ending,
-    never left to propagate as a bare exception."""
+    always caught at the top of `_drive_scope` and turned into a `FAILED`
+    ending, never left to propagate as a bare exception."""
 
 
 async def next_(
@@ -156,8 +174,24 @@ async def next_(
     inputs: Mapping[str, Any],
     host_inputs: Mapping[str, Any],
 ) -> NextAnswer:
-    """§12.1: `next(run, scope)`. Starting and resuming are this same call."""
-    return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+    """§12.1: `next(run, scope)`. Starting and resuming are this same call.
+
+    `scope` may itself already name a nested level (§9.3) — driving
+    always restarts from that scope's own top segment regardless, since
+    replay naturally re-descends into whichever nested level is still
+    open (see `_drive_scope`'s own docstring).
+    """
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
+        process,
+        _scope_def_for_process(process),
+        run_id,
+        top_scope,
+        ctx,
+        inputs,
+        host_inputs,
+    )
+    return result.answer
 
 
 async def report(
@@ -181,7 +215,8 @@ async def report(
     separation-of-duty (GATE), then continues driving forward exactly as
     `next()` would.
     """
-    node = process.nodes[node_id]
+    scope_def = _resolve_scope(process, scope, ctx.registry)
+    node = scope_def.nodes[node_id]
     if isinstance(node, GateNode):
         return await _report_gate_decision(
             process,
@@ -259,7 +294,17 @@ async def report(
             record, platform_id=ctx.platform_id, run_id=run_id
         )
 
-    return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
+        process,
+        _scope_def_for_process(process),
+        run_id,
+        top_scope,
+        ctx,
+        inputs,
+        host_inputs,
+    )
+    return result.answer
 
 
 async def _report_gate_decision(
@@ -279,16 +324,16 @@ async def _report_gate_decision(
     Unlike a STEP's `report()`, the actual validation (permission check,
     §7.6's evidence-path-resolves-to-a-value and no-deciding-on-your-own-
     work checks) cannot happen here directly — it needs the run's current
-    state and `produced_by` history, which only `_drive`'s own replay
+    state and `produced_by` history, which only `_drive_scope`'s own replay
     holds (§12.1: nothing kept between calls). So this hands the raw
-    decision to `_drive` as `pending_decision`; `_advance_gate` applies it
+    decision to `_drive_scope` as `pending_decision`; `_advance_gate` applies it
     at exactly the point it is reached, with the same state it would use
     to check whether the gate is even still awaiting this decider.
 
     If this call turns out not to actually correspond to what the gate is
     currently awaiting (a stale hand-off, a second `report()` for the same
     decider, wrong node), `_advance_gate` simply never consumes the
-    decision and `_drive` returns the gate's actual current answer instead
+    decision and `_drive_scope` returns the gate's actual current answer instead
     — no state is corrupted, but the decision is silently dropped rather
     than raising, a known rough edge (see the run record for this fix).
     """
@@ -303,15 +348,18 @@ async def _report_gate_decision(
         raise EngineRefusal(
             f"report() called for gate {node_id!r} with no decision output"
         )
-    return await _drive(
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
         process,
+        _scope_def_for_process(process),
         run_id,
-        scope,
+        top_scope,
         ctx,
         inputs,
         host_inputs,
         pending_decision=(node_id, output),
     )
+    return result.answer
 
 
 async def decide(
@@ -344,7 +392,8 @@ async def decide(
     `PolicyPort.authorize()` has no way to check a role, only an opaque
     permission string, and nothing here invents one.
     """
-    node = process.nodes[gate_id]
+    scope_def = _resolve_scope(process, scope, ctx.registry)
+    node = scope_def.nodes[gate_id]
     if not isinstance(node, GateNode):
         raise EngineRefusal(
             f"decide() called for {gate_id!r}, which is not a GATE node"
@@ -399,7 +448,17 @@ async def decide(
         ended_at=_now(),
     )
     await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
-    return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
+        process,
+        _scope_def_for_process(process),
+        run_id,
+        top_scope,
+        ctx,
+        inputs,
+        host_inputs,
+    )
+    return result.answer
 
 
 async def skip(
@@ -443,13 +502,14 @@ async def skip(
     eligibility (or just read the Process definition) and call `skip()`
     itself before calling `next()`, or let `next()` proceed normally.
     """
-    node = process.nodes[node_id]
+    scope_def = _resolve_scope(process, scope, ctx.registry)
+    node = scope_def.nodes[node_id]
     if not isinstance(node, StepNode):
         raise EngineRefusal(f"skip() called for {node_id!r}, which is not a STEP node")
-    if process.skip_policy != "ADVISORY":
+    if scope_def.skip_policy != "ADVISORY":
         raise EngineRefusal(
             f"process {process.header.id!r} has skip_policy "
-            f"{process.skip_policy!r} — steps cannot be skipped (§6)"
+            f"{scope_def.skip_policy!r} — steps cannot be skipped (§6)"
         )
     criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
     if criticality != "TRIVIAL":
@@ -488,41 +548,74 @@ async def skip(
         ended_at=_now(),
     )
     await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
-    return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
+        process,
+        _scope_def_for_process(process),
+        run_id,
+        top_scope,
+        ctx,
+        inputs,
+        host_inputs,
+    )
+    return result.answer
 
 
 # --------------------------------------------------------------------------- driving --
 
 
-async def _drive(
+async def _drive_scope(
     process: Process,
+    scope_def: _ScopeDef,
     run_id: str,
     scope: str,
     ctx: EngineContext,
     inputs: Mapping[str, Any],
     host_inputs: Mapping[str, Any],
     *,
+    depth: int = 0,
     pending_decision: tuple[str, Mapping[str, Any]] | None = None,
-) -> NextAnswer:
-    if process.permission is None:
-        return _forbidden(
-            process, "this process declares no `permission` — refusing to start (D14)."
+) -> _DriveResult:
+    """Drives one scope level — the top-level run (`depth == 0`) or a
+    nested `PROCESS`-mechanism call (§9, delegated from
+    `_advance_process_call`) — forward from its own `scope_def.start`.
+
+    `report()`/`decide()`/`skip()` always restart THIS function from
+    `depth=0` at `scope.split("/")[0]` regardless of how deeply nested
+    the node they just recorded an attempt for was — replay naturally
+    re-descends (`_advance_step`'s `PROCESS`-mechanism branch,
+    `_advance_process_call`) into whichever nested scope is still open
+    and continues it from there. There is deliberately no separate
+    "resume the child, then cascade the parent forward" path: delegating
+    into a child scope and "the child already finished, keep going" are
+    the same code, read from the same already-durable attempt records
+    (§12.1: "nothing is held in memory between calls").
+    """
+    if depth == 0:
+        if process.permission is None:
+            return _DriveResult(
+                answer=_forbidden(
+                    process,
+                    "this process declares no `permission` — refusing to start (D14).",
+                )
+            )
+        decision = await ctx.policy.authorize(
+            process.permission,
+            identity=ctx.identity,
+            platform_id=ctx.platform_id,
+            run_id=run_id,
         )
-    decision = await ctx.policy.authorize(
-        process.permission,
-        identity=ctx.identity,
-        platform_id=ctx.platform_id,
-        run_id=run_id,
-    )
-    if decision.verdict is not Verdict.PERMIT:
-        return _forbidden(process, decision.rationale or "permission refused")
+        if decision.verdict is not Verdict.PERMIT:
+            return _DriveResult(
+                answer=_forbidden(process, decision.rationale or "permission refused")
+            )
 
     state: dict[str, Any] = {
         name: (channel.default if channel.has_default else None)
-        for name, channel in process.state.items()
+        for name, channel in scope_def.state.items()
     }
     steps: dict[str, Any] = {}
-    node_id = process.start
+    node_id = scope_def.start
 
     # A loop can send control back to a node this same call has already
     # visited — `get_attempts` always returns every attempt this node has
@@ -548,10 +641,12 @@ async def _drive(
 
     try:
         while True:
-            if node_id not in process.nodes:
-                return _ending_answer(process, node_id)
+            if node_id not in scope_def.nodes:
+                return _DriveResult(
+                    answer=_ending_answer(scope_def.endings, node_id), final_state=state
+                )
 
-            node = process.nodes[node_id]
+            node = scope_def.nodes[node_id]
             all_attempts = await ctx.records.get_attempts(
                 run_id, scope, node_id, platform_id=ctx.platform_id, run_id=run_id
             )
@@ -567,6 +662,7 @@ async def _drive(
             if isinstance(node, StepNode):
                 advance = await _advance_step(
                     process,
+                    scope_def,
                     node,
                     node_id,
                     visit_attempts,
@@ -575,6 +671,7 @@ async def _drive(
                     run_id,
                     scope,
                     ctx,
+                    depth,
                 )
             elif isinstance(node, RouteNode):
                 advance = await _advance_route(
@@ -615,7 +712,7 @@ async def _drive(
                 )
 
             if advance.answer is not None:
-                return advance.answer
+                return _DriveResult(answer=advance.answer)
 
             state = advance.state if advance.state is not None else state
             if advance.state is not None and isinstance(node, StepNode):
@@ -636,8 +733,10 @@ async def _drive(
             visit_baseline[node_id] = len(refreshed)
             node_id = advance.next_node_id  # type: ignore[assignment]
     except EngineRefusal as exc:
-        return NextAnswer(
-            kind=AnswerKind.ENDED, says=str(exc), ending="FAILED", outcome="FAILURE"
+        return _DriveResult(
+            answer=NextAnswer(
+                kind=AnswerKind.ENDED, says=str(exc), ending="FAILED", outcome="FAILURE"
+            )
         )
 
 
@@ -649,7 +748,7 @@ class _Advance:
     step_record: Mapping[str, Any] | None = None
     took_loop: bool = False
     performed_by: str | None = None
-    """Who/what wrote `state` on a successful STEP — `_drive` uses this to
+    """Who/what wrote `state` on a successful STEP — `_drive_scope` uses this to
     build `produced_by` (§7.6's "no deciding on your own work" needs to
     know which identity produced each reviewed state path, not just which
     Tool ran)."""
@@ -659,6 +758,112 @@ def _resolve_tool(ref: str, registry: Registry) -> Tool:
     tool = registry.resolve("TOOL", ref)
     assert isinstance(tool, Tool)  # V2 already guarantees this resolves
     return tool
+
+
+@dataclass(frozen=True)
+class _ScopeDef:
+    """The structural definition-of-record for one level of a run's scope
+    tree (§9.3: "every answer names the scope and definition it belongs
+    to, at any depth") — resolvable without any run-state or attempt
+    replay, unlike `_drive_scope`'s own recursive descent (which
+    additionally needs run-state to resolve a child's own inputs)."""
+
+    nodes: Mapping[str, Node]
+    start: str
+    state: Mapping[str, StateChannel]
+    endings: Mapping[str, Ending]
+    skip_policy: str
+
+
+def _scope_def_for_process(process: Process) -> _ScopeDef:
+    return _ScopeDef(
+        nodes=process.nodes,
+        start=process.start,
+        state=process.state,
+        endings=process.endings,
+        skip_policy=process.skip_policy,
+    )
+
+
+def _scope_def_for_mechanism(
+    mechanism: Mechanism, parent: _ScopeDef, registry: Registry
+) -> tuple[_ScopeDef, Process | None]:
+    """§9's two call forms: a `ref` names an independently governed
+    Process with its own `skip_policy` (checked separately, at the
+    delegation site, from its own `.permission` — D14); an anonymous
+    `process:` (D18) declares none of its own — it is fused into the
+    parent Tool's already-checked dispatch permission, so it inherits
+    the parent scope's `skip_policy` instead. Returns the ref'd child
+    `Process` too (or `None` for inline), since the caller needs it
+    separately for the permission check this function does not do."""
+    if mechanism.ref is not None:
+        child = registry.resolve("PROCESS", mechanism.ref)
+        assert isinstance(child, Process)  # V2 already guarantees this resolves
+        return _scope_def_for_process(child), child
+    assert mechanism.process is not None  # V1: exactly one of ref/process (D18)
+    inline = mechanism.process
+    return (
+        _ScopeDef(
+            nodes=inline.nodes,
+            start=inline.start,
+            state=inline.state,
+            endings=inline.endings,
+            skip_policy=parent.skip_policy,
+        ),
+        None,
+    )
+
+
+def _resolve_scope(process: Process, scope: str, registry: Registry) -> _ScopeDef:
+    """Walks a scope string structurally — following `mechanism.process`/
+    `.ref` at each `PROCESS`-mechanism STEP a segment after the first
+    names as having delegated one level deeper — to find which
+    `_ScopeDef` governs it. Used by `report()`/`decide()`/`skip()` to
+    resolve a (possibly nested) target node before recording an attempt;
+    `_drive_scope`'s own descent needs run-state as well, so it computes
+    each child's `_ScopeDef` inline via `_scope_def_for_mechanism` rather
+    than calling this."""
+    scope_def = _scope_def_for_process(process)
+    for node_id in scope.split("/")[1:]:
+        node = scope_def.nodes.get(node_id)
+        if not isinstance(node, StepNode):
+            raise EngineRefusal(
+                f"scope segment {node_id!r} is not a STEP node in its own level"
+            )
+        tool = _resolve_tool(node.tool, registry)
+        if tool.mechanism.kind != "PROCESS":
+            raise EngineRefusal(
+                f"scope segment {node_id!r} does not call a process (§9)"
+            )
+        scope_def, _ = _scope_def_for_mechanism(tool.mechanism, scope_def, registry)
+    return scope_def
+
+
+def _resolve_call_inputs(
+    mapping: Mapping[str, str | list[str]], run_state: Mapping[str, Any]
+) -> dict[str, Any]:
+    """§9.1: a process call's own `inputs:` mapping resolves the same way
+    a Tool's own `in:` does (§7.1) — "the first present, non-empty value"
+    of an ordered path list — reusing `steps.py`'s private helper the
+    same way `_resolve_inputs_preview` already does."""
+    from sulis_workflows.engine.steps import _first_present
+
+    resolved: dict[str, Any] = {}
+    for name, paths in mapping.items():
+        path_list = [paths] if isinstance(paths, str) else list(paths)
+        resolved[name] = _first_present(path_list, run_state)
+    return resolved
+
+
+@dataclass(frozen=True)
+class _DriveResult:
+    """`_drive_scope`'s own return — one layer richer than a bare
+    `NextAnswer`: `_advance_process_call` needs a completed child scope's
+    final accumulated state to evaluate `mechanism.result.outputs` paths
+    (§9.1), which `NextAnswer` alone has nowhere to carry."""
+
+    answer: NextAnswer
+    final_state: Mapping[str, Any] | None = None
 
 
 def _producer_identity(performed_by: str | None) -> str | None:
@@ -696,8 +901,8 @@ def _forbidden(process: Process, rationale: str) -> NextAnswer:
     )
 
 
-def _ending_answer(process: Process, ending_id: str) -> NextAnswer:
-    declared = process.endings.get(ending_id)
+def _ending_answer(endings: Mapping[str, Ending], ending_id: str) -> NextAnswer:
+    declared = endings.get(ending_id)
     if isinstance(declared, Ending):
         return NextAnswer(
             kind=AnswerKind.ENDED,
@@ -731,6 +936,7 @@ def _resolve_route_target(target: RouteTarget) -> str:
 
 async def _advance_step(
     process: Process,
+    scope_def: _ScopeDef,
     node: StepNode,
     node_id: str,
     attempts: list[AttemptRecord],
@@ -739,6 +945,7 @@ async def _advance_step(
     run_id: str,
     scope: str,
     ctx: EngineContext,
+    depth: int,
 ) -> _Advance:
     tool = _resolve_tool(node.tool, ctx.registry)
 
@@ -764,7 +971,7 @@ async def _advance_step(
                 return _Advance(next_node_id=_route_for_step_failure(node, last, tool))
         elif outcome is StepOutcome.SUCCESS:
             new_state = apply_output(
-                process.state, run_state["state"], node.out, last.output or {}
+                scope_def.state, run_state["state"], node.out, last.output or {}
             )
             return _Advance(
                 next_node_id=_success_target(node),
@@ -796,6 +1003,27 @@ async def _advance_step(
         # did — §2.2 names no `.findings` sub-path itself, so this is a
         # grounded but non-literal reading, not a spec quotation).
         run_state["steps"][node_id] = _step_record_from(last)
+
+    if tool.mechanism.kind == "PROCESS":
+        # §9: a nested call — `ref`'d or inline (D18) — is neither a CODE
+        # dispatch nor a hand-off to the caller's own agent session; the
+        # engine drives it itself, recursively. This only fires on a
+        # fresh visit or a retry/repair fallthrough (never on plain
+        # replay of an already-recorded SUCCESS/failure, handled above).
+        return await _advance_process_call(
+            process,
+            scope_def,
+            node,
+            node_id,
+            tool,
+            attempts,
+            baseline,
+            run_state,
+            run_id,
+            scope,
+            ctx,
+            depth,
+        )
 
     if tool.mechanism.kind != "CODE":
         # §10.1/D12: permission is checked before ANY dispatch, hand-off
@@ -830,6 +1058,7 @@ async def _advance_step(
         if precheck is not None:
             return await _record_step_result(
                 process,
+                scope_def,
                 node,
                 node_id,
                 tool,
@@ -840,6 +1069,7 @@ async def _advance_step(
                 run_id,
                 scope,
                 ctx,
+                depth,
                 performed_by=f"AGENT:{tool.mechanism.ref}::{ctx.identity}",
             )
 
@@ -849,6 +1079,7 @@ async def _advance_step(
                 kind=AnswerKind.TOOL_STEP,
                 says=f"Waiting on {node.tool} to run.",
                 node_id=node_id,
+                scope=scope,
                 resolved_inputs=resolved_inputs,
                 # §12.1: "TOOL_STEP ... resolved inputs, instructions ref,
                 # controls" — `instructions_ref` is the mechanism's own
@@ -857,7 +1088,7 @@ async def _advance_step(
                 # via `node.tool` and the registry, not carried on the answer.
                 instructions_ref=tool.mechanism.ref,
                 controls=tuple({"kind": c.kind, "ref": c.ref} for c in tool.controls),
-                skippable=_is_skippable(process, node),
+                skippable=_is_skippable(scope_def, node),
             )
         )
 
@@ -878,6 +1109,7 @@ async def _advance_step(
                     kind=AnswerKind.STEP_RUNNING,
                     says="This step is already running.",
                     node_id=node_id,
+                    scope=scope,
                 )
             )
 
@@ -894,6 +1126,7 @@ async def _advance_step(
     )
     return await _record_step_result(
         process,
+        scope_def,
         node,
         node_id,
         tool,
@@ -904,12 +1137,14 @@ async def _advance_step(
         run_id,
         scope,
         ctx,
+        depth,
         performed_by=f"CODE:{tool.mechanism.ref}",
     )
 
 
 async def _record_step_result(
     process: Process,
+    scope_def: _ScopeDef,
     node: StepNode,
     node_id: str,
     tool: Tool,
@@ -920,6 +1155,7 @@ async def _record_step_result(
     run_id: str,
     scope: str,
     ctx: EngineContext,
+    depth: int,
     *,
     performed_by: str,
 ) -> _Advance:
@@ -966,7 +1202,7 @@ async def _record_step_result(
 
     if result.outcome is StepOutcome.SUCCESS:
         new_state = apply_output(
-            process.state, run_state["state"], node.out, result.output or {}
+            scope_def.state, run_state["state"], node.out, result.output or {}
         )
         return _Advance(
             next_node_id=_success_target(node),
@@ -981,6 +1217,7 @@ async def _record_step_result(
         if len(attempts) + 1 <= max_retries:
             return await _advance_step(
                 process,
+                scope_def,
                 node,
                 node_id,
                 attempts + [record],
@@ -989,12 +1226,14 @@ async def _record_step_result(
                 run_id,
                 scope,
                 ctx,
+                depth,
             )
     if result.outcome is StepOutcome.CONTROL_FAILED and _repair_count(
         attempts + [record]
     ) <= _repair_budget(node):
         return await _advance_step(
             process,
+            scope_def,
             node,
             node_id,
             attempts + [record],
@@ -1003,6 +1242,7 @@ async def _record_step_result(
             run_id,
             scope,
             ctx,
+            depth,
         )
     return _Advance(next_node_id=_route_for_step_failure(node, record, tool))
 
@@ -1072,14 +1312,14 @@ def _success_target(node: StepNode) -> str:
     )
 
 
-def _is_skippable(process: Process, node: StepNode) -> bool:
+def _is_skippable(scope_def: _ScopeDef, node: StepNode) -> bool:
     """§6: structurally eligible for `skip()` — `ADVISORY` skip policy,
     TRIVIAL criticality. Does not check `skip_permission`/authorization;
     `skip()` itself enforces that at the point of the actual call, the
     same way a GATE's `on` routes are shown regardless of whether this
     particular caller holds the gate's permission."""
     criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
-    return process.skip_policy == "ADVISORY" and criticality == "TRIVIAL"
+    return scope_def.skip_policy == "ADVISORY" and criticality == "TRIVIAL"
 
 
 def _resolve_inputs_preview(
@@ -1116,8 +1356,199 @@ def _route_for_step_failure(node: StepNode, record: AttemptRecord, tool: Tool) -
         error_code = (record.output or {}).get("error_code")
         target = node.on_error.get(error_code) if error_code else None
         return _resolve_route_target(target or RouteTarget(end=fmt_defaults.ON_ERROR))
+    if outcome_value == StepOutcome.DEPTH_EXHAUSTED.value:
+        target = node.on_depth_exhausted or RouteTarget(
+            end=fmt_defaults.ON_DEPTH_EXHAUSTED
+        )
+        return _resolve_route_target(target)
     raise EngineRefusal(
         f"step {node.id!r}: no route declared for outcome {outcome_value!r}"
+    )
+
+
+# -------------------------------------------------------------------- calling a process --
+
+
+async def _advance_process_call(
+    process: Process,
+    scope_def: _ScopeDef,
+    node: StepNode,
+    node_id: str,
+    tool: Tool,
+    attempts: list[AttemptRecord],
+    baseline: int,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+) -> _Advance:
+    """§9: dispatches a `PROCESS`-mechanism STEP — `ref`'d or inline
+    (D18) — by recursively driving a child scope one level deeper
+    (`_drive_scope`), then translating the child's ending into this
+    STEP's own output via `mechanism.result` (§9.1) and routing that
+    translated output through the SAME `check_controls`/
+    `_record_step_result` machinery a CODE dispatch uses — a control
+    failure or a repair on a process call means the same thing it does
+    on any other Tool, so nothing here special-cases it.
+
+    A repair (or retry) fallthrough re-enters this function and
+    re-delegates into the same child scope; since the child's own
+    attempts are already durable and complete, that re-delegation just
+    idempotently re-observes the same already-ended child result rather
+    than re-running anything — a known, deliberately unengineered nuance
+    (see the run record for this change) rather than a real retry of the
+    child's own internal logic.
+    """
+    mechanism = tool.mechanism
+    if mechanism.path is not None:
+        raise EngineRefusal(
+            f"process call {node_id!r} declares `path` — overriding the "
+            "child's first route (§9.1) is not yet supported by this engine."
+        )
+
+    max_depth = (
+        process.defaults.max_depth
+        if process.defaults is not None and process.defaults.max_depth is not None
+        else fmt_defaults.MAX_DEPTH
+    )
+    if depth + 1 > max_depth:
+        depth_result = StepAttemptResult(
+            outcome=StepOutcome.DEPTH_EXHAUSTED,
+            rationale=(
+                f"call chain depth {depth + 1} exceeds the limit of {max_depth} (§9.2)"
+            ),
+        )
+        return await _record_step_result(
+            process,
+            scope_def,
+            node,
+            node_id,
+            tool,
+            depth_result,
+            attempts,
+            baseline,
+            run_state,
+            run_id,
+            scope,
+            ctx,
+            depth,
+            performed_by="ENGINE:depth-limit",
+        )
+
+    if mechanism.ref is not None:
+        child_process = ctx.registry.resolve("PROCESS", mechanism.ref)
+        assert isinstance(child_process, Process)  # V2 already guarantees this resolves
+        precheck: StepAttemptResult | None
+        if child_process.permission is None:
+            precheck = StepAttemptResult(
+                outcome=StepOutcome.FORBIDDEN,
+                rationale=(
+                    f"process {mechanism.ref!r} declares no `permission` — "
+                    "refusing to call it rather than skip the check (§10.1, D14)."
+                ),
+            )
+        else:
+            decision = await ctx.policy.authorize(
+                child_process.permission,
+                identity=ctx.identity,
+                platform_id=ctx.platform_id,
+                run_id=run_id,
+            )
+            precheck = (
+                None
+                if decision.verdict is Verdict.PERMIT
+                else StepAttemptResult(
+                    outcome=StepOutcome.FORBIDDEN,
+                    rationale=decision.rationale or "called process permission refused",
+                )
+            )
+        if precheck is not None:
+            return await _record_step_result(
+                process,
+                scope_def,
+                node,
+                node_id,
+                tool,
+                precheck,
+                attempts,
+                baseline,
+                run_state,
+                run_id,
+                scope,
+                ctx,
+                depth,
+                performed_by=f"PROCESS:{mechanism.ref}",
+            )
+
+    child_scope_def, _ = _scope_def_for_mechanism(mechanism, scope_def, ctx.registry)
+    child_scope = f"{scope}/{node_id}"
+    child_inputs = _resolve_call_inputs(mechanism.inputs, run_state)
+    drive_result = await _drive_scope(
+        process,
+        child_scope_def,
+        run_id,
+        child_scope,
+        ctx,
+        child_inputs,
+        run_state["host"],
+        depth=depth + 1,
+    )
+    if drive_result.answer.kind is not AnswerKind.ENDED:
+        return _Advance(answer=drive_result.answer)
+
+    output: dict[str, Any] = {}
+    if mechanism.result is not None:
+        endings_map = mechanism.result.endings
+        child_ending = drive_result.answer.ending
+        if child_ending is None or child_ending not in endings_map:
+            raise EngineRefusal(
+                f"process call {node_id!r}: child ending {child_ending!r} has no "
+                "result.endings mapping (V10 should have refused this at validation time)"
+            )
+        final_run_state = {"state": drive_result.final_state or {}}
+        output = {
+            name: _evaluate(path, final_run_state)
+            for name, path in mechanism.result.outputs.items()
+        }
+        output["ending"] = endings_map[child_ending]
+
+    from sulis_workflows.engine.controls import check_controls
+
+    controls_result = await check_controls(
+        tool,
+        output,
+        registry=ctx.registry,
+        code_tool=ctx.code_tool,
+        platform_id=ctx.platform_id,
+        run_id=run_id,
+    )
+    if not controls_result.checkable:
+        call_outcome = StepOutcome.CONTROLS_UNCHECKABLE
+    elif controls_result.all_passed:
+        call_outcome = StepOutcome.SUCCESS
+    else:
+        call_outcome = StepOutcome.CONTROL_FAILED
+    call_result = StepAttemptResult(
+        outcome=call_outcome,
+        output=output if call_outcome is StepOutcome.SUCCESS else None,
+        controls=controls_result,
+    )
+    return await _record_step_result(
+        process,
+        scope_def,
+        node,
+        node_id,
+        tool,
+        call_result,
+        attempts,
+        baseline,
+        run_state,
+        run_id,
+        scope,
+        ctx,
+        depth,
+        performed_by=f"PROCESS:{mechanism.ref or 'inline'}",
     )
 
 
@@ -1367,6 +1798,7 @@ async def _advance_gate(
                 kind=AnswerKind.DECISION_STEP,
                 says=node.asks or "A decision is needed.",
                 node_id=node_id,
+                scope=scope,
                 resolved_inputs={
                     "agent_tool": decider.ref,
                     "criteria": node.criteria,
@@ -1381,6 +1813,7 @@ async def _advance_gate(
                 kind=AnswerKind.AWAITING_DECISION,
                 says=node.asks or "A decision is needed.",
                 node_id=node_id,
+                scope=scope,
             )
         )
 
@@ -1390,6 +1823,7 @@ async def _advance_gate(
             kind=AnswerKind.AWAITING_DECISION,
             says=node.asks or "A decision is needed.",
             node_id=node_id,
+            scope=scope,
         )
     )
 
@@ -1404,6 +1838,4 @@ def _outcome_from_record(index: int, record: AttemptRecord) -> DeciderOutcome:
 
 
 def _evaluate(expr: str, run_state: Mapping[str, Any]) -> Any:
-    from sulis_workflows.definition.expressions import evaluate, parse
-
     return evaluate(parse(expr), run_state)
