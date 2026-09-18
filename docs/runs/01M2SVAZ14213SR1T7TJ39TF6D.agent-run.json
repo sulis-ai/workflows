@@ -1,0 +1,136 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2SVAZ14213SR1T7TJ39TF6D",
+  "started_at": "2026-09-18T01:15:00Z",
+  "completed_at": "2026-09-18T02:00:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 gap closure, part 2",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "Closed the one remaining gap from the last report: a step being given a second try after failing a quality check now actually sees what was wrong the first time, not just that it failed. This is the difference between genuinely fixing something and blindly trying again and hoping. Proven directly — a new test inspects exactly what the retried attempt receives, not just whether it eventually succeeds. While building this, found and fixed a second, smaller problem in the same area: the specific quality check that failed couldn't actually be looked up by name from inside a step, because of how its identifier is written (a technical detail of the expression language) — fixed so a step can now reference it correctly. This closes out the execution-engine work entirely; nothing flagged from the last two reports remains open except the one item that was always out of scope (running steps in parallel or over a list), which needs its own, separate piece of work.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test asserting on the repair dispatch's actual received inputs, not just the run's final outcome — a stronger test than outcome-only, since it can't pass by accident."
+      },
+      {
+        "coordinate": "docs/runs/01M2SQZ60Y8P73FCEVXGW3WZHA.agent-run.json",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "The immediately prior run record, whose own `untouched[]` entry `control-fail-repair-no-failures-as-input` is exactly what this run closes."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Please close the gap",
+    "read_as": "The user's message names \"the gap\" singular, immediately following a reply that named exactly one remaining open item — the repair dispatch not receiving the failures as input. Read as: close that specific, already-identified gap, not a request to pick among several open items or to reopen the closed ones.",
+    "filled_in": [
+      {
+        "gap": "The user said \"close the gap\" without naming which one, though only one was live in the immediately preceding message.",
+        "assumed": "The referent is the repair-attempt-doesn't-see-failures gap named in the prior message's own prose, not the still-open priority question (parallel/loops vs. wiring a model) — that question was framed as theirs to answer, not a \"gap\" in delivered work, and a bare \"close the gap\" naturally reads as pointing at the one item framed as a shortfall in work already done.",
+        "basis": "PRINCIPAL_SAID",
+        "grounded_in": "The immediately preceding assistant message's own final paragraph, which named exactly one gap in these words: \"a repair attempt does not yet get told what was wrong before it retries.\"",
+        "reversal_cost": "Cheap — if this reading is wrong, the actual gap meant is still on record and closable in the same way.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "A control is referenced in run state by its bare id (`insight`), not its full `id@version` ref (`insight@1`).",
+      "problem": "Writing \"the failures as input\" into `steps.<node>.controls` needs a key a Step's own `in:` expression can actually address — but the expression grammar's path syntax (S8: `path := ident (\".\" ident | \"[\" integer \"]\")*`) has no room for `@` inside an ident, so a dict keyed by the full versioned ref (`insight@1`) would be structurally unreachable from any `in:` mapping.",
+      "options_rejected": [
+        "Key by the full ref anyway, accepting that S2.2's reserved path is only reachable by other means (e.g. tooling reading the record directly, never a Step's own expression): rejected — this would make the very field S10.2 asks a repair to read from useless to the one place S10.2 says it should be read from.",
+        "Invent a sanitised key (e.g. replacing `@`/`.` with `_`): rejected — a fabricated encoding scheme not grounded in anything the spec or the expression grammar already defines, and harder to predict for a process author writing an `in:` mapping by hand."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Localized to _step_record_from's one dict comprehension; no change to the durable record itself, which still stores the full versioned ref for audit purposes.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "The expression tokenizer's ident pattern (definition/expressions.py's _TOKEN_RE) has no `@` in its character class; parsing a path segment containing `@` fails.",
+          "source": "src/sulis_workflows/definition/expressions.py, read directly this session and in earlier WP-01 work this session's context carries forward."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A run resolves exactly one version of each reference once, at run start (spec S1.2: \"Resolution happens once, when a run starts\") — so within one run, a control's bare id and its resolved version are in 1:1 correspondence, and the bare id alone is unambiguous.",
+          "source": "docs/spec/process-definition.md S1.2, read directly."
+        }
+      ],
+      "revisit_if": "A future work package lets one Step reference two different controls that happen to share a bare id but differ only in version within the same run — not possible under the current registry/resolution model, so not expected."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after wiring failures-as-input into the repair dispatch.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "288 passed (287 pre-existing + 1 new test), 0 failed."
+    },
+    {
+      "subject": "Whether the repair dispatch's own received inputs (not just the run's final outcome) actually carry the prior failure's findings.",
+      "method": "A new test (tests/engine/test_run.py::test_control_fail_repair_receives_the_failures_as_input) records every `inputs` dict the stub Tool adapter actually receives, across both the original and the repaired dispatch, and asserts directly on their contents.",
+      "location": "tests/engine/test_run.py",
+      "result": "First dispatch's inputs contain no `prior_findings` key (nothing to report yet); the repair dispatch's inputs contain the first attempt's actual findings, non-empty — confirmed by running the test, which passed on first write."
+    },
+    {
+      "subject": "Lint, format and type-check of the changed files.",
+      "method": "python -m ruff check / ruff format --check / mypy, scoped to engine/ and tests/engine/ (already covered wholesale by ci.yml — no CI change needed).",
+      "location": "src/sulis_workflows/engine/run.py, tests/engine/test_run.py",
+      "result": "Clean after one formatting pass: 0 ruff findings, 0 reformatting needed, mypy success on 7 source files."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "state-reducers-replace-only",
+      "location": "src/sulis_workflows/engine/state.py",
+      "divergence": "Unchanged from both prior run records — only REPLACE is implemented; MERGE/APPEND/UPSERT_BY_ID still refuse.",
+      "governed_exception": false,
+      "why_not_now": "Still genuinely blocked on PARALLEL/FOR_EACH support (WP-03), which is what would produce a real, testable second-write-to-one-channel case. Unchanged reasoning from docs/runs/01M2RCJYPX0H56H4EKV2E3M6YW.agent-run.json."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When wiring a new runtime data path into a place an author-facing expression is meant to read it, check the expression grammar's own lexical rules before choosing the key shape — a dict key that looks natural in Python (a full `id@version` ref) can be structurally unreachable from the DSL that is actually supposed to consume it.",
+      "incident": "The first draft of _step_record_from keyed steps.<node>.controls by the control's full ref (e.g. \"insight@1\"); this would have compiled and run without error but made the field unreachable from any real `in:` mapping, since the expression tokenizer's ident pattern excludes `@` — caught before shipping only because a test was written that actually exercises an `in:` mapping reading the new field, not one that only checked the record's own shape in isolation.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future work in this repository that adds a new run-state path meant to be read by a Step's own `in:`/`if:`/expression field — write the test as an actual expression reading that path, not just an assertion on the stored data structure.",
+      "proposed_check": "tests/engine/test_run.py::test_control_fail_repair_receives_the_failures_as_input, which exercises the real `in:` mapping end to end.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "on_control_fail's repair mechanism is now complete against spec S10.2 step 5's own wording: bounded, and genuinely informed by what failed — nothing flagged from the last two reports remains open in this area."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The priority question from two reports ago still stands and is still yours: build out the missing pieces (parallel work, loops over lists, one process calling another), wire in a real AI model for the steps this engine currently only pauses on, or something else.",
+        "action": "No code action until you answer; I will scope whichever direction you name into a work package once you do.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Hold here — every gap explicitly flagged as a shortfall in delivered work is now closed; what's left is genuinely a new-direction decision, not a completion.",
+      "reason": "Consistent with the same reasoning given in both prior reports.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
