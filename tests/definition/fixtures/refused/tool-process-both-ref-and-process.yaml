@@ -1,0 +1,25 @@
+# D18: a PROCESS mechanism MUST declare exactly one of `ref`/`process` —
+# both is refused, the bad-but-conformant case of "declare both, let the
+# engine sort it out" rather than committing to one.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: run-both
+version: 1.0.0
+title: Calls a process two ways at once
+inputs: { brief: { type: "profile:brief@1" } }
+output: { note: { type: string } }
+controls: [ { profile: note@1 } ]
+mechanism:
+  kind: PROCESS
+  ref: grounded-inquiry@1
+  process:
+    start: only-step
+    nodes:
+      only-step: { type: STEP, tool: note-taker@1, in: {}, out: { note: state.note }, end: DONE }
+    endings:
+      DONE: { outcome: SUCCESS, says: "Noted." }
+  inputs: { brief: brief }
+  result:
+    outputs: { note: state.note }
+    endings: { DONE: DONE }
+effect: QUERY

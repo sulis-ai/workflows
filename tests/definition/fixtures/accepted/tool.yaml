@@ -14,7 +14,7 @@ controls:
   - profile: insight@1
   - conventions: faithful-generation@1
 mechanism:
-  kind: AGENTIC
+  kind: SKILL
   ref: skills/interrogate
   allowed_tools: [ground-citations@1]
 effect: QUERY

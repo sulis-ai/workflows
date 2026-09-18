@@ -244,7 +244,6 @@
           "enum": [
             "CODE",
             "SKILL",
-            "AGENTIC",
             "PROCESS",
             "TOOL",
             "EXTERNAL"
@@ -278,6 +277,9 @@
         },
         "result": {
           "$ref": "#/$defs/call_result"
+        },
+        "process": {
+          "$ref": "#/$defs/inline_process"
         }
       },
       "allOf": [
@@ -305,25 +307,6 @@
             "properties": {
               "kind": {
                 "const": "SKILL"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "ref"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "kind": true,
-              "ref": true
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "kind": {
-                "const": "AGENTIC"
               }
             }
           },
@@ -367,13 +350,23 @@
             }
           },
           "then": {
-            "required": [
-              "ref"
+            "oneOf": [
+              {
+                "required": [
+                  "ref"
+                ]
+              },
+              {
+                "required": [
+                  "process"
+                ]
+              }
             ],
             "additionalProperties": false,
             "properties": {
               "kind": true,
               "ref": true,
+              "process": true,
               "inputs": true,
               "path": true,
               "result": true
@@ -400,6 +393,43 @@
           }
         }
       ]
+    },
+    "inline_process": {
+      "type": "object",
+      "title": "Inline process (D18)",
+      "description": "PROCESS's anonymous form: a sequence belonging only to this one Tool, with no id/version/permission of its own. Same node/state/ending shapes a top-level Process uses.",
+      "required": [
+        "start",
+        "nodes",
+        "endings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "state": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/state_channel"
+          }
+        },
+        "endings": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/ending"
+          }
+        }
+      }
     },
     "control_ref": {
       "type": "object",

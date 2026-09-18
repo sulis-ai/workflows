@@ -76,14 +76,28 @@ class CallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InlineProcess:
+    """A PROCESS mechanism's anonymous form (spec §4.3/§9, D18): a sequence
+    belonging only to this one Tool, with no `id`/`version`/`permission`
+    of its own — unlike `ref: process-id@version`, it is not a separately
+    startable, independently governed run, so none of those apply."""
+
+    start: str
+    nodes: Mapping[str, Node]
+    state: Mapping[str, StateChannel] = field(default_factory=dict)
+    endings: Mapping[str, Ending] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class Mechanism:
-    kind: str  # CODE | SKILL | AGENTIC | PROCESS | TOOL | EXTERNAL
+    kind: str  # CODE | SKILL | PROCESS | TOOL | EXTERNAL
     ref: str | None = None
     allowed_tools: tuple[str, ...] = ()
     composes: tuple[ComposeItem, ...] = ()
     inputs: Mapping[str, str | list[str]] = field(default_factory=dict)
     path: str | None = None
     result: CallResult | None = None
+    process: InlineProcess | None = None  # PROCESS's anonymous form (D18)
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +422,22 @@ def _control_ref(d: Mapping[str, Any]) -> ControlRef:
     )
 
 
+def _inline_process(d: Mapping[str, Any]) -> InlineProcess:
+    """A PROCESS mechanism's anonymous form (D18) — the same node/state/
+    ending shapes a top-level Process uses, built the same way, minus the
+    fields (`id`, `version`, `permission`, ...) an anonymous sequence has
+    no use for."""
+    return InlineProcess(
+        start=d["start"],
+        nodes={node_id: _node(node_id, n) for node_id, n in d["nodes"].items()},
+        state={k: _state_channel(v) for k, v in d.get("state", {}).items()},
+        endings={
+            k: Ending(outcome=v["outcome"], says=v["says"])
+            for k, v in d.get("endings", {}).items()
+        },
+    )
+
+
 def _mechanism(d: Mapping[str, Any]) -> Mechanism:
     return Mechanism(
         kind=d["kind"],
@@ -428,6 +458,9 @@ def _mechanism(d: Mapping[str, Any]) -> Mechanism:
             )
             if d.get("result") is not None
             else None
+        ),
+        process=(
+            _inline_process(d["process"]) if d.get("process") is not None else None
         ),
     )
 

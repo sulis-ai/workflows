@@ -1,0 +1,214 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2T4V9MCZYB0B8X3PBRBQD9N",
+  "started_at": "2026-09-18T14:50:00Z",
+  "completed_at": "2026-09-18T16:10:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — D18: remove AGENTIC, fold it into SKILL/PROCESS (schema + model + validator + fixtures)",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "Built what we settled on: the format now has five ways a Tool's work gets done, not six. A step following one set of written instructions, with optional bounded discretion, is a SKILL. A step that's really a whole workflow of its own — either a separately published one, or a private one belonging only to this Tool — is a PROCESS. AGENTIC is gone; it never earned a separate identity once we agreed it wasn't about free choice. Every real AI-judgment step in the test corpus (research, interrogation, recommendation, review) is a one-word change from AGENTIC to SKILL and behaves identically. Added the actual ability to declare a private, inline workflow (no separate name or version) as a real, working, tested feature — including two tests that specifically try to break its one rule (must name exactly one of \"call this named workflow\" or \"here's a private one\") and get refused correctly. This is schema, data-model and rulebook work only; the running engine doesn't yet know how to execute a workflow-as-a-step in either form (that's still future work), but it's now something you can correctly write down and have checked before that work starts. Full suite: 310 tests pass.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/spec/process-definition.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/model.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New InlineProcess dataclass and Mechanism.process field; AGENTIC removed from the kind comment."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/process.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New inline_process $def; PROCESS's mechanism branch requires exactly one of ref/process; AGENTIC removed from the kind enum and its own branch; SKILL's branch gains allowed_tools."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/tool.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Identical edit to its own (separately maintained, pre-existing duplicate) copy of the mechanism $def."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "V2's allowed_tools[] resolution and V3's policy-only-control check both moved from checking mechanism.kind == \"AGENTIC\" to == \"SKILL\"."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/appendix_a_corpus/",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "All 4 AGENTIC Tool fixtures (grounded-recon, interrogate, recommend, review-recommendations) migrated to SKILL — a one-word change, since none were ever more than one hand-off."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/accepted/tool-process-inline.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New accepted fixture proving the inline process: block parses end to end through both schema and model layers."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/refused/tool-process-neither-ref-nor-process.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New refused fixture: the bad-but-conformant case of declaring neither ref nor process on a PROCESS mechanism."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/refused/tool-process-both-ref-and-process.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New refused fixture: the bad-but-conformant case of declaring both at once."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Go ahead and [truncated — read as approving the merge proposed in my immediately preceding message: fold AGENTIC into PROCESS, letting PROCESS's ref be either external or inline].",
+    "read_as": "The message was cut off after \"Go ahead and\", but it directly follows my own proposal (\"fold AGENTIC into PROCESS... SKILL stays as-is... PROCESS also takes an inline, anonymous definition\") and a direct question about the trade-off (rewriting the corpus vs. keeping the one-kind shorthand). Read as approval to proceed with exactly that merge, since no other pending proposal existed for \"go ahead\" to attach to, and the risk of this reading being wrong is low (reversible, and the user would have corrected a materially different \"go ahead\" quickly).",
+    "filled_in": [
+      {
+        "gap": "My own proposal message left one question open (\"worth it for a simpler format, or is keeping the one-skill shorthand worth its own kind?\") without the user's message (as received) containing an answer to it before being cut off.",
+        "assumed": "Resolved it in favour of the simplification (drop AGENTIC), since that was the affirmative direction \"go ahead\" was responding to, and since keeping the shorthand would have meant NOT going ahead with the merge at all — the two readings are mutually exclusive, and only one matches an instruction to proceed.",
+        "basis": "PRINCIPAL_SAID",
+        "grounded_in": "The immediately preceding assistant message's own final question, framed as a binary choice where \"go ahead\" (proceed with the merge) and \"keep the shorthand\" (don't) cannot both be true.",
+        "reversal_cost": "Cheap if wrong — every changed fixture is a one-word revert (SKILL back to AGENTIC), and the schema/model additions are purely additive (nothing removed that existing code depended on, confirmed by the full pre-existing suite passing unchanged in shape, only fixture values changed).",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D18 (spec log): AGENTIC removed; SKILL absorbs its single-step/bounded-discretion case; PROCESS gains an inline, anonymous form for the multi-step case. Full reasoning and worked example recorded in the spec itself.",
+      "problem": "See D18's own entry in docs/spec/process-definition.md §18 for the full context/options/outcome — not restated here since the spec is the authoritative copy and duplicating it risks the two drifting apart (CLAUDE.md: \"hold conventions once\").",
+      "options_rejected": [
+        "See D18's own \"Options\" clause in the spec for the three alternatives considered and rejected there."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "See D18's own \"Reversal\" clause: cheap to reintroduce AGENTIC as sugar for a SKILL-shaped PROCESS call; harder once real (non-fixture) process definitions start using the inline process: form.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Every place AGENTIC appeared in source code, schema, or test fixtures (20+ files, mapped by a repository-wide grep before any edit) was either updated to SKILL/removed, or left untouched deliberately (docs/runs/*.json, which are historical records not to be edited).",
+          "source": "grep -rln \"AGENTIC\" across the repository, run before and after this change; after, only docs/spec/process-definition.md's own D17 (historical) and D18 (explaining the removal) still name it."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The new inline process: shape parses correctly end to end through both the JSON Schema layer and model.py's builder functions, producing a real InlineProcess with real StepNode/RouteNode/Ending objects, not just schema-valid JSON.",
+          "source": "A direct Python check this session: load_definition_file() on the new accepted fixture, then inspecting the resulting Tool.mechanism.process object's real dataclass fields."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The new PROCESS mechanism's ref/process mutual-exclusivity rule refuses both the neither-declared and the both-declared bad-but-conformant cases, not just the never-declared trivial case.",
+          "source": "tests/definition/fixtures/refused/tool-process-neither-ref-nor-process.yaml and tool-process-both-ref-and-process.yaml, both passing via the pre-existing, auto-discovering test_schema_v1.py::test_refused_fixture_is_refused_by_v1."
+        }
+      ],
+      "revisit_if": "See D18's own \"Revisit\"-equivalent guidance embedded in its Consequences clause: WP-03 (§9, calling a process) is where the engine actually gains the ability to run either PROCESS form; this run is schema/model/spec only."
+    },
+    {
+      "headline": "The engine's own dispatch logic needed zero functional changes.",
+      "problem": "Removing a mechanism kind that the engine might have branched on by name could silently change runtime behaviour.",
+      "options_rejected": [],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "None — nothing to change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "grep for `== \"AGENTIC\"` (an actual runtime branch) across src/sulis_workflows/engine/*.py found zero matches, before this change — every AGENTIC reference in engine/*.py was prose (docstrings/comments), never a conditional. The engine's real STEP-dispatch check has always been the blanket `if tool.mechanism.kind != \"CODE\":`, unaffected by which specific non-CODE kinds exist.",
+          "source": "grep -n 'AGENTIC' src/sulis_workflows/engine/*.py, run before any code change this session; cross-checked against the actual dispatch condition in engine/run.py's _advance_step."
+        }
+      ],
+      "revisit_if": "Not applicable — confirmed, not a forecast."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after removing AGENTIC and adding the inline process: form.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "310 passed (307 pre-existing + 3 new fixture-driven tests, auto-discovered by test_schema_v1.py's existing parametrize-over-directory pattern — no test code changes needed for the new fixtures themselves), 0 failed."
+    },
+    {
+      "subject": "Every fixture and test that used AGENTIC incidentally (not testing AGENTIC-specific behaviour) continues to test the same thing under SKILL.",
+      "method": "Re-read each of the ~20 files found by the initial grep before editing; confirmed each occurrence was either a representative \"some non-CODE mechanism\" example (safe to rename) or the V3 policy-only-controls rule (still applies to SKILL identically after the validate.py change).",
+      "location": "tests/definition/, tests/engine/, tests/definition/fixtures/",
+      "result": "All migrated occurrences confirmed to test the same logical thing after the rename; no test's assertion needed to change beyond the literal string \"AGENTIC\" -> \"SKILL\"."
+    },
+    {
+      "subject": "Lint, format and type-check of every changed file.",
+      "method": "ruff check / ruff format --check / mypy, scoped to the changed files (the wider repo's own pre-existing noise, confirmed entirely within the deprecated compiler/ path this session must not touch, is unrelated).",
+      "location": "src/sulis_workflows/definition/model.py, validate.py; src/sulis_workflows/engine/{gates,steps,run,controls}.py; src/sulis_workflows/domain/ports/code_tool.py; the four migrated test files.",
+      "result": "0 ruff findings after one auto-fix (an unnecessary quoted forward-reference), 0 reformatting needed, mypy clean on all 7 scoped source files."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "inline-process-internals-not-cross-validated",
+      "location": "src/sulis_workflows/definition/validate.py",
+      "divergence": "An inline process:'s own internal STEP nodes reference Tools (tool: <id@v>) the same way a top-level Process's nodes do, but this pass does not extend V2's reference-resolution to walk into an inline process's own node graph and check those references resolve.",
+      "governed_exception": false,
+      "why_not_now": "No fixture exercises a real inline process with Tool references that need resolving (the one new accepted fixture uses tool: attack-claim@1 without that Tool being registered, and the schema-only test that exercises it never resolves against a registry). Building this cross-validation now, with nothing real to check it against, would be exactly the speculative guess D18 itself declined to make for the engine execution side."
+    },
+    {
+      "id": "catalogue-uc-tool-kinds-still-describes-agentic",
+      "location": "docs/use-cases/CATALOGUE.md",
+      "divergence": "UC-TOOL-KINDS's description (\"an agent skill (free to choose its own route)\") still describes the pre-D18 framing, grounded in a citation to an external register (FD's own tool.schema.json).",
+      "governed_exception": true,
+      "why_not_now": "CATALOGUE.md is tier 2 in CLAUDE.md's authority hierarchy (above the spec) and this text is citing external grounding evidence for why the underlying need exists, not asserting this format's own current mechanism-kind vocabulary; the need itself (some way to express bounded-discretion agent work) is still met, just by SKILL now rather than a same-named kind. Editing tier-2 catalogue text was outside what this change asked for."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a decision you already recorded (D17) explicitly concedes that two things are \"operationally identical... not yet load-bearing in code\", that sentence is itself the argument for merging them — read your own decision log's own consequences clause as a live question, not just an honesty disclosure.",
+      "incident": "D17 said outright that AGENTIC and SKILL were operationally identical under the current engine. That sentence, sitting in the very decision meant to keep them separate, was the strongest evidence for D18's own reversal — found only because the principal asked the obvious follow-up question directly, not because re-reading D17 on its own surfaced it.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "When writing a decision's Consequences clause names two things as behaviourally identical for now, treat that as a standing invitation to revisit whether they should be one thing, not settled prose to leave alone.",
+      "proposed_check": "D18's own Context clause, which quotes this exact sentence from D17 as its starting point.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "The mechanism-kind vocabulary is five kinds, spec-correct and schema/model-correct, with a real accepted fixture and two real refused fixtures proving the new PROCESS ref/process exclusivity rule. Every existing AI-judgment Tool in the corpus is SKILL, unchanged in behaviour."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "An inline process:'s own internal Tool references are not yet cross-validated against the registry the way a top-level Process's are.",
+        "untouched_id": "inline-process-internals-not-cross-validated",
+        "trigger": "A real fixture or corpus scenario that declares an inline process: with Tool references meant to resolve.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Safe today since nothing exercises it; becomes a real gap the first time someone writes an inline process: expecting a broken tool: reference to be caught at validation time."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The priority question from several reports back is still open and still yours: build out the missing pieces (parallel work, loops over lists, one process calling another), wire in a real AI model for the steps this engine currently only pauses on, or something else.",
+        "action": "No code action until you answer; I will scope whichever direction you name into a work package once you do.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      },
+      {
+        "n": 2,
+        "label": "This change lands squarely on §9 (\"calling a process\"), which WP-02 explicitly deferred to WP-03. If you want the engine to actually be able to run a PROCESS mechanism (either form) rather than just validate it, that is a real, sizeable next piece of work.",
+        "action": "Say the word and I will scope it as its own work package rather than building it speculatively now.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Hold here for your answer on action 1 (which also now subsumes action 2, since calling a process is one of that question's own named options) rather than starting WP-03 speculatively.",
+      "reason": "Consistent with the pattern held throughout this whole session: settle the conceptual/spec question fully and cheaply before building the expensive part.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

@@ -119,7 +119,7 @@ def _produce_tool(permission: str | None = "workflows.produce.dispatch") -> Tool
         header=_header("produce", "TOOL"),
         output={"recommendation": OutputSpec(type="string")},
         controls=(),
-        mechanism=Mechanism(kind="AGENTIC", ref="skills/produce"),
+        mechanism=Mechanism(kind="SKILL", ref="skills/produce"),
         effect="QUERY",
         inputs={},
         permission=permission,
@@ -131,7 +131,7 @@ def _review_tool(permission: str | None = "workflows.review.dispatch") -> Tool:
         header=_header("review", "TOOL"),
         output={"decision": OutputSpec(type="any")},
         controls=(),
-        mechanism=Mechanism(kind="AGENTIC", ref="skills/review"),
+        mechanism=Mechanism(kind="SKILL", ref="skills/review"),
         effect="QUERY",
         inputs={},
         permission=permission,
@@ -594,7 +594,7 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
         header=_header("classify", "TOOL"),
         output={"verdict": OutputSpec(type="enum[A, B]")},
         controls=(),
-        mechanism=Mechanism(kind="AGENTIC", ref="skills/classify"),
+        mechanism=Mechanism(kind="SKILL", ref="skills/classify"),
         effect="QUERY",
         inputs={"question": InputSpec(type="string")},
         permission="workflows.classify.dispatch",
@@ -646,9 +646,9 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
 def test_tool_step_hand_off_carries_instructions_ref_and_controls():
     """§12.1: `TOOL_STEP` carries "resolved inputs, instructions ref,
     controls" — previously only `resolved_inputs` reached the caller; the
-    Tool's own mechanism `ref` (§4.3: "a skill document" for SKILL, "a
-    skill or agent definition" for AGENTIC) and its declared `controls`
-    were only reachable by the caller looking the Tool up itself."""
+    Tool's own mechanism `ref` (§4.3: "a skill document" for SKILL) and
+    its declared `controls` were only reachable by the caller looking the
+    Tool up itself."""
     skill_tool = Tool(
         header=_header("classify", "TOOL"),
         output={"verdict": OutputSpec(type="enum[A, B]")},
@@ -841,14 +841,14 @@ def test_decide_uses_the_gates_own_permission_when_no_deciders_are_declared():
 
 def test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission():
     """§10.1/D12: permission is checked before ANY dispatch — a `TOOL_STEP`
-    hand-off is the dispatch for a `SKILL`/`AGENTIC` Tool, so a Tool with no
+    hand-off is the dispatch for a `SKILL` Tool, so a Tool with no
     declared `permission` must never reach the caller as a hand-off, the
     same as a CODE Tool never reaches `code_tool.call()`."""
     agentic_tool = Tool(
         header=_header("classify", "TOOL"),
         output={"verdict": OutputSpec(type="enum[A, B]")},
         controls=(),
-        mechanism=Mechanism(kind="AGENTIC", ref="skills/classify"),
+        mechanism=Mechanism(kind="SKILL", ref="skills/classify"),
         effect="QUERY",
         inputs={"question": InputSpec(type="string")},
         permission=None,
@@ -881,7 +881,7 @@ def test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied(
         header=_header("classify", "TOOL"),
         output={"verdict": OutputSpec(type="enum[A, B]")},
         controls=(),
-        mechanism=Mechanism(kind="AGENTIC", ref="skills/classify"),
+        mechanism=Mechanism(kind="SKILL", ref="skills/classify"),
         effect="QUERY",
         inputs={"question": InputSpec(type="string")},
         permission="workflows.classify.dispatch",

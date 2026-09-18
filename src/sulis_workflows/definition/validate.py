@@ -225,10 +225,12 @@ def _v2_mechanism_references(
     mechanism: model.Mechanism, registry: Registry
 ) -> list[Finding]:
     """`ref`/`composes`/`allowed_tools` are `id@version` references where the
-    mechanism kind makes them one (spec §4.3); CODE/SKILL/AGENTIC's own `ref`
-    names a module or skill path, not a registered definition, so only PROCESS's
-    `ref`, TOOL(composite)'s `composes[].tool`, and AGENTIC's `allowed_tools[]`
-    are checked here."""
+    mechanism kind makes them one (spec §4.3); CODE/SKILL's own `ref`
+    names a module or skill path, not a registered definition, so only a
+    referenced (not inline, D18) PROCESS's `ref`, TOOL(composite)'s
+    `composes[].tool`, and SKILL's `allowed_tools[]` are checked here.
+    An inline PROCESS's own internal `tool:` references are not yet
+    resolved by this function (untouched — no fixture exercises one)."""
 
     findings: list[Finding] = []
     if mechanism.kind == "PROCESS" and mechanism.ref:
@@ -240,7 +242,7 @@ def _v2_mechanism_references(
             _, err = _resolve(registry, "TOOL", item.tool)
             if err:
                 findings.append(err)
-    if mechanism.kind == "AGENTIC":
+    if mechanism.kind == "SKILL":
         for ref in mechanism.allowed_tools:
             _, err = _resolve(registry, "TOOL", ref)
             if err:
@@ -249,7 +251,7 @@ def _v2_mechanism_references(
 
 
 def v3_tool_controls(tool: model.Tool, registry: Registry) -> list[Finding]:
-    """A Tool with no control; a SKILL/AGENTIC Tool with only policy controls."""
+    """A Tool with no control; a SKILL Tool with only policy controls."""
 
     findings: list[Finding] = []
     if not tool.controls:
@@ -260,7 +262,7 @@ def v3_tool_controls(tool: model.Tool, registry: Registry) -> list[Finding]:
                 fix="add at least one control (profile/conventions/fitness/policy)",
             )
         )
-    if tool.mechanism.kind in ("SKILL", "AGENTIC"):
+    if tool.mechanism.kind == "SKILL":
         has_non_policy = any(c.kind != "policy" for c in tool.controls)
         if tool.controls and not has_non_policy:
             findings.append(

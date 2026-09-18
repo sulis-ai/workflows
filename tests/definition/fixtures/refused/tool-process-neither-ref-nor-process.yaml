@@ -1,0 +1,17 @@
+# D18: a PROCESS mechanism MUST declare exactly one of `ref`/`process` —
+# neither is refused, the bad-but-conformant case of "just leave it out".
+api_version: sulis.workflows/v1
+kind: TOOL
+id: run-nothing
+version: 1.0.0
+title: Calls nothing in particular
+inputs: { brief: { type: "profile:brief@1" } }
+output: { note: { type: string } }
+controls: [ { profile: note@1 } ]
+mechanism:
+  kind: PROCESS
+  inputs: { brief: brief }
+  result:
+    outputs: { note: state.note }
+    endings: { DONE: DONE }
+effect: QUERY

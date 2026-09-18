@@ -20,7 +20,7 @@ def test_tool_model_fields() -> None:
     assert tool.controls[0].kind == "profile"
     assert tool.controls[0].ref == "insight@1"
     assert tool.controls[1].kind == "conventions"
-    assert tool.mechanism.kind == "AGENTIC"
+    assert tool.mechanism.kind == "SKILL"
     assert tool.mechanism.allowed_tools == ("ground-citations@1",)
     assert tool.effect == "QUERY"
     assert {e.code for e in tool.errors} == {"SOURCE_UNREACHABLE", "BRIEF_UNANSWERABLE"}

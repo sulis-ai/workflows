@@ -12,9 +12,9 @@ the property this module exists to prove, not merely assert.
 Scope (mirrors steps 2-4's own narrowing, for the same reason — an
 honest, tested slice over a guessed-at complete one):
 
-- `STEP`: only `CODE`-mechanism Tools are dispatched inline; `SKILL`/
-  `AGENTIC` Tools are handed off as `TOOL_STEP` for the caller's agent
-  session to run and `report()` back.
+- `STEP`: only `CODE`-mechanism Tools are dispatched inline; `SKILL`
+  Tools are handed off as `TOOL_STEP` for the caller's agent session to
+  run and `report()` back.
 - `ROUTE`: full support (`engine/routes.py`).
 - `GATE`: the `policy` decider runs inline; `agent`/`person` deciders are
   handed off as `DECISION_STEP`/`AWAITING_DECISION` for `report()`/
@@ -173,8 +173,8 @@ async def report(
     error_code: str | None = None,
 ) -> NextAnswer:
     """§12.1: `report(run, scope, node, output | error)` — completes a
-    `TOOL_STEP` the caller's agent session ran externally (a `SKILL`/
-    `AGENTIC` Tool), OR a GATE's `agent` decider `DECISION_STEP` hand-off
+    `TOOL_STEP` the caller's agent session ran externally (a `SKILL`
+    Tool), OR a GATE's `agent` decider `DECISION_STEP` hand-off
     (gates.py's own docstring: an agent decider "need[s] a round trip
     through next()/report()/decide()", the same as a STEP's Tool). Records
     the attempt, checks controls (STEP) or the decision's evidence and
@@ -799,8 +799,8 @@ async def _advance_step(
 
     if tool.mechanism.kind != "CODE":
         # §10.1/D12: permission is checked before ANY dispatch, hand-off
-        # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`/
-        # `AGENTIC` Tool (the caller's agent session performs it next), so
+        # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`
+        # Tool (the caller's agent session performs it next), so
         # refusing this check here rather than only inside `attempt_step`
         # (CODE-only) closes a gap where a permission-less or refused
         # non-CODE Tool was previously handed off uncontrolled.
@@ -852,10 +852,9 @@ async def _advance_step(
                 resolved_inputs=resolved_inputs,
                 # §12.1: "TOOL_STEP ... resolved inputs, instructions ref,
                 # controls" — `instructions_ref` is the mechanism's own
-                # `ref` (§4.3: "a skill document" for SKILL, "a skill or
-                # agent definition" for AGENTIC), previously only
-                # reachable by the caller looking the Tool up itself via
-                # `node.tool` and the registry, not carried on the answer.
+                # `ref` (§4.3: "a skill document" for SKILL), previously
+                # only reachable by the caller looking the Tool up itself
+                # via `node.tool` and the registry, not carried on the answer.
                 instructions_ref=tool.mechanism.ref,
                 controls=tuple({"kind": c.kind, "ref": c.ref} for c in tool.controls),
                 skippable=_is_skippable(process, node),

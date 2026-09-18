@@ -28,7 +28,7 @@ output:
   insights: { type: "list<profile:insight@1>" }
   verdict:  { type: "enum[SURVIVED, DROPPED, REVISED]" }
 controls: [ { profile: insight@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/interrogate }
+mechanism: { kind: SKILL, ref: skills/interrogate }
 effect: QUERY
 """,
         fmt="yaml",

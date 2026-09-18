@@ -10,8 +10,8 @@ same reason WP-01's own CLI calls it directly rather than through a port.
 document (`checker: <tool-ref>`, spec §5.1/§5.2's "a checker is a CODE
 Tool") and are dispatched through the same `CodeToolPort` a STEP's own
 Tool uses (mirrors §12.1's CODE/EXTERNAL/deterministic-PROCESS vs.
-SKILL/AGENTIC split — a checker is always CODE, so there is no hand-off
-case to invent here). This was deferred past WP-02 step 2 itself ("no
+SKILL/non-deterministic-PROCESS split — a checker is always CODE, so
+there is no hand-off case to invent here). This was deferred past WP-02 step 2 itself ("no
 fixture yet exercises it" — this module's own prior docstring) until a
 live run of the spec's own Appendix A worked example actually needed it:
 nearly every one of its Tools uses a `conventions:` control, so without

@@ -1,9 +1,9 @@
 """STEP execution — the CODE mechanism-kind path (spec §7.1, §10, §12.4, WP-02 step 2).
 
 Scope note: only `CODE`-kind Tools (deterministic, "a function the host can
-call", §4.3) are dispatched here. `SKILL`/`AGENTIC` Tools are
-non-deterministic and are handed to the caller as a `TOOL_STEP` by
-`next()` instead of run here (§12.1); `EXTERNAL`, deterministic `PROCESS`
+call", §4.3) are dispatched here. `SKILL` Tools (and a non-deterministic
+`PROCESS` call) are non-deterministic and are handed to the caller as a
+`TOOL_STEP` by `next()` instead of run here (§12.1); `EXTERNAL`, deterministic `PROCESS`
 and the `TOOL` composite mechanism follow in a later step, alongside
 `next()`/`report()` itself — that is where the engine's dispatch-or-defer
 decision actually lives (`docs/work-packages/WP-02-execution-engine.md`).
