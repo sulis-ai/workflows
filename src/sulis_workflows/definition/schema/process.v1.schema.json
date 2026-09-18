@@ -681,6 +681,10 @@
         },
         "end": {
           "type": "string"
+        },
+        "skip_permission": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

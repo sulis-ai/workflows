@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from sulis_workflows.definition.model import (
     Decider,
     Ending,
@@ -37,7 +39,15 @@ from sulis_workflows.domain.ports.code_tool import (
 )
 from sulis_workflows.domain.ports.policy import StubPolicyAdapter, Verdict
 from sulis_workflows.domain.ports.records import StubRecordsAdapter
-from sulis_workflows.engine.run import AnswerKind, EngineContext, decide, next_, report
+from sulis_workflows.engine.run import (
+    AnswerKind,
+    EngineContext,
+    EngineRefusal,
+    decide,
+    next_,
+    report,
+    skip,
+)
 
 
 def _header(id_: str, kind: str) -> Header:
@@ -701,3 +711,293 @@ def test_control_fail_repair_receives_the_failures_as_input():
     assert received_inputs[1][
         "prior_findings"
     ]  # the first attempt's findings, non-empty
+
+
+def test_skip_a_trivial_step_under_guided_policy_reaches_the_end():
+
+    tool = Tool(
+        header=_header("optional-check", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:optional"),
+        effect="QUERY",
+        permission="workflows.optional.dispatch",
+    )
+    process = Process(
+        header=_header("guided-process", "PROCESS"),
+        start="optional",
+        permission="workflows.guided.start",
+        execution_policy="GUIDED",
+        nodes={
+            "optional": StepNode(
+                id="optional",
+                tool="optional-check@1",
+                in_={},
+                out={},
+                criticality="TRIVIAL",
+                skip_permission="workflows.optional.skip",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    call_count = {"n": 0}
+
+    class NeverCalledAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            call_count["n"] += 1
+            return {"x": "should not happen"}
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=NeverCalledAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        skip(
+            process,
+            "run-skip-1",
+            "root",
+            "optional",
+            ctx,
+            inputs={},
+            host_inputs={},
+            reason="not needed for this brief",
+            subject="user-42",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "done"
+    assert call_count["n"] == 0  # the Tool was never dispatched
+
+
+def test_skip_is_refused_without_permission_being_granted():
+
+    process = Process(
+        header=_header("guided-process-2", "PROCESS"),
+        start="optional",
+        permission="workflows.guided.start",
+        execution_policy="GUIDED",
+        nodes={
+            "optional": StepNode(
+                id="optional",
+                tool="optional-check@1",
+                in_={},
+                out={},
+                criticality="TRIVIAL",
+                skip_permission="workflows.optional.skip",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    policy = StubPolicyAdapter(denies={"workflows.optional.skip"})
+    ctx = EngineContext(
+        policy=policy,
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        skip(
+            process,
+            "run-skip-2",
+            "root",
+            "optional",
+            ctx,
+            inputs={},
+            host_inputs={},
+            reason="not needed",
+            subject="user-42",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FORBIDDEN"
+
+
+def test_skip_a_standard_step_is_refused_even_under_guided():
+
+    process = Process(
+        header=_header("guided-process-3", "PROCESS"),
+        start="required",
+        permission="workflows.guided.start",
+        execution_policy="GUIDED",
+        nodes={
+            "required": StepNode(
+                id="required",
+                tool="optional-check@1",
+                in_={},
+                out={},
+                criticality="STANDARD",
+                skip_permission="workflows.required.skip",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    with pytest.raises(EngineRefusal):
+        _run(
+            skip(
+                process,
+                "run-skip-3",
+                "root",
+                "required",
+                ctx,
+                inputs={},
+                host_inputs={},
+                reason="let's try anyway",
+                subject="user-42",
+            )
+        )
+
+
+def test_skip_is_refused_when_the_process_is_strict_not_guided():
+
+    process = Process(
+        header=_header("strict-process", "PROCESS"),
+        start="optional",
+        permission="workflows.strict.start",
+        execution_policy="STRICT",
+        nodes={
+            "optional": StepNode(
+                id="optional",
+                tool="optional-check@1",
+                in_={},
+                out={},
+                criticality="TRIVIAL",
+                skip_permission="workflows.optional.skip",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    with pytest.raises(EngineRefusal):
+        _run(
+            skip(
+                process,
+                "run-skip-4",
+                "root",
+                "optional",
+                ctx,
+                inputs={},
+                host_inputs={},
+                reason="try skipping anyway",
+                subject="user-42",
+            )
+        )
+
+
+def test_skip_is_refused_when_the_step_declares_no_skip_permission():
+
+    process = Process(
+        header=_header("guided-process-4", "PROCESS"),
+        start="optional",
+        permission="workflows.guided.start",
+        execution_policy="GUIDED",
+        nodes={
+            "optional": StepNode(
+                id="optional",
+                tool="optional-check@1",
+                in_={},
+                out={},
+                criticality="TRIVIAL",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    with pytest.raises(EngineRefusal):
+        _run(
+            skip(
+                process,
+                "run-skip-5",
+                "root",
+                "optional",
+                ctx,
+                inputs={},
+                host_inputs={},
+                reason="try anyway",
+                subject="user-42",
+            )
+        )
+
+
+def test_guided_process_that_is_never_skipped_runs_normally():
+    process = Process(
+        header=_header("guided-process-5", "PROCESS"),
+        start="optional",
+        permission="workflows.guided.start",
+        execution_policy="GUIDED",
+        nodes={
+            "optional": StepNode(
+                id="optional",
+                tool="optional-check@1",
+                in_={},
+                out={"x": "state.x"},
+                criticality="TRIVIAL",
+                skip_permission="workflows.optional.skip",
+                next="done",
+            ),
+        },
+        endings={"done": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    tool = Tool(
+        header=_header("optional-check", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:optional"),
+        effect="QUERY",
+        permission="workflows.optional.dispatch",
+    )
+    code_tool = StubCodeToolAdapter(responses={"mod:optional": {"x": "ran"}})
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=code_tool,
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(next_(process, "run-skip-6", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.ending == "done"
+    assert (
+        code_tool.observed_calls
+    )  # the Tool WAS dispatched — GUIDED alone doesn't skip anything

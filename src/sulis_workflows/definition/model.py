@@ -196,6 +196,7 @@ class StepNode:
     on_depth_exhausted: RouteTarget | None = None
     next: str | None = None
     end: str | None = None
+    skip_permission: str | None = None  # host's opaque grammar (ADR-024); spec §6, D15
     type: str = "STEP"
 
 
@@ -463,6 +464,7 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             on_depth_exhausted=_route_target(d.get("on_depth_exhausted")),
             next=d.get("next"),
             end=d.get("end"),
+            skip_permission=d.get("skip_permission"),
         )
     if node_type == "ROUTE":
         return RouteNode(

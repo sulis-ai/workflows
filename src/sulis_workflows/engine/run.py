@@ -88,6 +88,7 @@ __all__ = [
     "decide",
     "next_",
     "report",
+    "skip",
 ]
 
 
@@ -133,6 +134,7 @@ class NextAnswer:
     resolved_inputs: Mapping[str, Any] | None = None
     ending: str | None = None
     outcome: str | None = None
+    skippable: bool = False
 
 
 class EngineRefusal(Exception):
@@ -265,9 +267,88 @@ async def decide(
     record = AttemptRecord(
         key=key,
         inputs={},
-        output=None,
+        output={"note": note} if note else None,
         control_results=[],
         verdict=verdict.value,
+        performed_by=f"PERSON:{subject}",
+        started_at=_now(),
+        ended_at=_now(),
+    )
+    await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
+    return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+
+
+async def skip(
+    process: Process,
+    run_id: str,
+    scope: str,
+    node_id: str,
+    ctx: EngineContext,
+    *,
+    inputs: Mapping[str, Any],
+    host_inputs: Mapping[str, Any],
+    reason: str,
+    subject: str,
+) -> NextAnswer:
+    """§6: `GUIDED` execution policy — "a person with permission MAY skip a
+    step whose `criticality` is `TRIVIAL`, recording a reason." Not part
+    of §12.1's own three named calls (the spec's engine-semantics section
+    predates this being wired up); shaped the same way as `decide()` since
+    it is the same kind of act — a person's recorded decision, checked
+    against a permission, that changes what the run does next.
+
+    Fails closed on every one of D2/D15's conditions, not just the
+    permission check: refuses a step that is not a `STEP` node, a process
+    that is not `GUIDED`, a step whose `criticality` is not `TRIVIAL`
+    (`STANDARD`/`CRITICAL` are never skippable, §6), a step with no
+    `skip_permission` declared (D15), and a call with no `reason`.
+
+    Callable at any point before this step's own first attempt (i.e.
+    before anything has called `next()`/`report()` far enough to dispatch
+    it) — this engine does not itself pause and offer the choice before
+    every `TRIVIAL` step; a caller wanting to prompt a person must check
+    eligibility (or just read the Process definition) and call `skip()`
+    itself before calling `next()`, or let `next()` proceed normally.
+    """
+    node = process.nodes[node_id]
+    if not isinstance(node, StepNode):
+        raise EngineRefusal(f"skip() called for {node_id!r}, which is not a STEP node")
+    if process.execution_policy != "GUIDED":
+        raise EngineRefusal(
+            f"process {process.header.id!r} is not GUIDED — steps cannot be skipped (§6)"
+        )
+    criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
+    if criticality != "TRIVIAL":
+        raise EngineRefusal(
+            f"step {node_id!r} has criticality {criticality!r} — only TRIVIAL "
+            "steps may be skipped (§6, D2)"
+        )
+    if node.skip_permission is None:
+        raise EngineRefusal(
+            f"step {node_id!r} declares no `skip_permission` — refusing to skip (D15)"
+        )
+    if not reason:
+        raise EngineRefusal("skip() requires a non-empty `reason` (§6)")
+
+    decision = await ctx.policy.authorize(
+        node.skip_permission,
+        identity=ctx.identity,
+        platform_id=ctx.platform_id,
+        run_id=run_id,
+    )
+    if decision.verdict is not Verdict.PERMIT:
+        return _forbidden(process, decision.rationale or "skip permission refused")
+
+    attempts = await ctx.records.get_attempts(
+        run_id, scope, node_id, platform_id=ctx.platform_id, run_id=run_id
+    )
+    key = AttemptKey(run=run_id, scope=scope, node=node_id, attempt=len(attempts) + 1)
+    record = AttemptRecord(
+        key=key,
+        inputs={},
+        output={"reason": reason},
+        control_results=[],
+        verdict="SKIPPED",
         performed_by=f"PERSON:{subject}",
         started_at=_now(),
         ended_at=_now(),
@@ -484,6 +565,11 @@ async def _advance_step(
 
     if attempts:
         last = attempts[-1]
+        if last.verdict == "SKIPPED":
+            # §6: a GUIDED skip() call already recorded this — proceed as
+            # the step's own declared route says, without ever dispatching
+            # the Tool or writing anything into state (there is no output).
+            return _Advance(next_node_id=_success_target(node))
         outcome = (
             _parse_step_outcome(last.verdict) if last.verdict is not None else None
         )
@@ -539,6 +625,7 @@ async def _advance_step(
                 says=f"Waiting on {node.tool} to run.",
                 node_id=node_id,
                 resolved_inputs=resolved_inputs,
+                skippable=_is_skippable(process, node),
             )
         )
 
@@ -706,6 +793,16 @@ def _success_target(node: StepNode) -> str:
     raise EngineRefusal(
         f"step {node.id!r} succeeded with no `next` or `end` declared (V7 gap)"
     )
+
+
+def _is_skippable(process: Process, node: StepNode) -> bool:
+    """§6: structurally eligible for `skip()` — GUIDED policy, TRIVIAL
+    criticality. Does not check `skip_permission`/authorization; `skip()`
+    itself enforces that at the point of the actual call, the same way a
+    GATE's `on` routes are shown regardless of whether this particular
+    caller holds the gate's permission."""
+    criticality = node.criticality or fmt_defaults.STEP_CRITICALITY
+    return process.execution_policy == "GUIDED" and criticality == "TRIVIAL"
 
 
 def _resolve_inputs_preview(
