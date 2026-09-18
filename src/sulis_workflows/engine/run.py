@@ -69,6 +69,7 @@ from sulis_workflows.domain.ports.records import AttemptKey, AttemptRecord, Reco
 from sulis_workflows.engine.gates import (
     DeciderOutcome,
     GateResolution,
+    check_agent_decision,
     evaluate_policy_decider,
     resolve_gate,
 )
@@ -171,13 +172,29 @@ async def report(
 ) -> NextAnswer:
     """§12.1: `report(run, scope, node, output | error)` — completes a
     `TOOL_STEP` the caller's agent session ran externally (a `SKILL`/
-    `AGENTIC` Tool). Records the attempt, checks controls, then continues
-    driving forward exactly as `next()` would.
+    `AGENTIC` Tool), OR a GATE's `agent` decider `DECISION_STEP` hand-off
+    (gates.py's own docstring: an agent decider "need[s] a round trip
+    through next()/report()/decide()", the same as a STEP's Tool). Records
+    the attempt, checks controls (STEP) or the decision's evidence and
+    separation-of-duty (GATE), then continues driving forward exactly as
+    `next()` would.
     """
     node = process.nodes[node_id]
+    if isinstance(node, GateNode):
+        return await _report_gate_decision(
+            process,
+            run_id,
+            scope,
+            node_id,
+            ctx,
+            inputs=inputs,
+            host_inputs=host_inputs,
+            output=output,
+            error_code=error_code,
+        )
     if not isinstance(node, StepNode):
         raise EngineRefusal(
-            f"report() called for {node_id!r}, which is not a STEP node"
+            f"report() called for {node_id!r}, which is not a STEP or GATE node"
         )
     tool = _resolve_tool(node.tool, ctx.registry)
 
@@ -195,7 +212,7 @@ async def report(
             output={"error_code": error_code, "error_class": error_class},
             control_results=[],
             verdict=outcome.value,
-            performed_by=f"AGENT:{tool.mechanism.ref}",
+            performed_by=f"AGENT:{tool.mechanism.ref}::{ctx.identity}",
             started_at=_now(),
             ended_at=_now(),
         )
@@ -225,7 +242,7 @@ async def report(
                 for o in controls_result.outcomes
             ],
             verdict=outcome.value,
-            performed_by=f"AGENT:{tool.mechanism.ref}",
+            performed_by=f"AGENT:{tool.mechanism.ref}::{ctx.identity}",
             started_at=_now(),
             ended_at=_now(),
         )
@@ -234,6 +251,58 @@ async def report(
         )
 
     return await _drive(process, run_id, scope, ctx, inputs, host_inputs)
+
+
+async def _report_gate_decision(
+    process: Process,
+    run_id: str,
+    scope: str,
+    node_id: str,
+    ctx: EngineContext,
+    *,
+    inputs: Mapping[str, Any],
+    host_inputs: Mapping[str, Any],
+    output: Mapping[str, Any] | None,
+    error_code: str | None,
+) -> NextAnswer:
+    """Completes a GATE's `agent` decider `DECISION_STEP` hand-off.
+
+    Unlike a STEP's `report()`, the actual validation (permission check,
+    §7.6's evidence-path-resolves-to-a-value and no-deciding-on-your-own-
+    work checks) cannot happen here directly — it needs the run's current
+    state and `produced_by` history, which only `_drive`'s own replay
+    holds (§12.1: nothing kept between calls). So this hands the raw
+    decision to `_drive` as `pending_decision`; `_advance_gate` applies it
+    at exactly the point it is reached, with the same state it would use
+    to check whether the gate is even still awaiting this decider.
+
+    If this call turns out not to actually correspond to what the gate is
+    currently awaiting (a stale hand-off, a second `report()` for the same
+    decider, wrong node), `_advance_gate` simply never consumes the
+    decision and `_drive` returns the gate's actual current answer instead
+    — no state is corrupted, but the decision is silently dropped rather
+    than raising, a known rough edge (see the run record for this fix).
+    """
+    if error_code is not None:
+        raise EngineRefusal(
+            f"report() with an error_code for gate {node_id!r} is not "
+            "supported — spec §7.6 does not describe an agent decider's "
+            "own dispatch failing, as distinct from it returning "
+            "INDETERMINATE, so nothing is invented here for that case."
+        )
+    if output is None:
+        raise EngineRefusal(
+            f"report() called for gate {node_id!r} with no decision output"
+        )
+    return await _drive(
+        process,
+        run_id,
+        scope,
+        ctx,
+        inputs,
+        host_inputs,
+        pending_decision=(node_id, output),
+    )
 
 
 async def decide(
@@ -377,6 +446,8 @@ async def _drive(
     ctx: EngineContext,
     inputs: Mapping[str, Any],
     host_inputs: Mapping[str, Any],
+    *,
+    pending_decision: tuple[str, Mapping[str, Any]] | None = None,
 ) -> NextAnswer:
     if process.permission is None:
         return _forbidden(
@@ -412,6 +483,13 @@ async def _drive(
     # which counts DECIDER attempts, not full gate resolutions — several
     # decider attempts can belong to one resolution, or one.
     gate_loop_taken: dict[str, int] = {}
+
+    # §7.6's "no deciding on your own work" needs to know which identity
+    # produced each reviewed state path — built up as this replay passes
+    # each STEP that wrote state, from that attempt's own durable
+    # `performed_by` (so it is correct on a pure replay too, not only on
+    # the call where the step first ran).
+    produced_by: dict[str, str] = {}
 
     try:
         while True:
@@ -465,6 +543,13 @@ async def _drive(
                     run_id,
                     scope,
                     ctx,
+                    pending_decision=(
+                        pending_decision[1]
+                        if pending_decision is not None
+                        and pending_decision[0] == node_id
+                        else None
+                    ),
+                    produced_by=produced_by,
                 )
                 if advance.took_loop:
                     gate_loop_taken[node_id] = gate_loop_taken.get(node_id, 0) + 1
@@ -478,6 +563,11 @@ async def _drive(
                 return advance.answer
 
             state = advance.state if advance.state is not None else state
+            if advance.state is not None and isinstance(node, StepNode):
+                identity = _producer_identity(advance.performed_by)
+                if identity is not None:
+                    for path in node.out.values():
+                        produced_by[path] = identity
             steps[node_id] = (
                 advance.step_record
                 if advance.step_record is not None
@@ -503,12 +593,36 @@ class _Advance:
     state: dict[str, Any] | None = None
     step_record: Mapping[str, Any] | None = None
     took_loop: bool = False
+    performed_by: str | None = None
+    """Who/what wrote `state` on a successful STEP — `_drive` uses this to
+    build `produced_by` (§7.6's "no deciding on your own work" needs to
+    know which identity produced each reviewed state path, not just which
+    Tool ran)."""
 
 
 def _resolve_tool(ref: str, registry: Registry) -> Tool:
     tool = registry.resolve("TOOL", ref)
     assert isinstance(tool, Tool)  # V2 already guarantees this resolves
     return tool
+
+
+def _producer_identity(performed_by: str | None) -> str | None:
+    """Extracts the identity suffix from an `AGENT:<ref>::<identity>`
+    `performed_by` string (§7.6's `produced_by`), or `None` for anything
+    else (a CODE-performed step, a bare `AGENT:<ref>` with no identity
+    suffix, or no `performed_by` at all).
+
+    `::` (not a single `:`) is the separator deliberately: this
+    codebase's own identity strings already contain single colons
+    (`"user:iain"`, `"PERSON:<subject>"`), and a Tool's own `ref` can too
+    (a CODE mechanism's `module:function`) — splitting on one `:` would
+    misparse either. `::` is not used elsewhere in either half.
+    """
+    if performed_by is None or not performed_by.startswith("AGENT:"):
+        return None
+    if "::" not in performed_by:
+        return None
+    return performed_by.rsplit("::", 1)[-1]
 
 
 def _classify_error(tool: Tool, code: str) -> str:
@@ -601,6 +715,7 @@ async def _advance_step(
                 next_node_id=_success_target(node),
                 state=new_state,
                 step_record={"output": last.output, "attempt": len(attempts)},
+                performed_by=last.performed_by,
             )
         elif outcome is StepOutcome.CONTROL_FAILED:
             if _repair_count(attempts) <= _repair_budget(node):
@@ -670,7 +785,7 @@ async def _advance_step(
                 run_id,
                 scope,
                 ctx,
-                performed_by=f"AGENT:{tool.mechanism.ref}",
+                performed_by=f"AGENT:{tool.mechanism.ref}::{ctx.identity}",
             )
 
         resolved_inputs, _missing = _resolve_inputs_preview(node, tool, run_state)
@@ -791,7 +906,11 @@ async def _record_step_result(
         new_state = apply_output(
             process.state, run_state["state"], node.out, result.output or {}
         )
-        return _Advance(next_node_id=_success_target(node), state=new_state)
+        return _Advance(
+            next_node_id=_success_target(node),
+            state=new_state,
+            performed_by=performed_by,
+        )
     if result.outcome is StepOutcome.ERROR and result.error_class == "TRANSIENT":
         retry = node.retry
         max_retries = (
@@ -1019,6 +1138,9 @@ async def _advance_gate(
     run_id: str,
     scope: str,
     ctx: EngineContext,
+    *,
+    pending_decision: Mapping[str, Any] | None,
+    produced_by: Mapping[str, str],
 ) -> _Advance:
     outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
     person_required = node.person_required_when is not None and bool(
@@ -1086,11 +1208,98 @@ async def _advance_gate(
             run_id,
             scope,
             ctx,
+            pending_decision=pending_decision,
+            produced_by=produced_by,
         )
 
     if gate_decision.resolution is GateResolution.NEEDS_AGENT:
         assert gate_decision.next_decider_index is not None
-        decider = node.deciders[gate_decision.next_decider_index]
+        decider_index = gate_decision.next_decider_index
+        decider = node.deciders[decider_index]
+
+        if pending_decision is not None:
+            # §10.1/D12, mirroring the STEP-side fix: the reviewing agent's
+            # own permission is checked before its vote counts, the same as
+            # any other Tool dispatch. An unauthorized/undeclared-permission
+            # decider does not end the whole run (unlike a STEP's own
+            # dispatch) — a GATE already has other deciders to fall back to
+            # by design (policy, then agent, then person), so this decider
+            # simply cannot contribute a vote: INDETERMINATE, which
+            # `resolve_gate` already treats as "ask the next decider".
+            assert decider.ref is not None  # V9 requires `agent: <ref>` to declare one
+            tool = _resolve_tool(decider.ref, ctx.registry)
+            permission_rationale: str | None = None
+            if tool.permission is None:
+                permission_rationale = (
+                    f"Tool {tool.header.id!r} declares no `permission` — "
+                    "refusing to count this decider's vote (spec §10.1, D12)."
+                )
+            else:
+                perm_decision = await ctx.policy.authorize(
+                    tool.permission,
+                    identity=ctx.identity,
+                    platform_id=ctx.platform_id,
+                    run_id=run_id,
+                )
+                if perm_decision.verdict is not Verdict.PERMIT:
+                    permission_rationale = (
+                        perm_decision.rationale or "agent decider permission refused"
+                    )
+
+            if permission_rationale is not None:
+                outcome = DeciderOutcome(
+                    decider_index=decider_index,
+                    verdict=Verdict.INDETERMINATE,
+                    decided_by=f"AGENT:{decider.ref}:{ctx.identity}",
+                    rationale=permission_rationale,
+                )
+            else:
+                outcome = check_agent_decision(
+                    pending_decision,
+                    decider,
+                    decider_index,
+                    gate=node,
+                    run_state=run_state,
+                    agent_session_id=ctx.identity,
+                    produced_by=produced_by,
+                )
+
+            key = AttemptKey(
+                run=run_id,
+                scope=scope,
+                node=node_id,
+                attempt=baseline + decider_index + 1,
+            )
+            record = AttemptRecord(
+                key=key,
+                inputs={},
+                output={
+                    "evidence": list(outcome.evidence),
+                    "rationale": outcome.rationale,
+                },
+                control_results=[],
+                verdict=outcome.verdict.value,
+                performed_by=outcome.decided_by,
+                started_at=_now(),
+                ended_at=_now(),
+            )
+            await ctx.records.record_attempt(
+                record, platform_id=ctx.platform_id, run_id=run_id
+            )
+            return await _advance_gate(
+                node,
+                node_id,
+                attempts + [record],
+                baseline,
+                prior_loop_takes,
+                run_state,
+                run_id,
+                scope,
+                ctx,
+                pending_decision=None,
+                produced_by=produced_by,
+            )
+
         return _Advance(
             answer=NextAnswer(
                 kind=AnswerKind.DECISION_STEP,

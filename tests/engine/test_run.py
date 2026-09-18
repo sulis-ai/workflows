@@ -113,6 +113,63 @@ def _process(**overrides) -> Process:
     return Process(**defaults)
 
 
+def _produce_tool(permission: str | None = "workflows.produce.dispatch") -> Tool:
+    return Tool(
+        header=_header("produce", "TOOL"),
+        output={"recommendation": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="AGENTIC", ref="skills/produce"),
+        effect="QUERY",
+        inputs={},
+        permission=permission,
+    )
+
+
+def _review_tool(permission: str | None = "workflows.review.dispatch") -> Tool:
+    return Tool(
+        header=_header("review", "TOOL"),
+        output={"decision": OutputSpec(type="any")},
+        controls=(),
+        mechanism=Mechanism(kind="AGENTIC", ref="skills/review"),
+        effect="QUERY",
+        inputs={},
+        permission=permission,
+    )
+
+
+def _agent_gate_process() -> Process:
+    return Process(
+        header=_header("agent-gate-process", "PROCESS"),
+        start="produce",
+        permission="workflows.agent-gate.start",
+        nodes={
+            "produce": StepNode(
+                id="produce",
+                tool="produce@1",
+                in_={},
+                out={"recommendation": "state.recommendation"},
+                next="sign-off",
+            ),
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.recommendation",),
+                deciders=(Decider(kind="agent", ref="review@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "DENIED": Ending(outcome="STOPPED", says="Denied."),
+        },
+        state={},
+    )
+
+
 def _fresh_ctx(records=None, claims=None, policy=None, code_tool=None) -> EngineContext:
     return EngineContext(
         policy=policy or StubPolicyAdapter(),
@@ -238,6 +295,224 @@ def test_gate_with_only_an_agent_decider_hands_off_as_decision_step():
     )
     assert answer.kind is AnswerKind.DECISION_STEP
     assert answer.node_id == "sign-off"
+
+
+def test_gate_agent_decider_permit_with_evidence_completes_via_report():
+    """§7.6 end to end: an `agent` decider's `DECISION_STEP` hand-off is
+    completed by `report()`, the way gates.py's own docstring says it must
+    be — this was previously impossible: `check_agent_decision` existed
+    but nothing ever called it (see the run record for this fix)."""
+    process = _agent_gate_process()
+    records = StubRecordsAdapter()
+    registry = Registry([_produce_tool(), _review_tool()])
+
+    producer_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:producer",
+        platform_id="tenant-1",
+    )
+    first = _run(
+        next_(
+            process, "run-agent-gate-1", "root", producer_ctx, inputs={}, host_inputs={}
+        )
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+    second = _run(
+        report(
+            process,
+            "run-agent-gate-1",
+            "root",
+            "produce",
+            producer_ctx,
+            inputs={},
+            host_inputs={},
+            output={"recommendation": "adopt the finding"},
+        )
+    )
+    assert second.kind is AnswerKind.DECISION_STEP
+    assert second.node_id == "sign-off"
+
+    reviewer_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:reviewer",
+        platform_id="tenant-1",
+    )
+    third = _run(
+        report(
+            process,
+            "run-agent-gate-1",
+            "root",
+            "sign-off",
+            reviewer_ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "verdict": "PERMIT",
+                "rationale": "The recommendation is grounded in the finding.",
+                "evidence": [
+                    {"path": "state.recommendation", "claim": "grounded"},
+                ],
+            },
+        )
+    )
+    assert third.kind is AnswerKind.ENDED
+    assert third.ending == "COMPLETE"
+
+
+def test_gate_agent_decider_is_refused_before_counting_when_tool_has_no_permission():
+    """Mirrors the STEP-side fix: an `agent` decider whose Tool declares no
+    `permission` must not have its vote counted — it becomes INDETERMINATE
+    (the gate's own existing fallback for an undecided decider), not a
+    silent PERMIT/DENY and not a crash."""
+    process = _agent_gate_process()
+    records = StubRecordsAdapter()
+    registry = Registry([_produce_tool(), _review_tool(permission=None)])
+
+    producer_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:producer",
+        platform_id="tenant-1",
+    )
+    _run(
+        next_(
+            process, "run-agent-gate-2", "root", producer_ctx, inputs={}, host_inputs={}
+        )
+    )
+    _run(
+        report(
+            process,
+            "run-agent-gate-2",
+            "root",
+            "produce",
+            producer_ctx,
+            inputs={},
+            host_inputs={},
+            output={"recommendation": "adopt the finding"},
+        )
+    )
+
+    reviewer_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:reviewer",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        report(
+            process,
+            "run-agent-gate-2",
+            "root",
+            "sign-off",
+            reviewer_ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "verdict": "PERMIT",
+                "rationale": "Looks fine.",
+                "evidence": [{"path": "state.recommendation", "claim": "grounded"}],
+            },
+        )
+    )
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+
+    attempts = _run(
+        records.get_attempts(
+            "run-agent-gate-2",
+            "root",
+            "sign-off",
+            platform_id="tenant-1",
+            run_id="run-agent-gate-2",
+        )
+    )
+    assert attempts[-1].verdict == Verdict.INDETERMINATE.value
+    assert "permission" in (attempts[-1].output or {}).get("rationale", "")
+
+
+def test_gate_agent_decider_cannot_decide_on_its_own_work():
+    """§7.6, ANSI INCITS 359-2004: the same identity that produced a
+    reviewed value cannot also be the one deciding on it — proven end to
+    end via `report()`, not just against `check_agent_decision` in
+    isolation (already covered in test_gates.py)."""
+    process = _agent_gate_process()
+    records = StubRecordsAdapter()
+    registry = Registry([_produce_tool(), _review_tool()])
+
+    same_identity_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:same-session",
+        platform_id="tenant-1",
+    )
+    _run(
+        next_(
+            process,
+            "run-agent-gate-3",
+            "root",
+            same_identity_ctx,
+            inputs={},
+            host_inputs={},
+        )
+    )
+    _run(
+        report(
+            process,
+            "run-agent-gate-3",
+            "root",
+            "produce",
+            same_identity_ctx,
+            inputs={},
+            host_inputs={},
+            output={"recommendation": "adopt the finding"},
+        )
+    )
+
+    answer = _run(
+        report(
+            process,
+            "run-agent-gate-3",
+            "root",
+            "sign-off",
+            same_identity_ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "verdict": "PERMIT",
+                "rationale": "Looks fine.",
+                "evidence": [{"path": "state.recommendation", "claim": "grounded"}],
+            },
+        )
+    )
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+
+    attempts = _run(
+        records.get_attempts(
+            "run-agent-gate-3",
+            "root",
+            "sign-off",
+            platform_id="tenant-1",
+            run_id="run-agent-gate-3",
+        )
+    )
+    assert attempts[-1].verdict == Verdict.INDETERMINATE.value
+    assert "own work" in (attempts[-1].output or {}).get("rationale", "")
 
 
 def test_gate_with_only_a_person_decider_awaits_decision():
