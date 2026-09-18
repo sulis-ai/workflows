@@ -1,0 +1,35 @@
+# spec §9.1's inline-form worked example (D18): a PROCESS mechanism MAY
+# declare `process:` (an anonymous sequence belonging only to this Tool)
+# instead of `ref: process-id@version`.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: interrogate-inline
+version: 1.0.0
+title: Attack the claims, keep what survives (inline sequence)
+inputs:
+  candidates: { type: "list<profile:finding@1>" }
+  question:   { type: string }
+output:
+  insights: { type: "list<profile:insight@1>" }
+  verdict:  { type: "enum[SURVIVED, DROPPED, REVISED]" }
+controls:
+  - profile: insight@1
+  - conventions: faithful-generation@1
+mechanism:
+  kind: PROCESS
+  process:
+    start: attack
+    nodes:
+      attack:
+        { type: STEP, tool: attack-claim@1, in: { candidate: state.current }, out: { survived: state.survived }, next: keep-or-drop }
+      keep-or-drop:
+        type: ROUTE
+        when:
+          - { if: 'state.survived == true', next: attack }
+        otherwise: { end: DONE }
+    endings:
+      DONE: { outcome: SUCCESS, says: "Every candidate has been attacked." }
+  result:
+    outputs: { insights: state.insights, verdict: state.verdict }
+    endings: { DONE: SURVIVED }
+effect: QUERY

@@ -1,0 +1,274 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2RCJYPX0H56H4EKV2E3M6YW",
+  "started_at": "2026-09-17T04:45:00Z",
+  "completed_at": "2026-09-17T07:00:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-02 step 5 of 5 (final)",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "Finished the execution engine: this piece ties everything built across the last four pieces into something that genuinely runs a process, proving it does not secretly remember anything between calls (a real safety property, not just a claim) by rebuilding where a run is from durable history every single time. While testing loops (a process step that repeats and then decides whether to continue), the first version hung forever — it was quietly reusing an old decision instead of re-evaluating each time the loop came back around. Found and fixed this before it shipped, with two tests that would catch it again if it ever regressed. Also found and closed a fourth instance of the same format gap found in earlier pieces (a missing 'who is allowed to run this' field), resolved the same consistent way each time. This closes the whole execution-engine work package: what exists now genuinely runs the deterministic backbone of a process — a real, tested, but deliberately narrower slice than 'runs any process', with every remaining gap named plainly in the code rather than glossed over.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/state.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New, small module for writing a Tool's output into run state (REPLACE reducer only); split out from run.py as its own testable, narrowly-scoped concern."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/model.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added an optional `permission` field to Process (D14), the fourth instance of the D12/D13 pattern."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/process.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Schema counterpart of Process.permission, optional so no existing fixture needs to change."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/defaults.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added ENGINE_ENDING_SENTENCES — S6 describes each engine-added ending (ESCALATED/FAILED/FORBIDDEN/CANCELLED) in parentheses but states no literal `says` text, and D6 requires every state to carry a sentence."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "S10.1 amended to name the Process `permission` field; D14 added to S18's decision log."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-02-execution-engine.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "This run closes out the work package's stated 5-step sequence; its acceptance criteria (A1-A7) were checked against what this step actually delivers, not assumed met."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Continue WP-02 autonomously, PR by PR — this run picks up step 5 (next()/report()/decide() + claims wiring), the final step of the 5-step sequence, and was asked to pause and report fully once it's done rather than silently moving to a 6th PR.",
+    "read_as": "Compose the STEP/ROUTE/GATE pieces built in steps 2-4 into a single, genuinely stateless driving loop matching spec S12.1's exact contract, reconstructing position and state from durable records on every call rather than holding anything across calls — and prove that property with a test, not just claim it in a docstring. Wire claims (S12.3) around MUTATION/SIDE_EFFECT step dispatch. Keep the same honest-narrowing discipline steps 2-4 used rather than attempting full generality (PARALLEL/JOIN/FOR_EACH, process-calls, full reducer support) in this already-large step.",
+    "filled_in": [
+      {
+        "gap": "Spec S10.1 requires the engine to check permission \"before it starts a run\" but Process, like Tool (D12) and GateNode (D13) before it, declared no field naming which permission that is.",
+        "assumed": "Added an optional `permission: str | None` field to Process, resolved identically to D12/D13: absent means the engine refuses to start the run, not that the check is skipped.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "This session's own D12 and D13 (spec S18) — the third occurrence of the same shape gets the same answer, per \"hold conventions once.\"",
+        "reversal_cost": "Cheap — additive field, same as D12/D13.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec S6 names the four engine-added endings (ESCALATED/FAILED/FORBIDDEN/CANCELLED) with a parenthetical description each, but states no literal `says` text for any of them, and D6 requires every state to carry a sentence.",
+        "assumed": "Added ENGINE_ENDING_SENTENCES to defaults.py, quoting S6's own parenthetical description for each ending directly as its sentence, rather than composing new wording — a low-stakes, directly-grounded fill rather than a full MADR-weight decision.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "docs/spec/process-definition.md S6's own text for each of the four endings, quoted verbatim as the `says` sentence.",
+        "reversal_cost": "Trivial — four string constants in one file.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec S7.1's `out` mapping and S2.3's state-channel reducers (REPLACE/MERGE/APPEND/UPSERT_BY_ID) are fully specified, but nothing in this repository exercises MERGE/APPEND/UPSERT_BY_ID yet (no PARALLEL/FOR_EACH support exists to make a second-write-to-one-channel scenario real).",
+        "assumed": "Implemented REPLACE only; a channel using any other reducer causes the engine to refuse (UnsupportedReducer) rather than silently guessing at edge behaviour (does APPEND on a first write start from the channel's `default`? does UPSERT_BY_ID's `key` compare by identity or equality?) that no real fixture exercises yet.",
+        "basis": "MOST_REVERSIBLE",
+        "reversal_cost": "Cheap — engine/state.py is a small, isolated module; adding the other three reducers is additive and can be built against real test cases once PARALLEL/FOR_EACH exist to produce them.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "next()/report()/decide() reconstruct run position and state by replaying every node's attempt records from process.start on every call, rather than accepting a caller-supplied 'current position'.",
+      "problem": "Spec S12.1 states \"starting and resuming are the same call\" and \"nothing is held in memory between calls\" as a hard requirement, not an implementation suggestion — the engine had to actually satisfy this, not merely accept it as a design aspiration.",
+      "options_rejected": [
+        "Accept the current node id and run state as explicit parameters supplied by the caller, leaving reconstruction to a documented follow-on: rejected — this would mean the caller (not the engine) is the one holding state between calls, directly contradicting S12.1's own requirement; it would also make this PR's own acceptance criterion A5 (a second process reaching the same answer) provably false rather than proven true."
+      ],
+      "reversibility": "HEAVY_DOOR",
+      "cost_to_change": "The replay algorithm (_drive, visit_baseline) is the structural core of this module; changing the reconstruction strategy later (e.g. to a cached/indexed position rather than full replay) would touch every _advance_* function's calling convention.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S12.1 states this in as many words: \"Starting and resuming are the same call. Nothing is held in memory between calls.\"",
+          "source": "docs/spec/process-definition.md S12.1, read directly."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "tests/engine/test_run.py's own tests construct a brand-new EngineContext (a fresh object, not a reused reference) for every single call in a multi-call sequence (e.g. test_decide_completes_a_person_gate_and_the_run_reaches_complete), and the run still reaches the correct final answer — the only thing shared across calls is the backing StubRecordsAdapter/StubClaimsAdapter instances, standing in for a durable store.",
+          "source": "tests/engine/test_run.py, written and run in this session."
+        }
+      ],
+      "revisit_if": "A future work package needs to optimise away full replay for long-running processes (e.g. caching a checkpoint of state at known-good points) — the contract this PR proves stays the same; only the implementation strategy would change."
+    },
+    {
+      "headline": "Per-visit attempt-slice tracking (visit_baseline) distinguishes a node's Nth loop-revisit from a retry within one visit — fixed after being caught by this run's own test suite, not by inspection.",
+      "problem": "The first implementation treated every attempt record for a node as belonging to \"the current visit,\" which is correct for retries (several attempts of the same visit) but wrong for a genuine loop revisit (a new visit that happens to hit the same node_id) — causing a self-looping ROUTE to be resolved from its first-ever attempt's stale decision forever, an infinite loop that never reached its declared budget.",
+      "options_rejected": [
+        "Track loop-taken-count as a property of the edge (from-node, to-node) rather than the node's own attempt count: rejected as unnecessary once the actual bug was understood — the fix needed is tracking WHICH attempts belong to the CURRENT visit (a within-node distinction), not a new cross-node data structure; the loop-budget count itself already worked once fed the right, visit-aware numbers."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "The fix is localized to _drive's visit_baseline dict and the baseline parameter threaded through the three _advance_* functions; no change to the public next()/report()/decide() contract.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "The first implementation, run directly against a 2-node self-looping ROUTE process with budget=2, hung indefinitely — reproduced with a 10-second timeout and a debug harness logging each record.record_attempt call, which showed attempt numbers climbing past 7 with the loop-budget check never triggering EXHAUSTED.",
+          "source": "Direct execution in this session: `timeout 10 python3 -c ...` against the reproduction script, and `timeout 30 pytest tests/engine/test_run.py` both hanging before the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After adding visit_baseline and correcting the loop-budget's taken-count calculation (baseline + len(visit_attempts) - 1, not len(attempts) - 1), the same reproduction terminates correctly at LOOP_DONE after exactly 3 route attempts (2 taken, 1 exhausted), and a second regression test (a STEP looped back to via a ROUTE) confirms the STEP itself is freshly dispatched on each revisit (3 real Tool calls for budget=2), not resolved from a stale first-visit record.",
+          "source": "tests/engine/test_run.py::test_route_loop_budget_is_enforced_across_revisits and ::test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time, both passing in this session's final run."
+        }
+      ],
+      "revisit_if": "Never expected to need reversing — this is a correctness fix for a documented, in-scope capability (ROUTE loop budgets), not a scope or design choice."
+    },
+    {
+      "headline": "A GATE's own DENY-route loop budget (spec S7.6's own worked example shows one) is explicitly NOT enforced in this PR — a real, flagged gap, not a silent one.",
+      "problem": "Whether to also apply check_loop_budget to a GATE's `on.DENY.loop` route (send-back), the same way it's applied to ROUTE targets.",
+      "options_rejected": [
+        "Ship it anyway, reusing the same visit_baseline/prior_taken_count pattern ROUTE uses: rejected — a GATE's attempt records are per-DECIDER (one record per decider asked within one asking), not one-record-per-visit like ROUTE's; correctly counting \"how many times has this specific verdict sent the gate back\" against that per-decider record shape needs its own reasoning this session did not have time to work through and verify with a test, and shipping an unverified counting rule for a safety-relevant loop bound is worse than shipping none and saying so."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Additive — a future PR can add gate-loop-budget enforcement without changing this PR's ROUTE or GATE-decision logic.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Spec S7.6's own worked example declares a loop on a gate's DENY route: `DENY: { next: recommend, loop: { budget: 3 } }`.",
+          "source": "docs/spec/process-definition.md S7.6, read directly."
+        }
+      ],
+      "load_bearing_assumptions": [
+        "No test in this repository currently exercises a GATE-based send-back loop long enough to hit a real, unbounded-loop failure mode in practice — this is a real risk for a future caller, not one this session's own test suite happens to trigger."
+      ],
+      "revisit_if": "Before this engine is used to run any real Process whose GATE deciders route DENY back to an earlier node with a `loop:` spec — this must be built and tested before that happens, not after."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after composing next()/report()/decide(), engine/state.py, and Process.permission.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "285 passed (272 pre-existing from steps 1-4 + 13 in tests/engine/test_run.py), 0 failed. (Test count target of 220+65=285 matches; two loop-regression tests were added after the initial 11 to specifically cover the bug found and fixed in this run.)"
+    },
+    {
+      "subject": "The first implementation's behaviour on a self-looping ROUTE with a real budget.",
+      "method": "Ran the new loop test directly (both via pytest and a standalone debug script logging every record write) before the visit_baseline fix.",
+      "location": "tests/engine/test_run.py::test_route_loop_budget_is_enforced_across_revisits",
+      "result": "Hung indefinitely — confirmed via a 10s-timeout debug harness showing attempt numbers climbing unboundedly with the loop-budget check never reporting EXHAUSTED."
+    },
+    {
+      "subject": "Lint, format and type-check of every file this PR touches.",
+      "method": "python -m ruff check / ruff format --check / mypy, run against exactly the files/directories ci.yml already covers (engine/ and tests/engine/ cover run.py and state.py wholesale from step 2's own CI addition; no CI change was needed this step).",
+      "location": ".github/workflows/ci.yml",
+      "result": "All clean after several rounds of fixing real mypy Optional-narrowing errors (8 genuine type errors: two ambiguous-ternary ‘target’ variables, four un-asserted Optional accesses on GateDecision fields, one unused variable, one missing report()-path error_class propagation bug found in the same pass) and standard ruff import/formatting fixes: 0 ruff findings, 0 reformatting needed, mypy success on 21 source files."
+    },
+    {
+      "subject": "Whether adding Process.permission broke any existing WP-01 fixture.",
+      "method": "python -m pytest tests/definition -q, run immediately after the model.py/schema change.",
+      "location": "tests/definition/",
+      "result": "171/171 passing, unchanged — confirms the field is genuinely additive, consistent with D12/D13."
+    },
+    {
+      "subject": "A second, real bug found by mypy during this step, distinct from the loop bug: report()'s error path never stored error_class in the written record.",
+      "method": "mypy did not catch this directly (it is not a type error) — found by re-reading report()'s error branch against _advance_step's retry-detection logic, which reads `(last.output or {}).get(\"error_class\", \"PERMANENT\")` to decide whether to retry a TRANSIENT error.",
+      "location": "src/sulis_workflows/engine/run.py, report()",
+      "result": "Confirmed: report()'s error-path AttemptRecord set `output=None`, so a TRANSIENT error reported via report() (a SKILL/AGENTIC step failing externally) would have been misclassified as PERMANENT on replay and never retried. Fixed by storing `{\"error_code\":..., \"error_class\":...}` in output, matching the dispatch path's own shape exactly."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "gate-loop-budget-unenforced",
+      "location": "src/sulis_workflows/engine/run.py, _advance_gate",
+      "divergence": "A GATE's `on.<verdict>.loop` spec (S7.6's own worked example shows one on DENY) is not checked against any loop budget — a GATE-based send-back loop is currently unbounded, unlike a ROUTE's, which is enforced.",
+      "governed_exception": false,
+      "why_not_now": "GATE's per-decider attempt-record shape needs its own counting rule distinct from ROUTE's one-record-per-visit shape, which this session did not have time to design and verify with a test before this already-large step's natural stopping point.",
+      "recorded_in": "src/sulis_workflows/engine/run.py's own module docstring, and this run record."
+    },
+    {
+      "id": "on-control-fail-repair-not-tracked",
+      "location": "src/sulis_workflows/engine/run.py, _route_for_step_failure",
+      "divergence": "Spec S10.2 step 5 allows \"up to `repair` further invocations with the failures as input, then `then`\" on a control failure; this engine takes `then` on the very first control failure, never attempting a repair invocation.",
+      "governed_exception": false,
+      "why_not_now": "Implementing repair correctly needs the same visit-vs-retry attempt-slice reasoning this run just built for loops, applied to a third case (repair count within one visit); deferred to keep this step's scope to what could be built and verified carefully rather than guessed at."
+    },
+    {
+      "id": "state-reducers-replace-only",
+      "location": "src/sulis_workflows/engine/state.py",
+      "divergence": "Only the REPLACE state-channel reducer is implemented; MERGE, APPEND and UPSERT_BY_ID all refuse (UnsupportedReducer) rather than being handled.",
+      "governed_exception": false,
+      "why_not_now": "No fixture or test scenario in this repository exercises a second write to one channel yet (would need PARALLEL or FOR_EACH, both explicitly out of WP-02's scope) — implementing the other reducers now would be guessing at edge behaviour no real case has tested."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "A stateless-replay design's correctness hinges entirely on distinguishing 'this attempt belongs to the visit I'm currently resolving' from 'this attempt belongs to an earlier visit that happened to hit the same node' — get this wrong and every loop silently never terminates, in a way no unit test of the individual pieces (STEP, ROUTE, GATE in isolation) can catch, because each piece's own unit tests never exercise being visited twice.",
+      "incident": "engine/steps.py, engine/routes.py and engine/gates.py were each unit-tested thoroughly in steps 2-4 and passed cleanly; the bug only surfaced once they were composed into an actual driving loop that could revisit a node, and even then only because this run wrote an explicit multi-visit loop test rather than stopping at the single-pass happy-path tests that passed on the first try.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future engine or orchestrator built on a 'replay from durable records' design in this or a related codebase — a loop/revisit test is not optional coverage, it is the specific case that unit tests of the individual pieces structurally cannot catch.",
+      "proposed_check": "tests/engine/test_run.py::test_route_loop_budget_is_enforced_across_revisits and ::test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A deterministic (CODE-mechanism, policy-gate) process can be driven end to end through next()/report()/decide(), with permission checked at every level (process/tool), controls checked after every step, claims preventing double-dispatch of effectful steps, and loop budgets enforced for ROUTE — all proven by tests that call the engine the way a real caller would, including across multiple, independent calls."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "A GATE's own DENY-route loop budget is unenforced — a real, unbounded-loop risk once a real Process uses that shape.",
+        "untouched_id": "gate-loop-budget-unenforced",
+        "trigger": "Before this engine is used to run any real Process whose GATE deciders route DENY back to an earlier node with a `loop:` spec.",
+        "if_nothing_happens": "BECOMES_URGENT_ON_EVENT",
+        "detail": "Harmless as long as nothing routes through this shape; the moment a real Process does, an unbounded loop is a genuine availability/cost risk, not just an incomplete feature."
+      },
+      {
+        "item": "on_control_fail's `repair` count isn't tracked — a failed control always takes `then` immediately instead of getting its declared repair attempts.",
+        "untouched_id": "on-control-fail-repair-not-tracked",
+        "trigger": "A real Process whose Tool controls are expected to self-correct on repair (per its own `on_control_fail.repair` count) is run through this engine and the repair never happens.",
+        "if_nothing_happens": "DECAYS",
+        "detail": "Every process authored assuming repair works as specified will behave differently under this engine than intended, until this is built."
+      },
+      {
+        "item": "Only the REPLACE state reducer works; MERGE/APPEND/UPSERT_BY_ID all refuse.",
+        "untouched_id": "state-reducers-replace-only",
+        "trigger": "PARALLEL or FOR_EACH support is added (WP-03), which is what actually produces a second write to one channel.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Nothing this engine can currently run needs these reducers, since it cannot run PARALLEL/FOR_EACH at all yet — this gap and that one are the same boundary, not two separate risks."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Review and merge sulis-ai/workflows PRs #12 through #21, in order — this closes WP-01 (the validator) and WP-02 (the execution engine) together as the platform's foundation for this format.",
+        "action": "Review PRs #12-#16 (WP-01), then #17-#21 (WP-02) in that exact stacked order, merging each once satisfied. I do not merge PRs myself.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      },
+      {
+        "n": 2,
+        "label": "Decide what should be built next: PARALLEL/JOIN/FOR_EACH and the three remaining gaps above (a genuinely new work package), or wiring a real AI model in to actually run the non-deterministic (SKILL/AGENTIC) steps this engine currently only hands off, or something else entirely.",
+        "action": "This is a priority call about what the platform needs next, not a technical question — I can scope either direction into a work package once you tell me which matters more for what you're trying to ship.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Pause here rather than starting a new work package unprompted — WP-02 as scoped is genuinely done (5/5 steps), and what comes next (PARALLEL/loops-over-lists, wiring a real model for non-deterministic steps, or something else) is a real priority decision, not a technical one I should make silently.",
+      "reason": "Continuing to build without knowing which direction matters more risks investing further session time in a direction that isn't the one actually wanted next.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2T6SSDJVAXZ51MV0366BGVR",
+  "started_at": "2026-09-18T16:15:00Z",
+  "completed_at": "2026-09-18T18:05:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — §9 \"calling a process\": real engine execution for the PROCESS mechanism",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "The engine can now actually RUN a step that calls another process, not just accept it as a valid definition. Both forms work: a step that calls a separately named, independently governed process, and one that carries its own small private workflow inline. Either way, the engine drives it itself — no separate approvals or hand-offs are invented, and if that inner workflow itself needs a person or an agent to do something, that request now correctly bubbles all the way up to whoever is running the outer process, tagged with exactly where it happened, so answering it and resuming works the same way it already does everywhere else. A call chain that nests too deep (default limit: 4 levels) is refused rather than allowed to run forever. A named process with no permission set up is refused before it is ever entered, the same protection every other step already has. One thing is deliberately NOT built yet: the spec allows a call to force which of the inner workflow's own branches it must take first; that is refused with a clear message rather than silently ignored, since guessing at it wrongly would be worse than saying no. Full test suite: 315 passing (310 before this + 5 new, each proving one of the behaviours above).",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/steps.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Added StepOutcome.DEPTH_EXHAUSTED (§9.2) so a call-chain depth breach routes through the same outcome/routing machinery as any other STEP failure."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Five new tests: ref'd process call success (output/ending translation), inline process call with a nested hand-off resumed via report() against its own nested scope, depth-limit exhaustion, a ref'd child with no permission being refused before entry, and a control failure on the translated output routing via on_control_fail."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "§9 (\"calling a process\"), §9.1-§9.3, §10.1/D14, §12.1 read as the authoritative shape this implementation must match; no spec text changed this run."
+      },
+      {
+        "coordinate": "docs/runs/01M2T4V9MCZYB0B8X3PBRBQD9N.agent-run.json",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "The immediately preceding run (D18) built the PROCESS-mechanism shape and explicitly named engine execution as its own follow-up action (n2 in that run's where_next.actions) — this run is that action, not new scope."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Please close the gap so that the engine could support the steps we've defined",
+    "read_as": "Build the actual engine execution path for the PROCESS mechanism (both ref'd and inline forms) — the running capability the immediately preceding run's own where_next.actions[1] named as still missing after the schema/model work landed. The prior turns in this conversation (agreeing to fold AGENTIC into PROCESS, keeping SKILL for the single-step case) already settled what a PROCESS-mechanism step means; this instruction is about making the engine able to run it, not about redesigning it further.",
+    "filled_in": [
+      {
+        "gap": "The instruction did not spell out several sub-questions §9 leaves as worked examples rather than fully pinned-down mechanics: where the call-chain depth limit comes from when unset, whether a ref'd child's own permission is checked once or on every resume, what happens when a call declares `path` (§9.1's route-forcing override), and what a completed child's state looks like when evaluating `result.outputs` paths.",
+        "assumed": "Resolved each by extending an existing, already-decided convention rather than inventing a new one: the depth default is spec §9.2's own stated default (4) via the already-scaffolded `defaults.max_depth`/`fmt_defaults.MAX_DEPTH`; a ref'd child's permission is checked once, at the point of delegation, the same way a Tool's own permission is checked once per dispatch rather than on every replay (D12's own precedent); `path` is refused outright (EngineRefusal) rather than silently ignored, since honouring it wrong would produce a running process silently taking the wrong branch, which is worse than a clean refusal naming the gap; and `result.outputs` is evaluated against {\"state\": <child's final state>} only, matching every worked example in the spec (all reference state.* paths) — nothing exercises inputs/host/steps in that position, so nothing was built for them.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "spec §9.1 (\"path MAY name the option the child's first route must take; otherwise the child decides\"), §9.2 (\"default 4\"), §10.1/D14 (permission checked before dispatch, not re-checked on every replay of an already-dispatched attempt).",
+        "reversal_cost": "Cheap for all four: `path` support is additive (nothing today depends on it being refused); the depth-limit source is read from one place (`_advance_process_call`) so swapping it costs one edit; permission-check timing and the result.outputs run-state shape are both internal to `_advance_process_call` and touch no caller-visible contract.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "§9 (\"calling a process\") is now real engine behaviour: a PROCESS-mechanism STEP — ref'd or inline — recursively drives a child scope via a generalised `_drive_scope`, and a nested hand-off resumes through the exact same `report()`/`decide()`/`skip()` entry points as a top-level one, with no separate \"resume the child then cascade the parent\" mechanism.",
+      "problem": "WP-02 had always deferred \"calling a process\" past its own scope (this module's own header docstring named it explicitly), and the immediately preceding run built the declarable shape (`Mechanism.process`, `Mechanism.result`) without any engine that could run it. The principal then asked directly to close that remaining gap.",
+      "options_rejected": [
+        "A separate function that, given a nested scope whose child just finished, walks back up and continues the parent from where it left off. Rejected: `report()`/`decide()`/`skip()` already restart `_drive_scope` from the scope's own top segment on every call (§12.1's own stateless-replay contract) — natural replay-and-delegate-down already reaches and continues the correct nested level, so a second mechanism would duplicate that guarantee under a different name and risk drifting from it.",
+        "Re-checking a ref'd child process's own permission on every resume of an in-flight nested call. Rejected: once the parent's own STEP records a terminal attempt for the call (success or failure), `_advance_step`'s existing attempt-history branch returns without ever re-entering the PROCESS-mechanism dispatch branch at all — matching how a CODE Tool's permission is checked once per dispatch attempt, not on every subsequent replay of an already-recorded one.",
+        "Treating a PROCESS-mechanism call's controls/repair/retry as a special case with its own logic. Rejected: the translated output is routed through the exact same `check_controls` + `_record_step_result` machinery a CODE dispatch uses (spec gives controls no special treatment per mechanism kind), accepting as a known, disclosed nuance that a repair/retry fallthrough on an already-ended child just idempotently re-observes the same result rather than re-running the child's own logic (see untouched item below)."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — every new piece (`_ScopeDef`, `_resolve_scope`, `_drive_scope`, `_advance_process_call`, `NextAnswer.scope`) is additive; no existing call site's external contract changed (next_/report/decide/skip keep their prior signatures, and 310 pre-existing tests pass unmodified).",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "A ref'd PROCESS-mechanism call correctly recurses into the named child process, and the child's final state is translated back through `mechanism.result.outputs`/`.endings` into the calling STEP's own output and route.",
+          "source": "tests/engine/test_run.py::test_process_call_ref_translates_outputs_and_endings, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "An inline (`process:`) PROCESS-mechanism call whose child hands off (a SKILL Tool inside it) bubbles that hand-off up carrying the CHILD's own nested scope string (e.g. \"root/call-inline\"), and report() against exactly that scope both completes the child and continues the parent to its own ending — proving the no-separate-cascade design actually holds, not just that it was reasoned through.",
+          "source": "tests/engine/test_run.py::test_process_call_inline_hands_off_and_resumes_via_report, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A call chain deeper than the process's own `max_depth` (forced to 0 for the test) never delegates into the child at all — it routes via `on_depth_exhausted` (or the format default), the same as any other STEP failure.",
+          "source": "tests/engine/test_run.py::test_process_call_depth_exhausted_routes_to_on_depth_exhausted, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A ref'd child process with no `permission` declared is refused (FORBIDDEN, routed via on_forbidden) before the child is ever entered — the CountingAdapter standing in for the child's own Tool recorded zero calls.",
+          "source": "tests/engine/test_run.py::test_process_call_ref_child_with_no_permission_is_forbidden, passing (asserts call_count[\"n\"] == 0)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A control declared on the CALLING Tool checks the translated output the same way it checks any other Tool's output, and a failure there routes via on_control_fail's `then` exactly like a CODE dispatch's control failure would.",
+          "source": "tests/engine/test_run.py::test_process_call_control_failure_on_translated_output_routes_via_then, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The full pre-existing suite (310 tests) passes unchanged after this rewrite, and 5 new tests bring the total to 315, 0 failed.",
+          "source": "python -m pytest -q, run from the repository root after every code change in this run."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "ruff check, ruff format --check and mypy all pass clean on every scope CI actually checks (src/sulis_workflows/definition/, src/sulis_workflows/engine/, the four named domain/ports files, and their matching test files) after this change; the only pre-existing findings anywhere in the repository are entirely inside src/sulis_workflows/compiler/ (the deprecated LangGraph path CLAUDE.md says not to touch), unrelated to this run's edits.",
+          "source": "The exact ruff/mypy invocations copied verbatim from .github/workflows/ci.yml's own \"Lint\"/\"Format\"/\"Type check\" steps, run locally against those same paths."
+        }
+      ],
+      "revisit_if": "A real corpus process or scenario needs §9.1's `path` override (forcing the child's first route rather than letting it decide), or needs a PROCESS-mechanism call's own repair/retry to genuinely re-run the child rather than idempotently re-observe its already-ended result — see the matching untouched items."
+    },
+    {
+      "headline": "`NextAnswer` gained a `scope` field, populated from the same `scope` string each hand-off-constructing call site already had in hand — not a new bubbling mechanism, just naming what was already known at each point.",
+      "problem": "§9.3 requires that \"every answer names the scope and definition it belongs to, at any depth\" — without this, a caller resuming a hand-off produced from inside a nested PROCESS call would have no way to know it was NOT the top-level scope, since `_advance_step`/`_advance_gate` already knew the correct scope internally but never surfaced it.",
+      "options_rejected": [
+        "Have `_advance_process_call` rewrite/tag the child's hand-off answer with the child scope after the fact. Rejected: `_advance_step`/`_advance_gate` already receive `scope` as a parameter (used for their own AttemptKey lookups) — setting `scope=scope` at each hand-off construction site directly is simpler and cannot drift from the AttemptKey the answer's own attempt would be recorded under."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "None to revert — the field defaults to None and no existing caller reads it.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Every one of the four hand-off-constructing NextAnswer sites (TOOL_STEP, STEP_RUNNING, DECISION_STEP, AWAITING_DECISION \\u00d7 2) now sets scope=scope; ENDED answers do not (grep-confirmed after the edit).",
+          "source": "grep -n 'kind=AnswerKind\\.' src/sulis_workflows/engine/run.py, read against the diff before committing."
+        }
+      ],
+      "revisit_if": "Not applicable — this is settled, additive, and already covered by the nested-hand-off test above."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after implementing calling-a-process engine execution.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "315 passed (310 pre-existing, unmodified, + 5 new), 0 failed."
+    },
+    {
+      "subject": "Lint, format and type-check on every path CI actually scopes.",
+      "method": "python -m ruff check / python -m ruff format --check / python -m mypy, run with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "src/sulis_workflows/definition/, src/sulis_workflows/engine/, tests/definition/, tests/engine/, the four named domain/ports/*.py files and their test files.",
+      "result": "0 findings from ruff check, 0 reformatting needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    },
+    {
+      "subject": "Whether the engine's own dispatch logic for every OTHER mechanism kind (CODE/SKILL) changed behaviour as a side effect of this rewrite.",
+      "method": "Re-read every edited call site in _advance_step/_record_step_result after adding the scope_def/depth parameters, checking each one still reads the same values from the same sources (scope_def.state in place of process.state, scope_def.skip_policy in place of process.skip_policy — both equal to the prior value at the top-level scope, since _scope_def_for_process(process) copies process's own fields verbatim).",
+      "location": "src/sulis_workflows/engine/run.py — _advance_step, _record_step_result, _is_skippable.",
+      "result": "Confirmed equivalent at depth 0 (the only case any pre-existing test exercises) — the full pre-existing suite passing unchanged is the direct evidence of this, not merely the code reading."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "process-call-path-override-unsupported",
+      "location": "src/sulis_workflows/engine/run.py — _advance_process_call",
+      "divergence": "§9.1: \"`path` MAY name the option the child's first route must take; otherwise the child decides.\" This engine refuses (EngineRefusal) any PROCESS-mechanism call that declares `path`, rather than honouring the override.",
+      "governed_exception": false,
+      "why_not_now": "No fixture, scenario, or corpus process in this repository declares `path` on a process call, and implementing it correctly needs the child's very first ROUTE resolution to be forced rather than evaluated — a distinct piece of logic this run had no real case to build or test against. Refusing cleanly (rather than silently ignoring a declared `path`) keeps this fail-closed per CLAUDE.md rather than shipping a guessed-at behaviour."
+    },
+    {
+      "id": "process-call-repair-retry-re-observes-not-reruns",
+      "location": "src/sulis_workflows/engine/run.py — _advance_step's PROCESS-mechanism branch, _advance_process_call",
+      "divergence": "A CONTROL_FAILED repair or TRANSIENT-error retry fallthrough on a PROCESS-mechanism STEP re-enters `_advance_process_call` and re-delegates into the same child scope — but since the child's own attempts are already durable and its run already ended, this idempotently re-observes the same already-ended result rather than genuinely re-running the child's internal logic. A repair attempt on a process call therefore cannot change what the child itself did, only whether the OUTER step's own controls/routing re-evaluate the same translated output.",
+      "governed_exception": false,
+      "why_not_now": "No fixture exercises a repair/retry on a PROCESS-mechanism call specifically (the one control-failure test in this run uses repair=0 to avoid this exact path). Building a real \"re-run the child\" semantics would mean deciding whether that means a brand-new run of the same child process or something else entirely — a real design question the spec's own §9 text does not answer, so nothing was guessed at here."
+    },
+    {
+      "id": "skip-nested-scope-not-exercised",
+      "location": "src/sulis_workflows/engine/run.py — skip()",
+      "divergence": "skip() was updated to resolve its target node via `_resolve_scope` (so it works structurally against a nested scope the same way report()/decide() now do), but no test in this run calls skip() against a scope with a \"/\" in it.",
+      "governed_exception": false,
+      "why_not_now": "Out of this run's own blast radius — the principal's instruction was about calling a process, not about skip()'s own nested behaviour, and skip()'s existing top-level tests all continue to pass unchanged."
+    },
+    {
+      "id": "nested-loop-budgets-not-specifically-tested",
+      "location": "src/sulis_workflows/engine/run.py — _advance_route, _advance_gate (unchanged), _drive_scope",
+      "divergence": "ROUTE/GATE loop-budget tracking (`gate_loop_taken`, `visit_baseline`) is per-`_drive_scope`-invocation local state, correctly scoped per nested level by construction (each recursive `_drive_scope` call gets its own fresh dictionaries) — but no test in this run specifically proves a loop inside a nested PROCESS-mechanism child behaves independently of the parent's own loop state.",
+      "governed_exception": false,
+      "why_not_now": "No corpus scenario or fixture combines a loop with a nested process call yet; the claim rests on reading the code (each `_drive_scope` call's loop-tracking dicts are fresh locals, never passed to or shared with a child), not a targeted test."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Before adding a second mechanism to resume a recursive, stateless-replay engine's paused work, check whether the existing \"every call restarts from the top and replays forward\" contract already produces that resumption for free — needing a second mechanism is itself a sign the first one was under-trusted, not that the feature needs one.",
+      "incident": "Early design reasoning for this run nearly produced a separate function to \"cascade a finished child's completion back up to the parent\", distinct from the delegation call that enters the child in the first place. Re-reading `report()`/`decide()`/`skip()`'s own existing behaviour (§12.1: they already restart driving from scratch on every call) showed that restarting from the scope's own top segment and letting replay re-descend into the still-open nested level IS the resumption — delegating fresh and resuming an in-flight call are the same code path, once the PROCESS-mechanism dispatch branch is written to only fire on a record-less or repair-eligible visit.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "src/sulis_workflows/engine/run.py — _drive_scope's own docstring now states this reasoning directly, as the artefact this lesson changed.",
+      "proposed_check": "Any future WP-03 work adding PARALLEL/JOIN/FOR_EACH resumption should re-derive whether the same replay-from-top contract already covers it before writing a second resumption path.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "The engine can run a real, tested Process that calls another process — named or inline — including one whose nested step needs a person or an agent, end to end through next()/report()/decide(). This closes the specific gap asked for."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "§9.1's `path` override (forcing which route a called child takes first) has no engine implementation and is refused outright rather than honoured.",
+        "untouched_id": "process-call-path-override-unsupported",
+        "trigger": "A real process definition that needs to force a specific branch in a process it calls, rather than letting the called process decide its own first route.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Safe today since refusing beats silently doing the wrong thing; becomes a real ask the first time someone writes a call that needs it and gets refused."
+      },
+      {
+        "item": "A repair or retry on a PROCESS-mechanism call cannot actually re-run the called child — only re-evaluate the same already-ended result.",
+        "untouched_id": "process-call-repair-retry-re-observes-not-reruns",
+        "trigger": "A real process where a called child's OWN output needs to change on repair, not just how the caller's controls re-check the same translated value.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "No fixture or scenario currently relies on this; the moment one does, the semantics (re-run the same child fresh? something else?) need a real decision, not a guess."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The engine still refuses PARALLEL/JOIN/FOR_EACH nodes outright (unchanged by this run) — those, plus triggers and templates, remain WP-03's own scope per the module's own docstring.",
+        "action": "No code action until you decide priority; say which piece (parallel branches, loops over lists, triggers, or something else) matters next and I will scope it.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      },
+      {
+        "n": 2,
+        "label": "This engine has never been run against a real AI model — every SKILL/agent-decider hand-off still needs a caller (a real agent session) to actually perform the work and report() back. That caller does not exist yet.",
+        "action": "Say the word and I will scope wiring a real LLM-backed caller loop as its own work package.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Hold here for your answer on action 1 rather than starting either large piece speculatively — the same pattern this whole engine build has followed.",
+      "reason": "Both remaining large pieces are genuinely separate priorities (parallel/loop execution vs. a real calling agent), and building either without your steer risks scoping the wrong one first.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

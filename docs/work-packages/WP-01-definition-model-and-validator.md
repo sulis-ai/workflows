@@ -53,7 +53,7 @@ Each is a test.
 - **A3.** Bad-but-conformant fixtures, each refused:
   - a route whose options look exhaustive but miss one enum value (V6);
   - a gate with `INDETERMINATE: { next: … }` (V9);
-  - an `AGENTIC` Tool whose only control is a policy (V3);
+  - a `SKILL` Tool whose only control is a policy (V3);
   - a checker with only passing examples (V3);
   - a call that maps every child ending except `FORBIDDEN` (V10);
   - a loop with `budget: 0` (V8);

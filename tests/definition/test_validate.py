@@ -83,7 +83,7 @@ title: Interrogate
 inputs: { question: { type: string } }
 output: { verdict: { type: "enum[SURVIVED, DROPPED]" } }
 controls: [ { policy: may-run@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/interrogate }
+mechanism: { kind: SKILL, ref: skills/interrogate }
 effect: QUERY
 """
     findings = validate(doc, registry=_base_registry(policy_control))
@@ -187,7 +187,7 @@ inputs:
 output:
   verdict: { type: "enum[SURVIVED, DROPPED]" }
 controls: [ { profile: finding@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/interrogate }
+mechanism: { kind: SKILL, ref: skills/interrogate }
 effect: QUERY
 """
 
@@ -511,7 +511,7 @@ title: Reviewer
 inputs: { criteria: { type: string } }
 output: { note: { type: string } }
 controls: [ { profile: finding@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/reviewer }
+mechanism: { kind: SKILL, ref: skills/reviewer }
 effect: QUERY
 """
     doc = _gate_process(
@@ -534,7 +534,7 @@ title: Recommend
 inputs: { question: { type: string } }
 output: { decision: { type: "profile:decision@1" } }
 controls: [ { profile: finding@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/recommend }
+mechanism: { kind: SKILL, ref: skills/recommend }
 effect: QUERY
 """
     doc = """

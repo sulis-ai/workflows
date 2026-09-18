@@ -7,6 +7,7 @@ kind: PROCESS
 id: grounded-inquiry
 version: 1.0.0
 title: Grounded inquiry
+permission: workflows.grounded-inquiry.start
 inputs:
   brief: { type: "profile:brief@1" }
 host_inputs:

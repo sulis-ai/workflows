@@ -1,9 +1,9 @@
 """STEP execution — the CODE mechanism-kind path (spec §7.1, §10, §12.4, WP-02 step 2).
 
 Scope note: only `CODE`-kind Tools (deterministic, "a function the host can
-call", §4.3) are dispatched here. `SKILL`/`AGENTIC` Tools are
-non-deterministic and are handed to the caller as a `TOOL_STEP` by
-`next()` instead of run here (§12.1); `EXTERNAL`, deterministic `PROCESS`
+call", §4.3) are dispatched here. `SKILL` Tools (and a non-deterministic
+`PROCESS` call) are non-deterministic and are handed to the caller as a
+`TOOL_STEP` by `next()` instead of run here (§12.1); `EXTERNAL`, deterministic `PROCESS`
 and the `TOOL` composite mechanism follow in a later step, alongside
 `next()`/`report()` itself — that is where the engine's dispatch-or-defer
 decision actually lives (`docs/work-packages/WP-02-execution-engine.md`).
@@ -57,6 +57,7 @@ class StepOutcome(str, Enum):
     CONTROLS_UNCHECKABLE = "CONTROLS_UNCHECKABLE"
     CONTROL_FAILED = "CONTROL_FAILED"
     ERROR = "ERROR"
+    DEPTH_EXHAUSTED = "DEPTH_EXHAUSTED"  # §9.2 — a PROCESS-mechanism call chain
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,14 @@ async def attempt_step(
             rationale=str(exc),
         )
 
-    controls_result = check_controls(tool, output, registry=registry)
+    controls_result = await check_controls(
+        tool,
+        output,
+        registry=registry,
+        code_tool=code_tool,
+        platform_id=platform_id,
+        run_id=run_id,
+    )
     if not controls_result.checkable:
         names = ", ".join(f"{c.kind}:{c.ref}" for c in controls_result.unsupported)
         return StepAttemptResult(

@@ -9,5 +9,6 @@ inputs:
 output:
   decision: { type: "profile:decision@1" }
 controls: [ { conventions: output-present@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/review-recommendations }
+mechanism: { kind: SKILL, ref: skills/review-recommendations }
+permission: workflows.grounded-inquiry.review
 effect: QUERY

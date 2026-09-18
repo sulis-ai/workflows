@@ -143,7 +143,7 @@ def test_ordered_input_paths_use_first_present_non_empty_value():
 
 
 def test_non_code_mechanism_is_not_dispatchable_yet():
-    tool = _tool(mechanism=Mechanism(kind="AGENTIC", ref="skills/conclude"))
+    tool = _tool(mechanism=Mechanism(kind="SKILL", ref="skills/conclude"))
     code_tool = StubCodeToolAdapter()
     result = _run(_node(), tool, {"state": {"question": "why"}}, code_tool=code_tool)
     assert result.outcome is StepOutcome.NOT_DISPATCHABLE

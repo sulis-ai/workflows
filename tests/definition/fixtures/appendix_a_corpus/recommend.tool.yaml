@@ -9,5 +9,6 @@ inputs:
 output:
   recommendations: { type: "list<profile:recommendation@1>" }
 controls: [ { profile: recommendation@1 } ]
-mechanism: { kind: AGENTIC, ref: skills/recommend }
+mechanism: { kind: SKILL, ref: skills/recommend }
+permission: workflows.grounded-inquiry.recommend
 effect: QUERY

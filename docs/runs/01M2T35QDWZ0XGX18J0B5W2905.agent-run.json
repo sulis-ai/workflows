@@ -1,0 +1,144 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2T35QDWZ0XGX18J0B5W2905",
+  "started_at": "2026-09-18T14:20:00Z",
+  "completed_at": "2026-09-18T14:45:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — proposed spec decision: what AGENTIC means (D17), correcting S4.3's table",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "Wrote up, as a recorded spec decision rather than code, what you described AGENTIC should mean: an agent led step by step through an automated sequence, not given free rein to choose its own route — the rulebook's own wording said the opposite until now. Checking that against the rest of the rulebook found it already fits without inventing new machinery: a rule already exists for a called sub-process's steps surfacing back to whoever is running the top-level work, and that same rule already generalises to this case. What still needs a real answer, which I have deliberately NOT guessed at: exactly how you'd write a multi-step AGENTIC tool down on paper. No example anywhere needs one yet, so inventing that shape now would be a guess with nothing to check it against — every existing AI-judgment step in the test corpus is a single hand-off already, and stays valid either way. Nothing about how the engine runs today changed; this is a definition correction and an open question recorded, not new code. Review the rulebook change (search for \"D17\") and tell me if that's the right split — settle it now, or say more before I touch anything else.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/spec/process-definition.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    }
+  },
+  "interpretation": {
+    "ask_as_given": "Yes please (confirming: \"write this up as a proposed spec decision ... so it's recorded and reviewable before I touch code\").",
+    "read_as": "Write the spec-level documentation of the AGENTIC redefinition and its relationship to PROCESS as a reviewable proposal — explicitly NOT an instruction to also implement the resulting engine/schema changes yet, since the whole point of asking for this first was to review before any code changes.",
+    "filled_in": [
+      {
+        "gap": "The principal's description (\"agent being led by the process, process is automated\") was a concept, not a concrete spec-writable shape — it needed translating into the spec's own existing vocabulary and structure (a table row, a decision-log entry) without either understating the change (a cosmetic wording tweak) or overstating it (inventing untested new schema).",
+        "assumed": "Split the decision into a settled half (the conceptual correction: AGENTIC = led sequence, not free choice; distinguished from PROCESS by identity, not by who drives it) and an explicitly open half (the concrete multi-step authoring grammar), rather than resolving both in one pass. Grounded the settled half in S9.3's already-existing nested-scope/gate-surfacing rule, which was written for called-Process gates but reads generally enough to already cover an AGENTIC sub-sequence's own hand-offs without amendment.",
+        "basis": "JUDGMENT",
+        "grounded_in": "CLAUDE.md: \"Adopt the cheap seam now; defer the expensive guess\" — the conceptual correction is cheap, grounded in text that already exists, and reversible; the authoring grammar is exactly the kind of speculative invention this format's own working practice (every prior control-dispatch and permission decision this session) has consistently refused to guess at without a real fixture to check it against.",
+        "reversal_cost": "Cheap for the settled half (a table-row/prose correction, no schema or code touched, every existing single-step AGENTIC Tool in this repository's own corpus remains valid under the new reading). The open half has no cost yet since nothing was decided for it.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D17 (spec log): AGENTIC means an agent led through an automated sequence; distinguished from PROCESS by having no independent identity, not by who drives the hand-offs. Recorded as PROPOSED, with the concrete multi-step authoring grammar explicitly left open.",
+      "problem": "S4.3's table said AGENTIC means \"free to choose its route within allowed_tools\" — the opposite of what the principal described wanting it to mean (an agent led step by step through a declared, automated sequence). Left unresolved, this is a live contradiction between the normative spec text and the format owner's actual intent.",
+      "options_rejected": [
+        "A new, seventh mechanism kind for a \"led sequence\", leaving AGENTIC's old meaning alone: rejected — duplicates nearly everything AGENTIC already is (non-deterministic, controls-checked, allowed_tools-capable) for one behavioural axis, and this format's own mechanism vocabulary is grounded in an external register (ADR-0074) this session has no standing to extend unilaterally.",
+        "Merge AGENTIC into PROCESS entirely, since both now surface nested hand-offs the same way under S9.3's own rule: rejected — erases the real difference (an independently versioned, independently governed artifact vs. an anonymous sequence belonging to one Tool) and would force every existing single-step AGENTIC Tool in the Appendix A corpus to be rewritten as a separately versioned child Process for no behavioural gain.",
+        "Design the full inline multi-step authoring grammar in the same pass, so the decision is completely settled: rejected — no fixture or corpus scenario anywhere exercises a multi-step AGENTIC Tool; inventing its concrete YAML shape now, with nothing real to validate it against, is precisely the kind of speculative guess this session has refused to make at every other control-dispatch and permission decision (controls.py's own docstring, D8-D16's shared reasoning)."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "The settled half touches only S4.3's table description and adjacent prose — wording, not schema; nothing to migrate, since every fixture in this repository already uses AGENTIC in its single-step form, which remains valid under either reading. The open half commits nothing, so there is nothing to unwind.",
+      "confidence": "MEDIUM",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "S9.3 already states, for called Processes, \"every answer names the scope and definition it belongs to, at any depth... a gate in a child is surfaced through the top-level run\" — a nested-scope hand-off rule that does not, on its own wording, require the nested thing to be a separately versioned Process.",
+          "source": "docs/spec/process-definition.md S9.3, read directly this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Every AGENTIC Tool in this repository's own corpus (grounded-recon, interrogate, recommend, review-recommendations, all in tests/definition/fixtures/appendix_a_corpus/) declares a single, atomic `ref: skills/<name>` with no sub-sequence — confirmed by re-reading all four this session — so none require any change under the corrected reading; each remains the trivial, one-step case explicitly named in the corrected table row.",
+          "source": "tests/definition/fixtures/appendix_a_corpus/*.tool.yaml, read directly earlier this session while building the live-evaluation harness."
+        }
+      ],
+      "revisit_if": "A real corpus scenario (docs/use-cases/scenarios/) or a real process definition needs a genuinely multi-step AGENTIC Tool — that is the trigger CLAUDE.md's own \"defer the expensive guess\" principle names for finally designing the authoring grammar, not a date or a plan."
+    }
+  ],
+  "flags": [
+    {
+      "id": "agentic-multistep-authoring-grammar-undecided",
+      "kind": "UNVERIFIED_ASSUMPTION",
+      "subject": "docs/spec/process-definition.md S4.3 (AGENTIC row) and S18 D17",
+      "tension": "D17 settles what AGENTIC conceptually means but explicitly does not decide how a multi-step AGENTIC sequence is written in YAML (an inline node graph inside the mechanism block? a separate, Tool-scoped node map alongside it? something else) — today every AGENTIC Tool is single-step, so this gap is real but currently invisible.",
+      "standards_in_play": [
+        "docs/spec/process-definition.md S9.1's existing PROCESS-calling worked example, which is the nearest analogue but was explicitly not reused wholesale (D17's own \"options_rejected\")"
+      ],
+      "need": "A real corpus scenario or process definition that actually needs a multi-step AGENTIC Tool, at which point the authoring grammar should be designed against that concrete need rather than guessed at in the abstract.",
+      "options": [
+        {
+          "option": "Design it now, ahead of any real need.",
+          "consequence": "Risks guessing wrong about shape (inline graph vs. reference vs. something else) with nothing to check the guess against, exactly what D17 declined to do."
+        },
+        {
+          "option": "Wait for a real need (a corpus process that wants this) and design it then.",
+          "consequence": "Every AGENTIC Tool stays single-step until that happens — no capability lost today, since nothing currently needs more."
+        }
+      ],
+      "recommendation": "Wait — consistent with D17's own reasoning and this session's practice throughout (conventions:/fitness: control dispatch was deferred the same way, until Appendix A's own live run genuinely needed it).",
+      "safe_default": "AGENTIC stays single-step (identical in practice to SKILL) until a real need forces the authoring-grammar question."
+    }
+  ],
+  "measured": [
+    {
+      "subject": "The spec-only change does not break anything (schema, model, engine, tests all unaffected — as intended, since this is a documentation/decision-log change, not a code change).",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "307 passed, unchanged from before this change — confirms the edit is prose-only with no code impact, as intended."
+    },
+    {
+      "subject": "Every existing AGENTIC Tool fixture remains a valid instance of the corrected definition (the single-step case named explicitly in the new table row).",
+      "method": "Re-read all four AGENTIC Tool fixtures in tests/definition/fixtures/appendix_a_corpus/ directly.",
+      "location": "tests/definition/fixtures/appendix_a_corpus/{grounded-recon,interrogate,recommend,review-recommendations}.tool.yaml",
+      "result": "All four declare exactly one `ref: skills/<name>`, no sub-sequence — each is the trivial one-step case the corrected wording explicitly preserves as valid, confirming this change needed no fixture migration."
+    }
+  ],
+  "untouched": [],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "The conceptual definition of AGENTIC (led sequence, not free choice) is now recorded in the spec's own decision log (D17) and reflected in S4.3's table — ready for your review before any engine or schema work builds on it."
+    ],
+    "waiting_on": [
+      {
+        "flag_id": "agentic-multistep-authoring-grammar-undecided",
+        "restated_for_principal": "Does the D17 write-up (docs/spec/process-definition.md, search \"D17\") match what you meant by AGENTIC — an agent led through a declared, automated sequence, distinguished from PROCESS by having no identity of its own rather than by who drives it? I've deliberately not guessed at how you'd write a multi-step one down in YAML, since nothing needs one yet."
+      }
+    ],
+    "parked": [
+      {
+        "item": "The concrete authoring grammar for a genuine multi-step AGENTIC Tool (how it's written in YAML) is undecided.",
+        "untouched_id": "agentic-multistep-authoring-grammar-undecided",
+        "trigger": "A real corpus scenario or process definition that needs a multi-step AGENTIC Tool.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "AGENTIC stays operationally identical to SKILL (single hand-off) until this is designed — no capability is lost by waiting, since nothing today asks for more."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Review D17 (docs/spec/process-definition.md S18) and the corrected S4.3 AGENTIC row — confirm this is the split and definition you meant, or redirect before any code is written against it.",
+        "action": "Waiting on your read before touching the engine or schema for this.",
+        "source_kind": "FLAG",
+        "source_id": "agentic-multistep-authoring-grammar-undecided",
+        "effort": "SMALL"
+      },
+      {
+        "n": 2,
+        "label": "The priority question from several reports back is still open and still yours: build out the missing pieces (parallel work, loops over lists, one process calling another), wire in a real AI model for the steps this engine currently only pauses on, or something else.",
+        "action": "No code action until you answer; I will scope whichever direction you name into a work package once you do.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Hold for your review of D17 before any AGENTIC-related code changes; the PROCESS mechanism's own design (§9, WP-03) is the natural next place to revisit once AGENTIC's boundary with it is confirmed, since the two are now defined in terms of each other.",
+      "reason": "Building code against an unconfirmed conceptual definition risks the same rework this session has been careful to avoid everywhere else — verify before implementing, not after.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

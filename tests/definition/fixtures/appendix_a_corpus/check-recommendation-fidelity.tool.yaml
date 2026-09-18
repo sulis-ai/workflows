@@ -11,4 +11,5 @@ output:
   verdict:         { type: "enum[ENTAILED, DROPPED, REVISED]" }
 controls: [ { profile: recommendation@1 } ]
 mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:check_recommendation_fidelity" }
+permission: workflows.grounded-inquiry.check-fidelity
 effect: QUERY

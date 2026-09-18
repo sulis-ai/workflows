@@ -4,8 +4,9 @@ Deciders are asked in order; the first `PERMIT` or `DENY` decides
 (§7.6). Of the three decider kinds, only `policy` is engine-run —
 deterministic, via `PolicyPort.evaluate_policy` — the same split §12.1
 draws for STEP mechanisms (§10.2's CODE/EXTERNAL/deterministic-PROCESS
-vs. SKILL/AGENTIC). An `agent` decider is a non-deterministic Tool
-(`SKILL`/`AGENTIC`) and a `person` decider is always a hand-off; both
+vs. SKILL/non-deterministic PROCESS). An `agent` decider is a
+non-deterministic Tool (`SKILL`) and a `person` decider is always a
+hand-off; both
 need a round trip through `next()`/`report()`/`decide()` (WP-02 step 5),
 so this module never dispatches them itself. `resolve_gate` is pure and
 synchronous: given the deciders already asked and answered (in whatever

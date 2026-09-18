@@ -9,4 +9,5 @@ output:
   framed_question: { type: string }
 controls: [ { conventions: output-present@1 } ]
 mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:frame_question" }
+permission: workflows.grounded-inquiry.frame
 effect: QUERY

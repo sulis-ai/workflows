@@ -2,10 +2,10 @@
 
 §4.3: `CODE` = "A function the host can call", deterministic, `ref` names
 `module:function`. §12.1: "CODE, EXTERNAL and deterministic PROCESS steps
-... are run by the engine before it answers" — unlike `SKILL`/`AGENTIC`
-mechanisms, which are non-deterministic and are handed to the caller's
-agent session as a `TOOL_STEP` instead of run here (that hand-off is
-`next()`'s job, WP-02 step 5, not this port's).
+... are run by the engine before it answers" — unlike `SKILL` (and a
+non-deterministic `PROCESS` call), which are non-deterministic and are
+handed to the caller's agent session as a `TOOL_STEP` instead of run here
+(that hand-off is `next()`'s job, WP-02 step 5, not this port's).
 
 This is deliberately a different port from the deprecated compiler's
 ``ToolDispatchPort`` (domain/ports/tool_dispatch.py). That port is scoped

@@ -137,7 +137,7 @@ controls:                                  # C — at least one
   - profile: insight@1
   - conventions: faithful-generation@1
 mechanism:                                 # M
-  kind: AGENTIC
+  kind: SKILL
   ref: skills/interrogate
   allowed_tools: [ground-citations@1]
 effect: QUERY
@@ -156,15 +156,16 @@ errors:
 | `kind` | What does the work | Deterministic | `ref` names | Verified by |
 |---|---|---|---|---|
 | `CODE` | A function the host can call | yes | `module:function` | Exact output on examples |
-| `SKILL` | A model following written instructions, no tool choice | no | a skill document | Conformance to its controls |
-| `AGENTIC` | An agent session, free to choose its route within `allowed_tools` | no | a skill or agent definition | Conformance to its controls |
-| `PROCESS` | Another Process, run as a child (§9) | as the child | `process-id@version` | The child's corpus scenarios |
+| `SKILL` | A model following written instructions, one hand-off — with bounded discretion (`allowed_tools`) if declared | no | a skill or agent definition | Conformance to its controls |
+| `PROCESS` | Another process, run as a child (§9): a separately authored, separately versioned artifact (`ref: process-id@version`), or an anonymous sequence declared inline, belonging only to this Tool (`process: { start, nodes, endings, ... }`, D18) | as the child | `process-id@version`, or none (inline) | The child's corpus scenarios (external) or this Tool's own controls (inline) |
 | `TOOL` | A composite: child Tools in order over shared values (`composes`) | as its children | — | Its children |
 | `EXTERNAL` | A service outside Sulis, through a host adapter | per adapter | an adapter id | The adapter's contract tests |
 
 `composes` lists `{ tool, inputs, output }` per child. `allowed_tools` belongs to the mechanism; the policy allowing the Tool to hold that set is a control.
 
-These kinds follow fd-product-architecture ADR-0074's mechanism vocabulary (read on its published step-contract page); they are that register's own convention, not an external standard.
+A non-deterministic `PROCESS` call (either form) surfaces its inner hand-offs through the top-level run at a nested `scope` — §9.3's "every answer names the scope and definition it belongs to, at any depth" is not only about a called Process's gates; it is the general rule an inline sequence's own steps follow too. It is not opaque to the caller the way a `CODE` dispatch is: the same top-level caller drives it, one hand-off at a time, exactly as it drives the outer run. What the two `PROCESS` forms differ on is identity, not who drives them or how: `ref` names a process with its own id, version, endings and corpus scenarios, reusable anywhere; the inline form has none of that — no `id`, no `version`, no independent `permission` — and simply produces this Tool's own declared `output` directly, with no `result.outputs`/`result.endings` translation to perform (D18).
+
+These kinds follow fd-product-architecture ADR-0074's mechanism vocabulary (read on its published step-contract page); `SKILL` absorbing what this register calls out as bounded tool choice, and `PROCESS` gaining an anonymous form, are this format's own convention on top of it (D18), not a further claim about ADR-0074 itself.
 
 ### 4.4 Controls *(UC-TOOL-CONTROLS, UC-OUT-TYPED, UC-FIDELITY)*
 
@@ -172,7 +173,7 @@ These kinds follow fd-product-architecture ADR-0074's mechanism vocabulary (read
 - A control is `profile: <id@v>`, or a reference to a CONTROL document (§5): `conventions:`, `fitness:` or `policy:`.
 - Every control MUST resolve at validation **and** at run start; one that does not **refuses to run**.
 - Every non-policy control MUST have a registered checker (§5.2).
-- A `SKILL` or `AGENTIC` Tool MUST have at least one non-policy control: its output varies, so without a checkable bar it cannot be evaluated.
+- A `SKILL` Tool MUST have at least one non-policy control: its output varies, so without a checkable bar it cannot be evaluated.
 
 ### 4.5 Effect *(UC-TOOL-EFFECT, UC-SIDE-EFFECT-CLAIM)*
 
@@ -252,12 +253,12 @@ endings:
   DROPPED:      { outcome: SUCCESS, says: "Nothing survived review, so there is nothing to recommend." }
   DENIED:       { outcome: STOPPED, says: "Stopped: the recommendations were not approved." }
 triggers: [ ... ]
-execution_policy: STRICT                 # STRICT | GUIDED
+skip_policy: STRICT                      # STRICT | ADVISORY
 ```
 
 - **Endings** *(UC-STOP-NAMED, UC-STOP-HONEST)*: every ending is named, has an `outcome` (`SUCCESS`, `STOPPED` — ended on purpose, a person may need to act — or `FAILURE`), and a `says` sentence. An honest `INSUFFICIENT` is a `SUCCESS`.
 - The engine adds four endings every process has, each with its own sentence: `ESCALATED` (a limit ran out with no route), `FAILED` (a permanent error with no route), `FORBIDDEN` (a permission was refused, §10.1), `CANCELLED` (a person stopped the run).
-- **Execution policy** *(UC-EXEC-POLICY, UC-CRITICALITY)*: `STRICT` — only declared routes run. `GUIDED` — a person with permission MAY skip a step whose `criticality` is `TRIVIAL`, recording a reason. `STANDARD` and `CRITICAL` steps are never skipped. The default is in §15.
+- **Skip policy** *(UC-EXEC-POLICY, UC-CRITICALITY)*: `STRICT` — only declared routes run. `ADVISORY` — a person with permission MAY skip a step whose `criticality` is `TRIVIAL`, recording a reason. `STANDARD` and `CRITICAL` steps are never skipped. The default is in §15. A `STEP` MAY declare `skip_permission: <host permission string>` (ADR-024's grammar, same shape as D12-D14); absent means the engine refuses every skip of that step, `ADVISORY` or not (D15) — skip authority is per-step, distinct from the Tool's own dispatch `permission` (§10.1). This field is named `skip_policy`, not `execution_policy` (D16): every run is driven step by step by whatever agent calls `next()`/`report()` (§12.1) regardless of this setting, so "guided" describes that whole engine, not this one field — `skip_policy` only ever governs whether a `TRIVIAL` step may be skipped.
 
 ---
 
@@ -385,7 +386,7 @@ A gate is where something must be decided before the run continues. **ADR-028 go
 | Decider | Decides by | Declared as |
 |---|---|---|
 | `policy` | The host's `PolicyPort` evaluates the policy (trust earned, thresholds, grants) | `policy: <control-id@v>` |
-| `agent` | A `SKILL` or `AGENTIC` Tool that receives `criteria` and the `reviewing` values and returns `profile:decision@1` — `{ verdict, rationale, evidence: [ { path, claim } ] }` | `agent: <tool-id@v>` |
+| `agent` | A `SKILL` Tool that receives `criteria` and the `reviewing` values and returns `profile:decision@1` — `{ verdict, rationale, evidence: [ { path, claim } ] }` | `agent: <tool-id@v>` |
 | `person` | A person holding the named permission or role, through the host's decision surface | `person: { permission: <host permission> }` or `{ role: <host role> }` |
 
 - A gate MAY declare `permission: <host permission string>` (ADR-024's grammar, same shape as a Tool's, §10.1, D12). If `deciders` is absent, the gate is decided by a person holding the gate's permission; that permission is this field. It is also who may decide the gate once every declared decider has answered `INDETERMINATE` (the **pause** state above) when the last decider is not itself a `person` (D13).
@@ -455,6 +456,38 @@ effect: QUERY
 - `result.endings` MUST map every ending the child can reach, including the engine's four. The calling step MUST route every value of `ending`. Either gap is refused — the defence against parents and children disagreeing about result names.
 - `path` MAY name the option the child's first route must take; otherwise the child decides.
 
+`ref` names a separately authored, separately versioned Process. A Tool MAY instead declare `process:` — the same shape (`start`, `nodes`, `state`, `endings`), inline, with no `id`/`version`/`permission` of its own (D18):
+
+```yaml
+kind: TOOL
+id: interrogate
+inputs: { candidates: { type: "list<profile:finding@1>" }, question: { type: string } }
+output:
+  insights: { type: "list<profile:insight@1>" }
+  verdict:  { type: "enum[SURVIVED, DROPPED, REVISED]" }
+controls: [ { profile: insight@1 }, { conventions: faithful-generation@1 } ]
+mechanism:
+  kind: PROCESS
+  process:
+    start: attack
+    nodes:
+      attack:
+        { type: STEP, tool: attack-claim@1, in: { candidate: state.current }, out: { survived: state.survived }, next: keep-or-drop }
+      keep-or-drop:
+        type: ROUTE
+        when:
+          - { if: 'state.survived == true', next: attack }
+        otherwise: { end: DONE }
+    endings:
+      DONE: { outcome: SUCCESS, says: "Every candidate has been attacked." }
+  result:
+    outputs: { insights: state.insights, verdict: state.verdict }
+    endings: { DONE: SURVIVED }
+effect: QUERY
+```
+
+`process:` and `ref` are mutually exclusive — exactly one, never both, never neither. An inline `process:` has no `permission` field of its own: it is not a separately startable run, only a sequence fused into this Tool's own dispatch, which is already permission-gated (§10.1) before the mechanism runs at all.
+
 ### 9.2 Depth
 
 Depth counts calls on the current chain. At the depth limit (§15) no further call is made and the step takes `on_depth_exhausted`. A process that can reach itself MUST declare `on_depth_exhausted`.
@@ -471,6 +504,7 @@ Every answer names the scope and definition it belongs to, at any depth. A gate 
 
 Before the engine starts a run, dispatches any Tool, or accepts any decision, it asks the host's `PolicyPort` whether the acting identity (the person, the agent session, or the service acting for the run) holds the required permission. The run carries that identity; the engine never runs a step without one.
 
+- A Process MAY declare `permission: <host permission string>` (ADR-024's grammar, same shape as D12/D13), checked once before the engine starts a run of it. Absent means the engine refuses to start the run, not that starting is unchecked (D14).
 - A Tool MAY declare `permission: <host permission string>` (ADR-024's grammar, carried opaquely, same shape as a gate decider's `person.permission`, §7.6). When present, the engine checks it via `PolicyPort` before every dispatch of that Tool. A Tool with no `permission` declared refuses to dispatch — the same fail-closed treatment §4.4 already gives an unresolved control, not a silent skip (D12).
 - A refusal records the attempt as `FORBIDDEN` and takes `on_forbidden` (default in §15). It is never retried.
 - This is the seam sulis-ai/platform ADR-022 found missing: the platform's in-app engine enforces an action's declared permission before dispatch and the published engine does not, so adopting it without this port would remove a privilege check. The port is part of the engine contract, not an option.
@@ -552,7 +586,7 @@ A definition is valid only when every rule holds. Each rule has a conformance ca
 |---|---|
 | V1 schema | unknown fields; wrong types; values not in `SCREAMING_SNAKE_CASE` |
 | V2 references | any `id@version` that does not resolve |
-| V3 controls | a Tool with no control; a non-policy control with no checker; a `SKILL`/`AGENTIC` Tool with only policy controls; a checker without both a passing and a failing example |
+| V3 controls | a Tool with no control; a non-policy control with no checker; a `SKILL` Tool with only policy controls; a checker without both a passing and a failing example |
 | V4 mappings | an unmapped required input; a type mismatch in `in`, `out` or `collect` |
 | V5 expressions | an unparseable expression; an untyped path; an enum compared with a value outside it |
 | V6 routes | a route without `otherwise` that is not proven exhaustive |
@@ -589,7 +623,7 @@ A definition is valid only when every rule holds. Each rule has a conformance ca
 | Join cannot be met | `end: FAILED` | `on_join_failed` |
 | For-each concurrency | 1 | `max_concurrency` |
 | Step criticality | `STANDARD` | `criticality` |
-| Execution policy | `STRICT` | `execution_policy` |
+| Skip policy | `STRICT` | `skip_policy` |
 | Gate kind | `APPROVAL` (ADR-028) | `kind` |
 | Gate deciders | a person holding the gate's permission | `deciders` |
 
@@ -666,7 +700,7 @@ Recorded in MADR form (context, options, outcome, consequences) so each can be a
 
 **D1 — One loop default of 10, everywhere.** *Context:* the principal set 10 as the default loop size. *Options:* 10 everywhere; 10 with lower defaults inside templates such as `revise_loop`. *Outcome:* 10 everywhere, including send-backs at gates. A second default in templates would state a convention twice and let the two drift. *Consequences:* a person or agent could be sent back up to 10 times unless the author sets less; authors of revise loops SHOULD set a budget. *Reversal:* change one value in §15 before any process is converted — minutes; after conversion, a re-validation of converted processes.
 
-**D2 — `STRICT` by default; `GUIDED` may skip only `TRIVIAL` steps.** *Context:* methodology sequences allow deviation; fail closed. *Options:* allow skipping `STANDARD` steps with a reason; allow only `TRIVIAL`. *Outcome:* only `TRIVIAL`, by a person with permission, with a recorded reason. Skipping `STANDARD` work with a reason is the bad-but-conformant path — a reason field is always fillable. *Reversal:* one rule; widening later is additive.
+**D2 — `STRICT` by default; `ADVISORY` may skip only `TRIVIAL` steps.** *Context:* methodology sequences allow deviation; fail closed. *Options:* allow skipping `STANDARD` steps with a reason; allow only `TRIVIAL`. *Outcome:* only `TRIVIAL`, by a person with permission, with a recorded reason. Skipping `STANDARD` work with a reason is the bad-but-conformant path — a reason field is always fillable. *Reversal:* one rule; widening later is additive. (Renamed from `GUIDED` by D16.)
 
 **D3 — Claim lease length is a host setting.** *Context:* how long a running step holds its claim depends on how the host runs sessions. *Outcome:* not in the format. *Reversal:* adding a field later is additive.
 
@@ -689,6 +723,16 @@ Recorded in MADR form (context, options, outcome, consequences) so each can be a
 **D12 — A Tool's dispatch permission is an optional, opaque `permission` field; absent means refuse to dispatch, not "no check needed."** *Context:* §10.1 requires the engine to check permission "before it ... dispatches any Tool" but, as first drafted, named no field carrying which permission a given Tool's dispatch requires — a gap found while building WP-02's engine (the `PolicyPort` call has to name *something* to check). *Options:* derive a permission string automatically from the Tool's own id (rejected — invents a naming scheme ADR-024 reserves to the host, and two hosts would derive two different strings from the same Tool); make `permission` a required field on every Tool now, enforced by the JSON Schema (rejected for this draft — would invalidate every Tool fixture already written against v1, a large, unrelated blast radius for a field this decision can add without it); an optional field that, when absent, means the dispatch proceeds unchecked (rejected — silently defeats §10.1's own "before it dispatches any Tool," the bad-but-conformant path this format's own principles ask every rule to defeat). *Outcome:* `permission` is optional in the schema (so no existing fixture needs to change), but the *engine* treats its absence as a refusal to dispatch, mirroring §4.4's existing rule that a Tool with an unresolved control refuses to run. *Consequences:* every Tool that should actually run needs `permission` declared; a future draft should tighten this to a schema-level requirement (a new validator rule, V-something) once real Tool fixtures exist to migrate. *Reversal:* two-way door — tightening `permission` to schema-required is additive once fixtures are updated; the engine-side refusal-on-absence rule is local to `engine/steps.py` and can be relaxed in one place.
 
 **D13 — A gate's own `permission` is likewise an optional, opaque field (mirroring D12); a decider's "`may` list" is exactly the three ADR-028 verdicts.** *Context:* two related gaps found while building WP-02's GATE execution (step 4). First, §7.6 twice refers to "the gate's permission" (deciding a gate with no `deciders` declared; deciding a gate once every decider has answered `INDETERMINATE` and the last is not a `person`) without GATE ever declaring a `permission` field, the same shape of gap as D12's. Second, §7.6 says a decider "gives a verdict outside its `may` list" counts as `INDETERMINATE`, but no `may` field or list is defined anywhere for any decider kind. *Options, first gap:* the same three considered for D12, with the same reasoning; adopted the same outcome for consistency ("hold conventions once" — two gates of the same shape should not get two different answers). *Options, second gap:* invent a new per-decider `may:` field naming which verdicts that decider is allowed to give (rejected — no worked example in the spec ever shows such a field, and inventing new schema surface from a single, isolated phrase risks guessing wrong about what was meant); read `may list` as referring to the fixed, already-existing ADR-028 vocabulary itself — i.e. the phrase is reinforcing that a decider's raw answer must be one of `PERMIT`/`DENY`/`INDETERMINATE` and nothing else, not introducing a new declared field (adopted — the reading that adds no new schema surface and is consistent with `decision@1`'s own verdict already being drawn from that same enum). *Outcome:* GATE gains an optional `permission` field, engine-refused-when-absent exactly as D12; "outside its `may` list" means "not one of PERMIT/DENY/INDETERMINATE." *Consequences:* a gate with no `deciders` and no `permission` cannot be decided by anyone until `permission` is added — the same fail-closed shape D12 already accepted for Tools. *Reversal:* two-way door for both halves, local to `model.py`'s `GateNode` and `engine/gates.py`'s `may`-list check respectively.
+
+**D14 — A Process's own `permission`, checked once before the engine starts a run, is the third and final field of this shape (D12, D13).** *Context:* §10.1 requires the engine to check permission "before it starts a run" but, like D12/D13's fields, named no place a Process declares which permission that is — found while building WP-02's `next()` (step 5), the first code that actually has to start a run rather than dispatch a step or a gate already inside one. *Options:* the same three considered for D12/D13. *Outcome:* the same answer, for the same reason: `permission` is optional on Process, and the engine refuses to start a run of a Process that has none, rather than starting it unchecked. *Consequences:* every real Process needs `permission` declared before any run can start, same as D12/D13's Tools and Gates. *Reversal:* two-way door, additive, local to `model.py`'s `Process` and `engine/run.py`'s start-of-run check.
+
+**D15 — A `STEP`'s skip authority under `ADVISORY` skip policy is its own field, `skip_permission`, distinct from the Tool's dispatch `permission` (D12).** *Context:* §6 says `ADVISORY` (then named `GUIDED`) lets "a person with permission" skip a `TRIVIAL` step, but names no field carrying which permission — the same shape of gap as D12-D14, found while building the engine's own support for this policy (a capability the engine had validated and stored since WP-01 but never acted on at runtime until now). *Options:* reuse the Tool's own `permission` (D12) for skip authority too: rejected — dispatching a Tool and overriding the process's own declared flow are different privileges a host may reasonably grant to different roles (e.g. anyone who may run a step at all, versus only a supervisor who may skip one), and collapsing them removes a distinction a host may need; the same three options D12-D14 considered for a fresh field, with the same reasoning. *Outcome:* `STEP` gains an optional `skip_permission`; absent means the engine refuses every skip of that step (fail closed, same shape as D12-D14), whether or not the policy is `ADVISORY`. *Consequences:* a `TRIVIAL` step is only actually skippable once its author declares `skip_permission`; an `ADVISORY` process with no such declarations behaves identically to `STRICT` in practice, which is the safe default. *Reversal:* two-way door, additive, local to `model.py`'s `StepNode` and `engine/run.py`'s skip path.
+
+**D16 — `execution_policy`/`GUIDED` renamed to `skip_policy`/`ADVISORY`.** *Context:* the principal's own working definition of "guided" is a different, unrelated concept already true of the whole engine — an agent calling `next()`/`report()` to get the current step and record its outcome, one step at a time, as opposed to a session (the deprecated `compiler/` path) that runs a process internally in one go. That property holds for every run under this v1 format regardless of `execution_policy`/D2's setting, so naming the skip-a-`TRIVIAL`-step setting `GUIDED` collided with a more fundamental, already-true meaning of the same word. *Options:* keep the field name and only rename the value (`GUIDED` → something else, field stays `execution_policy`): rejected — the field name itself is what invites the confusion, since "execution policy" reads as governing how the process is run in general, not narrowly whether a step may be skipped. Rename only in prose/docs, keep `execution_policy`/`GUIDED` in the machine format: rejected — the two channels would then disagree, and any process definition or fixture written against the docs would fail to validate. *Outcome:* field renamed to `skip_policy`; enum value renamed `GUIDED` → `ADVISORY` (paired with `STRICT`, both describing the same axis — how strictly the declared flow is followed); `STRICT` unchanged. *Consequences:* every prior reference to `execution_policy: GUIDED` across the spec, schema, model and engine is updated in the same change (D2, D15, §15's defaults table, `StepNode`/`Process` fields, `skip()`'s guard clauses); no process definitions exist yet outside this repository's own fixtures, so there is no external migration. *Reversal:* two-way door — a field/enum rename, no semantic change to what is or is not skippable.
+
+**D17 — `AGENTIC` means an agent led step by step through an automated sequence, not free choice of route; distinguished from `PROCESS` by having no identity of its own, not by who drives it. SUPERSEDED BY D18 — the principal's own follow-up question ("wouldn't `AGENTIC` just be another workflow that's defined as guided?") showed the identity-based distinction drawn here still didn't need a separate mechanism kind to hold it; kept for the record of how D18 was reached, not as the standing rule.** *Context:* building the engine's `TOOL_STEP` hand-off (closing its own gap against §12.1, same session) raised the question of what `AGENTIC` actually hands an agent, which exposed that this table's prior wording — "free to choose its route within `allowed_tools`" — was never what the principal meant by the word: their own working model is an agent *led* through a declared, automated sequence, the same step-by-step hand-off discipline as the outer run, not given free rein. Checking that reading against the rest of the spec found it already fits: §9.3 ("every answer names the scope and definition it belongs to, at any depth... a gate in a child is surfaced through the top-level run") already generalizes past `PROCESS` calls to any nested scope, so an `AGENTIC` sub-sequence surfacing its own hand-offs to the same top-level caller needs no new mechanic invented, only correct wording. *Options:* leave `AGENTIC` meaning free route choice and introduce a new mechanism kind for a led sequence: rejected — a seventh kind duplicates most of what `AGENTIC` already is (non-deterministic, controls-checked, `allowed_tools`-capable) for one behavioural difference, and ADR-0074's own vocabulary (§4.3's grounding) is the register of kinds this format already commits to holding to, not extending on a single Tool's say-so. Merge `AGENTIC` into `PROCESS` entirely, since both now surface nested hand-offs the same way: rejected — collapses a real distinction (an independently versioned, independently governed artifact with its own corpus scenarios, vs. a sequence with no identity of its own belonging to exactly one Tool) that authors need, and would force every simple, single-step `AGENTIC` Tool already in this repository's own corpus (`grounded-recon`, `interrogate`, `recommend`, `review-recommendations`, Appendix A) to be rewritten as a separately versioned child Process for no behavioural gain. Design the full multi-step authoring grammar (an inline node graph in the mechanism block, or something else) in this same pass: rejected — no fixture or corpus scenario yet exercises a multi-step `AGENTIC` Tool, so inventing its concrete shape now would be exactly the speculative guess this format's own working practice (`docs/runs/`, this session repeatedly) refuses to make without something real to check it against; "adopt the cheap seam now, defer the expensive guess" (CLAUDE.md). *Outcome:* the table description of `AGENTIC` is corrected now (this is wording, not new schema — no fixture changes, no validator changes, nothing to migrate); every existing single-step `AGENTIC` Tool remains valid as the trivial case of a one-step "sequence." The concrete authoring grammar for a genuine multi-step sequence is left undecided, to be settled against a real corpus scenario that needs one. *Consequences:* until that follow-up is settled, `AGENTIC` and `SKILL` remain operationally identical in this engine (both hand off once, as `TOOL_STEP`, per the current WP-02 implementation) — the distinction drawn here is conceptual and forward-looking, not yet load-bearing in code. *Reversal:* two-way door — a corrected table description commits nothing that a later, differently-shaped authoring grammar would need to unwind.
+
+**D18 — `AGENTIC` is removed; `SKILL` absorbs its single-step, bounded-discretion case (`allowed_tools`), and `PROCESS` gains an anonymous, inline form for the multi-step, automated-sequence case D17 was trying to hold onto its own kind.** *Context:* D17 kept `AGENTIC` distinct from `PROCESS` on the strength of one difference — identity (an independently versioned artifact vs. a sequence belonging to one Tool). Asked directly whether that difference earns a whole mechanism kind, the answer is no: "guided" (an agent driving hand-offs one at a time via `next()`/`report()`) is not a per-kind property to begin with — it is what this engine already does with anything non-deterministic, `PROCESS` calls included (§9.3). There was never a distinct "guided workflow" mechanic to invent; a multi-step `AGENTIC` sequence and a `PROCESS` call are the same mechanic wearing two names. Once that is seen, the only real difference left — identity — decides which of `SKILL` or `PROCESS` a Tool needs, not whether a third kind should exist. *Options:* keep D17's three kinds (`SKILL`, `AGENTIC`, `PROCESS`) with `AGENTIC`'s authoring grammar still to be designed: rejected — D17 already conceded `AGENTIC` and `SKILL` were "operationally identical... not yet load-bearing in code"; a kind that is not operationally distinct from another kind, with no authoring grammar of its own, is not earning its place, and the moment `PROCESS` gains an inline form (needed regardless, to give a multi-step sequence *some* home), `AGENTIC` has nothing left to do that `PROCESS` cannot. Give `AGENTIC` its own inline multi-step grammar instead of extending `PROCESS`: rejected — it would duplicate `PROCESS`'s own `nodes`/`start`/`endings`/`result` shape under a different kind name for no reason once identity is the only distinguishing property remaining. Drop `allowed_tools` (bounded discretion) entirely rather than move it to `SKILL`: rejected — nothing else in this reasoning calls that capability itself into question, only which kind's name it lives under; every fixture that used it keeps exactly the same behaviour under `SKILL`. *Outcome:* the mechanism vocabulary is five kinds — `CODE`, `SKILL`, `PROCESS`, `TOOL`, `EXTERNAL` — not six. `SKILL` MAY declare `allowed_tools` (previously `AGENTIC`-only). `PROCESS` MAY declare `process:` (§9.1) as an alternative to `ref:` — the same `start`/`nodes`/`state`/`endings` shape a top-level Process uses, with no `id`/`version`/`permission` of its own, mutually exclusive with `ref:`. Every existing single-step `AGENTIC` Tool in this repository's own corpus (`grounded-recon`, `interrogate`, `recommend`, `review-recommendations`) becomes `SKILL` with the same `ref`/`allowed_tools` unchanged — a one-word migration, not a rewrite, since none of them were ever more than one hand-off. *Consequences:* a genuinely multi-step, agent-led sequence is now authored as `PROCESS` with an inline `process:` block rather than a bespoke `AGENTIC` grammar that was never designed; §9.3's nested-scope hand-off rule, already written for a called Process's gates, is confirmed (not extended) to already cover an inline sequence's own steps the same way, since nothing about that rule was ever specific to `ref`-based calls. No fixture in this repository exercises a genuinely multi-step inline `process:` yet — this decision's own worked example (§9.1) is the first, written to prove the shape parses and reads sensibly, not as a claim that the engine can run one (§9, "calling a process," is WP-03 scope; unaffected by this decision, which is schema/model/spec only). *Reversal:* two-way door for the removal itself (additive to reverse — `AGENTIC` could be reintroduced as sugar for a `SKILL`-shaped `PROCESS` call without breaking anything this decision produces); harder to reverse cheaply once real process definitions outside this repository start using the inline `process:` form, since removing it again would need a real migration rather than a one-word rename.
 
 ---
 

@@ -1,0 +1,189 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2SXGZ8QJJHWWS2C427CCJZS",
+  "started_at": "2026-09-18T09:10:00Z",
+  "completed_at": "2026-09-18T09:35:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — rename execution_policy/GUIDED to skip_policy/ADVISORY",
+  "work_package": "docs/work-packages/WP-02-execution-engine.md",
+  "branch": "wp-02/step-5-next-report-decide",
+  "summary_for_principal": "You flagged that \"guided\" already means something specific elsewhere — an agent calling in for the current step, doing the work, and reporting back, one step at a time. That is in fact how this whole engine has always worked, for every run, regardless of any setting; there was no gap to build. The actual problem was a name collision: the spec's own vocabulary had reused the word \"guided\" for a narrower, unrelated setting (whether a person may skip a minor step). Renamed that setting from execution_policy: STRICT | GUIDED to skip_policy: STRICT | ADVISORY, everywhere it appears — the format's rulebook, the schema, the code, and the tests. This frees \"guided\" to keep its one meaning going forward. Pure rename: no behaviour changed, and the full test suite (294 tests) still passes unchanged. Recorded as a new decision (D16) in the rulebook's own decision log, alongside the two decisions it touches.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/spec/process-definition.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "skip()'s guard clause, _is_skippable(), and surrounding docstrings all referenced process.execution_policy/\"GUIDED\"."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/model.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Process.execution_policy field and its loader default renamed to skip_policy."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/defaults.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "The single defaults table (spec S15) EXECUTION_POLICY constant renamed to SKIP_POLICY, per CLAUDE.md's 'hold conventions once'."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/schema/process.v1.schema.json",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Schema property execution_policy (enum STRICT|GUIDED) renamed to skip_policy (enum STRICT|ADVISORY), kept in lockstep with model.py per the two-channel-never-disagree reasoning in D16."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Six GUIDED-policy tests updated to construct Process(skip_policy=\"ADVISORY\", ...); four test names updated from *_guided_* to *_advisory_* to match."
+      },
+      {
+        "coordinate": "docs/use-cases/CATALOGUE.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Checked UC-EXEC-POLICY/UC-CRITICALITY for the word \"guided\" — present only as informal English in a use-case description (\"strict, guided or custom\"), not as a stable id or an enum value, so left untouched: the catalogue's ids are stable per CLAUDE.md's authority hierarchy and this rename does not touch what those ids identify."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Yes, that makes sense. Guided is used in different contexts",
+    "read_as": "Confirmation of the proposed action from my prior message: rename the spec's skip-permission vocabulary away from GUIDED to remove the collision with the principal's own established use of \"guided\" (an agent driving the run step by step) in other contexts — proceed with the rename.",
+    "filled_in": [
+      {
+        "gap": "The principal confirmed the direction (rename) but did not specify the replacement field/value names — my prior message only offered one example (skip_policy: NONE | ADVISORY) as an illustration, not a committed choice.",
+        "assumed": "Chose skip_policy: STRICT | ADVISORY (keeping STRICT, the well-understood, no-jargon term, and pairing it with ADVISORY rather than introducing a third new word) over the illustrative NONE | ADVISORY from the prior message, since STRICT already correctly describes the other branch and renaming it too would be gratuitous churn beyond what the collision requires.",
+        "basis": "JUDGMENT",
+        "grounded_in": "CLAUDE.md: \"Technical decisions are yours: research, decide, record, proceed\" — naming is a technical decision once the direction (rename to avoid the collision) was confirmed by the principal.",
+        "reversal_cost": "Cheap — a further rename, if the chosen names turn out wrong, is the same mechanical change again (one field, one enum value, contained to this repository's own fixtures).",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D16: execution_policy/GUIDED renamed to skip_policy/ADVISORY; STRICT unchanged.",
+      "problem": "The format's own vocabulary named a narrow setting (whether a TRIVIAL step may be skipped) GUIDED, colliding with the principal's own, broader and already-established use of \"guided\" for the engine's fundamental step-by-step, agent-driven operating model — a property true of every run regardless of this setting.",
+      "options_rejected": [
+        "Rename only the enum value (GUIDED -> something else), keep the field named execution_policy: rejected — the field name itself invites the confusion, since \"execution policy\" reads as governing how the process runs in general, not narrowly whether a step may be skipped.",
+        "Rename only in prose/docs, keep execution_policy/GUIDED in the machine-readable schema and code: rejected — the two channels (spec prose vs. machine format) would then disagree, violating the spec's own authority as the single normative source, and any future process definition or fixture written against the docs would fail validation."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "A further field/enum rename, mechanically identical to this one; no process definitions exist yet outside this repository's own fixtures, so there is no external migration burden either way.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Every run, under every skip_policy setting, is driven exclusively by a caller invoking next()/report()/decide()/skip() one node at a time — the engine never executes a step's own work itself.",
+          "source": "src/sulis_workflows/engine/run.py: next_()/report() always return after exactly one node's hand-off (a NextAnswer), confirmed by re-reading _drive()'s control flow this session; unchanged by this rename."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "execution_policy/GUIDED appeared in exactly five files before this change (model.py, process.v1.schema.json, engine/run.py, tests/engine/test_run.py, the spec itself); all five updated in this same change, confirmed by a repo-wide grep before and after.",
+          "source": "grep -rln \"execution_policy\\|GUIDED\" across the repository, run before and after the edits."
+        }
+      ],
+      "revisit_if": "A future work package needs a third skip-policy value (e.g. a role-scoped or per-step-category policy beyond a flat STRICT/ADVISORY) — not requested now; additive if it happens."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after the rename.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "294 passed, 0 failed — identical count to before the rename, confirming it changed no behaviour."
+    },
+    {
+      "subject": "No stray execution_policy/GUIDED references left outside intentional explanatory text about the rename itself.",
+      "method": "grep -rn \"execution_policy\" --include=*.py --include=*.md --include=*.json . (excluding .git, mypy cache, and prior run records, which are historical and never edited).",
+      "location": "repository root",
+      "result": "Three hits remain, all inside D16's own text and skip()'s docstring, explaining the old name for context — no functional reference remains."
+    },
+    {
+      "subject": "Lint, format, type-check and JSON-schema validity of every changed file.",
+      "method": "ruff check / ruff format --check / mypy scoped to the changed Python files; python3 -c \"json.load(...)\" for the schema file.",
+      "location": "src/sulis_workflows/engine/run.py, src/sulis_workflows/definition/model.py, src/sulis_workflows/definition/defaults.py, src/sulis_workflows/definition/schema/process.v1.schema.json, tests/engine/test_run.py",
+      "result": "0 ruff findings, 0 reformatting needed, mypy success on 3 source files, schema JSON parses cleanly."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "catalogue-informal-guided-wording",
+      "location": "docs/use-cases/CATALOGUE.md",
+      "divergence": "UC-EXEC-POLICY's description text still contains the informal English word \"guided\" (\"strict, guided or custom\"), describing the deviation-policy concept in general terms, not the format's own enum value.",
+      "governed_exception": true,
+      "why_not_now": "The catalogue's ids and text are the second tier of authority in CLAUDE.md's hierarchy and are meant to stay stable across format changes; this is ordinary English describing a concept, not a reference to the renamed field or enum, so rewriting it would be cosmetic churn to a document this rename has no normative claim over."
+    },
+    {
+      "id": "gate-note-into-not-wired",
+      "location": "src/sulis_workflows/engine/run.py",
+      "divergence": "Unchanged from docs/runs/01M2SVZ4MXFQAZE54ZXRTAK4A2.agent-run.json — GateNode.note_into is still parsed but never copied into the named run-state channel.",
+      "governed_exception": false,
+      "why_not_now": "Out of scope for this rename; already parked in the immediately prior run record with its own trigger and decay assessment."
+    },
+    {
+      "id": "policy-decider-rationale-not-persisted",
+      "location": "src/sulis_workflows/engine/run.py",
+      "divergence": "Unchanged from docs/runs/01M2SVZ4MXFQAZE54ZXRTAK4A2.agent-run.json — a policy/agent gate decider's rationale is still computed but discarded.",
+      "governed_exception": false,
+      "why_not_now": "Same as above — already parked, out of scope for this rename."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a spec's own vocabulary borrows a word the principal already uses for something else in their world, the collision is real even if the two meanings never appear in the same sentence — confirm the rename direction with the principal (their world: what a term means to them and the people they'll show this to), then treat the actual rename as an ordinary technical decision to make and record, not something to keep asking about at each step.",
+      "incident": "The principal's first message (\"a different definition of guided\") was answered with a proposal and one open question (does this collide with your other usage); their reply (\"yes... guided is used in different contexts\") was a green light for the whole rename, not a request to keep checking in — so the actual field/enum name choice, the file-by-file edits, and the decision-log entry were all done in one pass without further questions, consistent with CLAUDE.md's instruction to ask the principal only about their world, never about implementation.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "Any future naming collision between this format's own vocabulary and terms the principal already uses elsewhere: confirm direction once, then execute the rename as a normal technical decision.",
+      "proposed_check": "This run's own decisions[] entry (D16) and measured[] evidence that all five affected files were updated in one pass.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "skip_policy: STRICT | ADVISORY is the format's own name for the skip-a-TRIVIAL-step setting, freeing \"guided\" to describe the engine's actual step-by-step, agent-driven nature without collision — nothing further needed for this specific rename."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "GateNode.note_into (S7.6's worked example) is parsed but a gate decision's note is never copied into the named run-state channel it points at.",
+        "untouched_id": "gate-note-into-not-wired",
+        "trigger": "A process definition that declares note_into and expects a later step's `in:` expression to read the note.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Carried forward unchanged from the immediately prior run record; still no shipped scenario exercises it."
+      },
+      {
+        "item": "A policy/agent gate decider's computed rationale is discarded rather than persisted into the AttemptRecord.",
+        "untouched_id": "policy-decider-rationale-not-persisted",
+        "trigger": "An audit or downstream consumer that reads a policy-decided gate's stored rationale and finds it absent.",
+        "if_nothing_happens": "DECAYS",
+        "detail": "Carried forward unchanged from the immediately prior run record."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The priority question from three reports ago still stands and is still yours: build out the missing pieces (parallel work, loops over lists, one process calling another), wire in a real AI model for the steps this engine currently only pauses on, or something else.",
+        "action": "No code action until you answer; I will scope whichever direction you name into a work package once you do.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "UNKNOWN"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Close out the two small S7.6 provenance gaps (gate note_into, policy-decider rationale persistence) in one short follow-up pass, then hold for your answer on the priority question.",
+      "reason": "Both are small, already-located, and complete S7.6's provenance requirement fully rather than leaving it partially met; neither needs a decision from you first. Unchanged recommendation from the immediately prior run record.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

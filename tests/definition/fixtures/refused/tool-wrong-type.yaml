@@ -11,6 +11,6 @@ output:
 controls:
   - profile: insight@1
 mechanism:
-  kind: AGENTIC
+  kind: SKILL
   ref: skills/interrogate
 effect: 1
