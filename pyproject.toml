@@ -29,6 +29,9 @@ dev = [
     "pytest-cov >= 5.0",
 ]
 
+[project.scripts]
+sulis-workflows = "sulis_workflows.definition.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/sulis-ai/workflows"
 

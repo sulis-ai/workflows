@@ -1,0 +1,12 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: brief
+version: 1.0.0
+title: Brief
+grounded_in: This format's own convention — no external standard applies.
+schema:
+  type: object
+  required: [question]
+  additionalProperties: false
+  properties:
+    question: { type: string }

@@ -1,0 +1,12 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: frame-question
+version: 1.0.0
+title: Frame the question
+inputs:
+  brief: { type: "profile:brief@1" }
+output:
+  framed_question: { type: string }
+controls: [ { conventions: output-present@1 } ]
+mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:frame_question" }
+effect: QUERY

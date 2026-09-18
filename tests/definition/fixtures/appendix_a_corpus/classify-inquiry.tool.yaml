@@ -1,0 +1,12 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: classify-inquiry
+version: 1.0.0
+title: Classify the inquiry
+inputs:
+  question: { type: string }
+output:
+  path: { type: "enum[SINGLE, RECURSIVE]" }
+controls: [ { conventions: output-present@1 } ]
+mechanism: { kind: CODE, ref: "appendix_a_corpus.tools:classify_inquiry" }
+effect: QUERY

@@ -1,0 +1,13 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: conclusion
+version: 1.0.0
+title: Conclusion
+grounded_in: This format's own convention — no external standard applies.
+schema:
+  type: object
+  required: [summary]
+  additionalProperties: false
+  properties:
+    summary: { type: string }
+checker: profile-conformance@1

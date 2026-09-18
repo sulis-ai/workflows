@@ -1,0 +1,31 @@
+# The decision@1 evidence checker (spec §7.6): every evidence[].path must be
+# one of the gate's reviewing paths. Wired from decision.profile.yaml's own
+# `checker: decision-evidence@1` field, not registered generically via
+# `checker_for` — it checks one specific profile, not every control of a kind.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: decision-evidence
+version: 1.0.0
+title: Decision evidence checker
+mechanism: { kind: CODE, ref: "sulis_workflows.checkers:decision_evidence" }
+inputs:
+  value:     { type: "profile:decision@1" }
+  control:   { type: string }
+  reviewing: { type: "list<string>" }
+output:
+  result: { type: "profile:control-result@1" }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - name: evidence citing a reviewed path passes
+    inputs:
+      value: { verdict: PERMIT, rationale: "Every recommendation is grounded.", evidence: [ { path: "state.recommendations", claim: "grounded" } ] }
+      control: decision@1
+      reviewing: [state.recommendations, state.confidence]
+    expect: { result: { passed: true } }
+  - name: evidence citing a path never reviewed fails
+    inputs:
+      value: { verdict: PERMIT, rationale: "Looks fine.", evidence: [ { path: "state.notes", claim: "fine" } ] }
+      control: decision@1
+      reviewing: [state.recommendations, state.confidence]
+    expect: { result: { passed: false } }

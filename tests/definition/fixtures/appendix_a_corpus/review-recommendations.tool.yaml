@@ -1,0 +1,13 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: review-recommendations
+version: 1.0.0
+title: Review recommendations
+inputs:
+  criteria:  { type: string }
+  reviewing: { type: "list<any>" }
+output:
+  decision: { type: "profile:decision@1" }
+controls: [ { conventions: output-present@1 } ]
+mechanism: { kind: AGENTIC, ref: skills/review-recommendations }
+effect: QUERY

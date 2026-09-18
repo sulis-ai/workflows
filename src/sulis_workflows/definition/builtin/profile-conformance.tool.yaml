@@ -1,0 +1,27 @@
+# The generic checker for every `profile:` control (spec §5.2) — the shape spec
+# §5.2 shows verbatim, wired to sulis_workflows.checkers:profile_conformance.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: profile-conformance
+version: 1.0.0
+title: Profile conformance checker
+mechanism: { kind: CODE, ref: "sulis_workflows.checkers:profile_conformance" }
+checker_for: { control: PROFILE }
+inputs:
+  value:   { type: any }
+  control: { type: string }
+output:
+  result: { type: "profile:control-result@1" }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - name: a conforming finding passes
+    inputs:
+      value: { id: "f1", claim: "the sky is blue on a clear day", source: "observation" }
+      control: finding@1
+    expect: { result: { passed: true } }
+  - name: a finding with no source fails
+    inputs:
+      value: { id: "f1", claim: "the sky is blue on a clear day" }
+      control: finding@1
+    expect: { result: { passed: false } }

@@ -1,0 +1,6 @@
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: grounded-inquiry-sign-off
+version: 1.0.0
+type: POLICY
+title: Trusted enough to auto-approve grounded-inquiry recommendations

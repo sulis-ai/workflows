@@ -1,0 +1,12 @@
+# A minimal, shared CONVENTIONS control for this corpus's plain (non-profile-typed)
+# outputs — every Tool below that isn't already profile-controlled uses this one,
+# rather than inventing a bespoke checker per Tool.
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: output-present
+version: 1.0.0
+type: CONVENTIONS
+title: The output is present
+applies_to: output
+checker: output-present@1
+grounded_in: This format's own convention — no external standard applies.
