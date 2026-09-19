@@ -1067,6 +1067,125 @@ def test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time():
     assert call_count["n"] == 3  # budget=2 allows 2 loop-backs -> 3 dispatches total
 
 
+def test_multi_step_loop_body_spanning_separate_report_calls_advances_correctly():
+    """D20: pressure-testing the real grounded-inquiry process (spec Appendix
+    A) against the engine for the first time found this — a loop body with
+    TWO SKILL (hand-off) steps got stuck asking for the first one forever
+    after exactly one cycle, never reaching the second again and never
+    exhausting the loop budget, because replay always jumped a node's own
+    baseline straight to however many attempts now existed for it in total,
+    which is only correct when nothing ELSE in the loop body has already
+    recorded a later revisit's own attempts first. The existing loop tests
+    above never caught this because their loop bodies are either a single
+    node, or CODE-mechanism (dispatched synchronously, so the whole loop
+    finishes inside one next_() call — no cross-call hand-off ever needed
+    mid-loop). This is the first real one."""
+
+    step_a_tool = Tool(
+        header=_header("step-a", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/a"),
+        effect="QUERY",
+        permission="workflows.step-a.dispatch",
+    )
+    step_b_tool = Tool(
+        header=_header("step-b", "TOOL"),
+        output={"verdict": OutputSpec(type="enum[GO, STOP]")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/b"),
+        effect="QUERY",
+        permission="workflows.step-b.dispatch",
+    )
+    process = Process(
+        header=_header("two-step-loop", "PROCESS"),
+        start="a",
+        permission="workflows.two-step-loop.start",
+        nodes={
+            "a": StepNode(id="a", tool="step-a@1", in_={}, out={}, next="b"),
+            "b": StepNode(
+                id="b",
+                tool="step-b@1",
+                in_={},
+                out={"verdict": "state.verdict"},
+                next="check",
+            ),
+            "check": RouteNode(
+                id="check",
+                when=(
+                    RouteOption(
+                        if_='state.verdict == "GO"',
+                        next="a",
+                        loop=LoopSpec(budget=2, on_exhausted=RouteTarget(end="DONE")),
+                    ),
+                ),
+                otherwise=RouteTarget(end="DONE"),
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([step_a_tool, step_b_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    answer = _run(next_(process, "run-loop-3", "root", ctx, inputs={}, host_inputs={}))
+    a_dispatches = 0
+    b_dispatches = 0
+    for _ in range(10):
+        assert answer.kind is not AnswerKind.ENDED, "never reached DONE"
+        if answer.node_id == "a":
+            a_dispatches += 1
+            answer = _run(
+                report(
+                    process,
+                    "run-loop-3",
+                    "root",
+                    "a",
+                    ctx,
+                    inputs={},
+                    host_inputs={},
+                    output={"x": "ok"},
+                )
+            )
+        elif answer.node_id == "b":
+            b_dispatches += 1
+            answer = _run(
+                report(
+                    process,
+                    "run-loop-3",
+                    "root",
+                    "b",
+                    ctx,
+                    inputs={},
+                    host_inputs={},
+                    output={"verdict": "GO"},
+                )
+            )
+        else:
+            raise AssertionError(f"unexpected hand-off: {answer.node_id!r}")
+        if answer.kind is AnswerKind.ENDED:
+            break
+    assert answer.ending == "DONE"
+    # budget=2 allows 2 loop-backs, so "a" and "b" are each freshly asked 3
+    # times (the 3rd "b" answer is the one whose GO verdict the budget
+    # check finds already exhausted, ending DONE without ever asking "a" a
+    # 4th time) -- the bug this test originally guarded against asked for
+    # "a" a 4th, 5th, 6th... time and never asked for "b" again at all; a
+    # second, related bug found later (`_advance_route`'s own replay
+    # branch reusing a stale, already-superseded route decision instead of
+    # the earliest one this walk had not yet consumed) skipped asking "b"
+    # a 3rd time at all once the loop had already been taken twice, which
+    # this assertion now also guards against.
+    assert a_dispatches == 3
+    assert b_dispatches == 3
+
+
 def test_gate_deny_loop_budget_is_enforced_across_askings():
     # spec S7.6's own worked example loops on DENY: DENY: { next: recommend, loop: { budget: N } }.
 
@@ -1954,3 +2073,156 @@ def test_process_call_control_failure_on_translated_output_routes_via_then():
         next_(parent, "run-ctrlfail-1", "root", ctx, inputs={}, host_inputs={})
     )
     assert answer.ending == "GAVE_UP"
+
+
+# ---------------------------------------------------------- state reducers (§2.3, D19) --
+
+
+def test_step_writing_a_mismatched_value_to_an_append_channel_ends_cleanly() -> None:
+    """D19: a write that does not fit its channel's reducer shape is refused
+    and recorded as a failed attempt, not a crash out of next()/report() —
+    the exact bug pressure-testing the real grounded-inquiry process found
+    (a STEP writing to an APPEND channel with nothing implementing APPEND)."""
+    from sulis_workflows.definition.model import StateChannel
+
+    tool = Tool(
+        header=_header("gather", "TOOL"),
+        output={"findings": OutputSpec(type="list<any>")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:gather"),
+        effect="QUERY",
+        permission="workflows.gather.dispatch",
+    )
+    process = Process(
+        header=_header("append-process", "PROCESS"),
+        start="gather",
+        permission="workflows.append-process.start",
+        state={"findings": StateChannel(type="list<any>", reducer="APPEND")},
+        nodes={
+            "gather": StepNode(
+                id="gather",
+                tool="gather@1",
+                in_={},
+                out={"findings": "state.findings"},
+                end="DONE",
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        # The Tool's own output field is a list, but this dispatch hands back
+        # a bare string instead — the bad-but-conformant write D19 defends
+        # against, not a hypothetical.
+        code_tool=StubCodeToolAdapter(
+            responses={"mod:gather": {"findings": "not a list"}}
+        ),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(next_(process, "run-state-1", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+
+
+def test_step_appending_a_real_list_to_an_append_channel_accumulates() -> None:
+    """The positive case for the same shape: two STEPs writing to the same
+    APPEND channel accumulate rather than each replacing the other's write —
+    exactly what grounded-inquiry's own gather->interrogate loop depends on.
+    A third step reads `state.findings` back as its own input, so the
+    assertion is on what the engine actually accumulated, not just that the
+    run reached an ending without crashing."""
+    from sulis_workflows.definition.model import InputSpec, StateChannel
+
+    gather_tool = Tool(
+        header=_header("gather", "TOOL"),
+        output={"findings": OutputSpec(type="list<any>")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:gather"),
+        effect="QUERY",
+        permission="workflows.gather.dispatch",
+    )
+    gather_again_tool = Tool(
+        header=_header("gather-again", "TOOL"),
+        output={"findings": OutputSpec(type="list<any>")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:gather-again"),
+        effect="QUERY",
+        permission="workflows.gather.dispatch",
+    )
+    snapshot_tool = Tool(
+        header=_header("snapshot", "TOOL"),
+        output={"snapshot": OutputSpec(type="any")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:snapshot"),
+        effect="QUERY",
+        inputs={"findings": InputSpec(type="any")},
+        permission="workflows.snapshot.dispatch",
+    )
+    process = Process(
+        header=_header("append-process", "PROCESS"),
+        start="gather",
+        permission="workflows.append-process.start",
+        state={
+            "findings": StateChannel(type="list<any>", reducer="APPEND"),
+            "snapshot": StateChannel(type="any", reducer="REPLACE"),
+        },
+        nodes={
+            "gather": StepNode(
+                id="gather",
+                tool="gather@1",
+                in_={},
+                out={"findings": "state.findings"},
+                next="gather-again",
+            ),
+            "gather-again": StepNode(
+                id="gather-again",
+                tool="gather-again@1",
+                in_={},
+                out={"findings": "state.findings"},
+                next="snapshot",
+            ),
+            "snapshot": StepNode(
+                id="snapshot",
+                tool="snapshot@1",
+                in_={"findings": "state.findings"},
+                out={"snapshot": "state.snapshot"},
+                end="DONE",
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+
+    captured: dict[str, object] = {}
+
+    class CapturingAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            if ref == "mod:gather":
+                return {"findings": ["f1"]}
+            if ref == "mod:gather-again":
+                return {"findings": ["f2", "f3"]}
+            if ref == "mod:snapshot":
+                captured["findings"] = inputs["findings"]
+                return {"snapshot": inputs["findings"]}
+            raise AssertionError(f"unexpected ref: {ref}")
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=CapturingAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([gather_tool, gather_again_tool, snapshot_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(next_(process, "run-state-2", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "DONE"
+    assert captured["findings"] == ["f1", "f2", "f3"]

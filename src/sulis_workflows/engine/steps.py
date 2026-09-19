@@ -58,6 +58,7 @@ class StepOutcome(str, Enum):
     CONTROL_FAILED = "CONTROL_FAILED"
     ERROR = "ERROR"
     DEPTH_EXHAUSTED = "DEPTH_EXHAUSTED"  # §9.2 — a PROCESS-mechanism call chain
+    STATE_MISMATCH = "STATE_MISMATCH"  # §2.3 — output doesn't fit its channel's reducer
 
 
 @dataclass(frozen=True)

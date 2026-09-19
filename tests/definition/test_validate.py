@@ -974,3 +974,29 @@ schema:
 """
     findings = validate(doc, registry=Registry())
     assert "V15" in _rules(findings)
+
+
+# ------------------------------------------------------------------------------ V16 --
+
+
+def test_v16_accepted_upsert_by_id_channel_with_key() -> None:
+    doc = _process_with_step(
+        "    { type: STEP, tool: interrogate@1, in: { question: inputs.question }, "
+        "out: { verdict: state.verdict }, end: DONE }",
+        extra_state='  insights: { type: "list<any>", reducer: UPSERT_BY_ID, key: id }\n',
+    )
+    findings = validate(doc, registry=_base_registry(_INTERROGATE_TOOL))
+    assert "V16" not in _rules(findings)
+
+
+def test_v16_refused_upsert_by_id_channel_with_no_key() -> None:
+    """The bad-but-conformant case: a channel that calls itself UPSERT_BY_ID
+    but never names what to upsert by — schema-valid (§14/V1 leaves `key`
+    optional), still refused."""
+    doc = _process_with_step(
+        "    { type: STEP, tool: interrogate@1, in: { question: inputs.question }, "
+        "out: { verdict: state.verdict }, end: DONE }",
+        extra_state='  insights: { type: "list<any>", reducer: UPSERT_BY_ID }\n',
+    )
+    findings = validate(doc, registry=_base_registry(_INTERROGATE_TOOL))
+    assert "V16" in _rules(findings)
