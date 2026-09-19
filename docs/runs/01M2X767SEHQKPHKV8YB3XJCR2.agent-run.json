@@ -4,11 +4,11 @@
   "kind": "AgentRun",
   "id": "01M2X767SEHQKPHKV8YB3XJCR2",
   "started_at": "2026-09-19T14:10:00Z",
-  "completed_at": "2026-09-19T17:40:00Z",
+  "completed_at": "2026-09-19T18:35:00Z",
   "agent": "Claude Code (CLAUDE.md, this repository) — pressure-testing spec Appendix A (grounded inquiry) against the real engine for the first time",
   "work_package": "docs/work-packages/WP-02-execution-engine.md",
   "branch": "docs/grounded-inquiry-pressure-test",
-  "summary_for_principal": "You asked me to pressure-test the grounded-inquiry workflow through the real engine, not just check its paperwork. It had never actually run before, only been checked as well-formed. Running it for real found and fixed three genuine bugs, all now covered by tests:\n\n- Recording a finding sometimes crashed the whole run instead of cleanly failing just that step.\n- Two bugs let a \"try a couple more times, then move on\" loop either get stuck retrying forever, or silently skip a needed re-check. Both now behave exactly as configured.\n\nI also found the example's own \"require a person's sign-off if confidence is too low\" rule can never fire, since an earlier check already ends the run first — a gap in the example, not a live bug. Full suite: 340 tests passing. All fixes are logged in the spec's own decision record.\n\nNumbered actions:\n1. Nothing needs your decision — implementation bugs, not judgment calls, so I fixed them.\n2. Found and left: the unreachable sign-off rule (harmless); one loop-through-a-gate case reasoned through but untested.\n3. Opinion: merge this, then connect a real AI reviewer to run this workflow, or test that remaining case first.",
+  "summary_for_principal": "You asked me to pressure-test the grounded-inquiry workflow through the real engine, not just check its paperwork. It had never actually run before, only been checked as well-formed. Running it for real found and fixed four genuine bugs, all now covered by tests:\n\n- Recording a finding sometimes crashed the whole run instead of cleanly failing just that step.\n- Three bugs let a \"try a couple more times, then move on\" loop get stuck retrying forever, silently skip a needed re-check, or (the worst, found while double-checking the others) silently ignore a real approval decision in favour of a stale one. All now behave exactly as configured.\n\nI also found the example's own \"require a person's sign-off if confidence is too low\" rule can never fire, since an earlier check already ends the run first — a gap in the example, not a live bug. Full suite: 342 tests passing.\n\nNumbered actions:\n1. Nothing needs your decision — implementation bugs, not judgment calls, so I found and fixed them all.\n2. Found and left: the unreachable sign-off rule in the example (harmless).\n3. Opinion: merge this, then connect a real AI reviewer to actually run this workflow.",
   "subjects": {
     "primary": {
       "coordinate": "src/sulis_workflows/engine/run.py",
@@ -50,7 +50,7 @@
         "coordinate": "tests/engine/test_run.py",
         "kind": "COMPONENT",
         "role": "ACTED_ON",
-        "reason": "New D19 tests (a mismatched APPEND write ends cleanly; a real APPEND accumulates across two steps) and the D20 regression test, whose own expected counts (b_dispatches 2 -> 3) were corrected once D21's fix made the test's previously-masked true behaviour visible."
+        "reason": "New D19 tests (a mismatched APPEND write ends cleanly; a real APPEND accumulates across two steps), the D20 regression test (expected counts corrected once D21 made its previously-masked true behaviour visible), and two new D22 regression tests for the equivalent GATE-replay bug (dispatch counts, and a verdict-shadowing case proving a later DENY-then-PERMIT resolution is no longer discarded)."
       },
       {
         "coordinate": "tests/engine/test_grounded_inquiry_e2e.py",
@@ -62,7 +62,7 @@
         "coordinate": "docs/spec/process-definition.md",
         "kind": "PROCESS",
         "role": "ACTED_ON",
-        "reason": "Added D19, D20 and D21 to the §18 decision log (MADR form), and an Update annotation on D20 correcting its own now-wrong claim that ROUTE was unaffected by the bug it fixed, per this repo's own D17->D18 precedent for correcting an earlier entry in place rather than rewriting history."
+        "reason": "Added D19, D20, D21 and D22 to the §18 decision log (MADR form), plus Update annotations on D20 and D21 correcting their own now-wrong claims that ROUTE, then GATE, were unaffected by the bug they each fixed, per this repo's own D17->D18 precedent for correcting an earlier entry in place rather than rewriting history."
       },
       {
         "coordinate": "tests/definition/fixtures/accepted/process-appendix-a.yaml",
@@ -90,6 +90,14 @@
         "basis": "PRINCIPAL_SAID",
         "grounded_in": "The instruction's own explicit standing order to decide and proceed rather than ask, for anything short of the six named escalation triggers (money, personal data, legal exposure, irreversible loss, a changed product promise, expensive lock-in) — none of which this fix touches.",
         "reversal_cost": "Cheap — see the D21 decision entry's own Reversal field; two-way door.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "After the PR was opened, this run's own record parked one item (whether _advance_gate has the same replay bug D21 fixed for _advance_route) as INFERRED-but-unverified, recommending it as a small SMALL-effort follow-up. Whether to treat that as closing this run or to continue and resolve it before calling the work done was not explicitly re-asked.",
+        "assumed": "Continued and resolved it in the same run rather than waiting to be asked, per the standing instruction to decide technical follow-through rather than defer it, and because the parked item was exactly the shape of thing (small, testable, already reasoned through) the instruction says to just do. It also turned out to be a real, more serious bug than the ROUTE one (a later decider verdict could be silently discarded, not just a wasted duplicate ask) — confirming the value of verifying rather than leaving it as an inference.",
+        "basis": "PRINCIPAL_SAID",
+        "grounded_in": "The same standing order as the D21 fill-in: decide and proceed rather than defer, for anything short of the six named escalation triggers.",
+        "reversal_cost": "Cheap — see the D22 decision entry's own Reversal field; two-way door.",
         "confidence": "HIGH"
       }
     ],
@@ -193,6 +201,45 @@
         }
       ],
       "revisit_if": "See the untouched[] entry on GATE's own equivalent replay path, which was reasoned through but not verified in this run."
+    },
+    {
+      "headline": "_advance_gate now replays resolve_gate itself to find exactly one resolution's own attempts before deciding anything, instead of feeding every unconsumed attempt in the slice to it at once — the same D20/D21 bug class, found a third time, in GATE nodes.",
+      "problem": "Verifying (rather than leaving as an inference) whether _advance_gate had the same replay-baseline bug STEP (D20) and ROUTE (D21) both turned out to have: a synthetic GATE whose DENY route loops back through two SKILL hand-offs before reaching the gate again recorded five sign-off attempts for a budget-2 loop that should have produced exactly three resolutions, one landing out of order relative to the second hand-off's own report.",
+      "options_rejected": [
+        "Give _advance_gate a fixed-size truncation the way D21 gave _advance_route (attempts[0]/visit_attempts_used=1): rejected — a GATE resolution's own attempt count is not fixed at one the way a ROUTE's always is; it varies from one attempt up to len(node.deciders), so there is no single fixed size to take.",
+        "Recompute the whole resolution from scratch some other way: rejected as unneeded complexity once resolve_gate itself, being pure, could simply be replayed."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — _gate_visit_prefix is a pure function with no state of its own; visit_attempts_used is additive exactly as D20/D21's own.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before this fix, a synthetic two-SKILL-hand-off GATE loop (budget 2, policy decider always DENY) recorded five sign-off attempts instead of three, one appearing out of order relative to the second hand-off's own report.",
+          "source": "Ad hoc repro script, this run, before the fix; durable AttemptRecord store contents inspected directly."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After this fix, the same loop records exactly three sign-off attempts, in order, and each hand-off is dispatched exactly three times.",
+          "source": "tests/engine/test_run.py::test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per_resolution, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before this fix, merging two resolutions' attempts into one resolve_gate call used only the first decider's verdict and would have silently discarded a genuinely later, different verdict (confirmed directly with a policy decider scripted DENY then PERMIT: before the fix the run never reached PERMIT's own route).",
+          "source": "Ad hoc repro script, this run, before the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After this fix, the same DENY-then-PERMIT scenario correctly reaches COMPLETE via PERMIT's own route.",
+          "source": "tests/engine/test_run.py::test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own_verdict, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after this fix: 342 tests, 0 failed; ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "Not applicable — this closes the specific open question D20/D21 both left behind; no further node type in this engine shares the same replay-baseline shape (PROCESS-mechanism calls recurse into a fresh nested scope rather than revisiting a node in the current one)."
     }
   ],
   "flags": [],
@@ -207,7 +254,7 @@
       "subject": "Full test suite after all three fixes (D19, D20, D21) and the new e2e suite.",
       "method": "python -m pytest -q",
       "location": "repository root",
-      "result": "340 passed, 0 failed. New this run: 2 tests in tests/definition/test_validate.py (V16), 3 in tests/engine/test_run.py (D19's crash/accumulation fixes plus D20's own regression test), 12 in the new tests/engine/test_state.py (all four reducers), 8 in the new tests/engine/test_grounded_inquiry_e2e.py (the real-process pressure-test suite)."
+      "result": "342 passed, 0 failed. New this run: 2 tests in tests/definition/test_validate.py (V16), 5 in tests/engine/test_run.py (D19's crash/accumulation fixes, D20's own regression test, and two new D22 regression tests for the equivalent GATE-replay bug), 12 in the new tests/engine/test_state.py (all four reducers), 8 in the new tests/engine/test_grounded_inquiry_e2e.py (the real-process pressure-test suite)."
     },
     {
       "subject": "Lint, format and type-check on every path CI actually scopes.",
@@ -236,29 +283,22 @@
       "divergence": "produced_by only ever records an AGENT-attributed write (performed_by starting 'AGENT:...') and is never cleared or updated when a LATER CODE-attributed write (performed_by starting 'CODE:...') subsequently overwrites the same state path with a different value — so §7.6's 'no deciding on your own work' check can attribute a state path's CURRENT value to an agent identity that did not actually produce it, if a CODE step overwrote that agent's earlier write. Found while writing the sign-off agent-decider test: `recommend` (a SKILL step, AGENT-attributed) writes state.recommendations, which check-recommendation-fidelity (CODE) then overwrites — produced_by still names the original AGENT identity.",
       "governed_exception": false,
       "why_not_now": "Whether the 'more correct' behaviour is to clear produced_by on any overwrite, or to attribute it to the CODE step (untracked), or to track both an original-drafter and a final-writer separately, is a product judgement call this pass has no mandate to make blind, and no fixture or scenario currently depends on the answer either way (the one test that touches this deliberately uses a distinct reviewer identity to sidestep it, and notes why in its own docstring)."
-    },
-    {
-      "id": "gate-multi-hand-off-loop-replay-unverified",
-      "location": "src/sulis_workflows/engine/run.py — _advance_gate",
-      "divergence": "_advance_gate's own DECIDED-resolution branch, like _advance_route before D21's fix, never sets _Advance.visit_attempts_used, so _drive_scope's baseline-bump falls back to the store's running total for that GATE node rather than exactly what this visit consumed. Reasoning through it structurally (not tested) suggests a GATE revisited more than once within a SINGLE _drive_scope call — which needs every node between two revisits to resolve without an external hand-off pausing the walk — could suffer the same class of bug D21 fixed for ROUTE (a later revisit's decision replayed in place of an earlier, not-yet-reached one). Appendix A's own sign-off gate cannot hit this in practice, because its only loop-back (DENY -> gather) always passes through at least one SKILL hand-off (gather/interrogate/recommend) before sign-off could be reached again, which necessarily pauses the walk across a fresh report() call and gives _drive_scope a clean, freshly-computed baseline each time — confirmed empirically by this run's own DENY-then-PERMIT scenario passing.",
-      "governed_exception": false,
-      "why_not_now": "No fixture or corpus scenario in this repository has a GATE that could actually be revisited twice within one call (it would need a loop body with no hand-off at all between two visits of the same gate, an unusual shape) — building a targeted repro and fix without one would be exactly the speculative, unverified change CLAUDE.md's own 'measure, don't author' principle warns against. Recorded here as a specific, concrete follow-up rather than left implicit."
     }
   ],
   "lessons": [
     {
-      "maxim": "When a fix corrects a baseline/counting bug in one node-type's replay logic, check every OTHER node type that shares the same replay contract before declaring the bug class closed — 'this other node type can't have the same bug' is a claim that needs a test, not an assumption from a different shape of reasoning.",
-      "incident": "D20 fixed the exact same class of bug for STEP nodes and explicitly reasoned that ROUTE was safe ('a ROUTE's own visit is always exactly one attempt') — true of any single visit, but not of how many unconsumed past visits could be sitting in the slice handed to it once a loop had looped back more than once. The very next thing built after that (the committed e2e regression suite) found ROUTE had the identical latent bug, just never exercised by D20's own ad hoc script, which had only ever pushed the loop through two iterations rather than to genuine exhaustion. D20's own synthetic regression test had, unnoticed at the time, encoded the ROUTE bug's own wrong behaviour as its expected assertion (b_dispatches == 2) — a passing test that was itself evidence the surrounding claim ('ROUTE unaffected') was never actually tested to its own true boundary.",
+      "maxim": "When a fix corrects a baseline/counting bug in one node-type's replay logic, check every OTHER node type that shares the same replay contract before declaring the bug class closed — and check it with a real test, not by reasoning about why the other type is different.",
+      "incident": "D20 fixed this bug class for STEP nodes and explicitly reasoned ROUTE was safe ('a ROUTE's own visit is always exactly one attempt') — true of any single visit, but not of how many unconsumed past visits could sit in the slice once a loop had looped back more than once. The very next thing built (the committed e2e suite) found ROUTE had the identical latent bug (D21), whose own regression test had, unnoticed, encoded the bug's wrong behaviour as its expected assertion. D21's own reasoning then repeated the SAME mistake in the opposite direction: its Consequences field said this applied to 'a ROUTE (not a GATE)', reasoning GATE was safe from unstructured analysis rather than a test. Actually testing it (D22) found GATE had a related but worse bug — not skipping a node, but silently discarding a later, genuinely different decider verdict in favour of an earlier stale one. Two node types in a row were declared safe by reasoning and were wrong both times; only the third was actually verified before being declared safe, and only because it was tested rather than reasoned about.",
       "applies_to": "AGENT_INSTRUCTIONS",
       "destination": "docs/spec/process-definition.md's own D20 entry now carries an Update annotation naming this correction directly, as the artefact this lesson changed.",
-      "proposed_check": "Before closing out any future replay/baseline fix as covering 'every node type', write (or explicitly flag as not yet written) a test that drives the SAME bug shape past its actual boundary condition (here: loop budget > 1, driven to full exhaustion, not just partway) for every node type the fix's own reasoning claims is unaffected.",
+      "proposed_check": "Before closing out any future replay/baseline fix as covering 'every node type', write a test that drives the SAME bug shape past its actual boundary condition for every OTHER node type sharing the replay contract — never write a Consequences/Reversal claim that a sibling node type is unaffected without that test backing it.",
       "confidence": "HIGH"
     }
   ],
   "where_next": {
     "ready_now": [
       "The real grounded-inquiry process can now be driven end to end through the engine for every branch it declares (bar the one found unreachable): the happy path, both loop-exhaustion shapes, the DROPPED short-circuit, the honest INSUFFICIENT stop, and all three sign-off decider paths — with a committed regression suite proving each one, not just a one-off script.",
-      "The three bugs that made this impossible before (a crash on any non-REPLACE state write, and two separate loop-replay bugs) are fixed and each recorded as its own spec decision-log entry (D19, D20, D21)."
+      "The four bugs that made this impossible or unreliable before are fixed and each recorded as its own spec decision-log entry (D19-D22): a crash on any non-REPLACE state write, and three separate loop-replay bugs (STEP, ROUTE, GATE) that could stall a run, skip a step, or silently discard a real decision."
     ],
     "waiting_on": [],
     "parked": [
@@ -275,33 +315,18 @@
         "trigger": "A real process where this ordering (agent writes a reviewed value, a later CODE step overwrites it, then the SAME agent identity reviews it at a gate) actually occurs and the current behaviour turns out to be wrong for that case.",
         "if_nothing_happens": "HOLDS_STEADY",
         "detail": "No fixture depends on the answer either way today; deciding it needs a product call about what provenance should mean here, not just a code fix."
-      },
-      {
-        "item": "GATE's own replay path (_advance_gate) was never given the same visit_attempts_used fix ROUTE just needed (D21) — reasoned through as structurally safe for every fixture in this repository today, but not verified against an actual repro the way STEP and ROUTE were.",
-        "untouched_id": "gate-multi-hand-off-loop-replay-unverified",
-        "trigger": "A real process with a GATE that could be revisited twice within a single next()/report() call (a loop body with no hand-off between two visits of the same gate) — none exists in this repository yet.",
-        "if_nothing_happens": "DECAYS",
-        "detail": "Low risk today since no fixture can hit it, but the confidence this is actually safe is INFERRED, not VERIFIED — the same gap in reasoning that let D21's own bug go unfound for as long as it did."
       }
     ],
     "actions": [
       {
         "n": 1,
-        "label": "The gate/loop-replay question above (GATE's own equivalent of the ROUTE bug just fixed) is worth actually verifying with a real test rather than leaving it as reasoning.",
-        "action": "Build a synthetic GATE-in-a-loop-with-no-intervening-hand-off fixture, drive it to a loop budget beyond 1 take, and confirm whether _advance_gate needs the same visit_attempts_used fix D21 gave _advance_route.",
-        "source_kind": "PARKED",
-        "source_id": "gate-multi-hand-off-loop-replay-unverified",
-        "effort": "SMALL"
-      },
-      {
-        "n": 2,
         "label": "This engine has still never been run against a real AI model — every SKILL/agent-decider hand-off still needs a caller (a real agent session) to actually perform the work and report() back.",
         "action": "Say the word and scope wiring a real LLM-backed caller loop as its own work package.",
         "source_kind": "RECOMMENDATION",
         "effort": "LARGE"
       },
       {
-        "n": 3,
+        "n": 2,
         "label": "This engine still refuses PARALLEL/JOIN/FOR_EACH nodes outright — those, plus triggers and templates, remain WP-03's own scope.",
         "action": "Say which piece (parallel branches, loops over lists, triggers, or something else) matters next and it will be scoped.",
         "source_kind": "RECOMMENDATION",
@@ -309,9 +334,9 @@
       }
     ],
     "recommended_next": {
-      "recommendation": "Merge this once you're comfortable, then prioritise action 1 (it's small and closes the one real unknown this pass leaves open) before either of the two large pieces.",
-      "reason": "Action 1 is cheap and turns an inferred-but-unverified risk into either a confirmed-safe result or a fourth fix — worth doing before building more on top of an engine whose replay correctness has now twice been wrong in a place it was reasoned to be safe.",
-      "urgency": "SOON"
+      "recommendation": "Merge this once you're comfortable.",
+      "reason": "The one open technical question this pass left (whether GATE had the same class of bug as ROUTE) has now been tested and fixed, not just reasoned about — nothing is waiting on further verification before merging.",
+      "urgency": "NOT_URGENT"
     }
   }
 }

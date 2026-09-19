@@ -1723,6 +1723,37 @@ async def _advance_route(
 # ------------------------------------------------------------------------------ GATE --
 
 
+def _gate_visit_prefix(
+    node: GateNode, attempts: list[AttemptRecord], *, person_required: bool
+) -> list[AttemptRecord]:
+    """D22: `_visit_prefix` (D20)'s counterpart for GATE nodes. `attempts`
+    (already sliced from this node's own visit baseline) may hold more
+    than one PAST resolution's own deciders once a gate loop has been
+    taken more than once before a replay walk catches up to it — the same
+    shape of gap D20/D21 fixed for STEP/ROUTE. Unlike those two, a GATE
+    resolution's own attempt count varies (1 to `len(node.deciders)`,
+    however many deciders were actually asked before one decided or every
+    one answered `INDETERMINATE`), so there is no fixed-size prefix to
+    take — this replays `resolve_gate` itself, one attempt at a time, and
+    stops at the first prefix it calls `DECIDED`. If nothing in `attempts`
+    ever decides it, the whole slice genuinely belongs to one still-open
+    resolution (matches the existing NEEDS_*/PAUSED handling) and is
+    returned unchanged.
+
+    `resolve_gate` is pure, so replaying it here costs nothing beyond a
+    few extra calls over a small, bounded list (at most `len(node.deciders)`
+    attempts belong to any one resolution)."""
+    for index in range(1, len(attempts) + 1):
+        prefix = attempts[:index]
+        outcomes = [_outcome_from_record(i, rec) for i, rec in enumerate(prefix)]
+        if (
+            resolve_gate(node, outcomes, person_required=person_required).resolution
+            is GateResolution.DECIDED
+        ):
+            return prefix
+    return attempts
+
+
 async def _advance_gate(
     node: GateNode,
     node_id: str,
@@ -1737,10 +1768,20 @@ async def _advance_gate(
     pending_decision: Mapping[str, Any] | None,
     produced_by: Mapping[str, str],
 ) -> _Advance:
-    outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
     person_required = node.person_required_when is not None and bool(
         _evaluate(node.person_required_when, run_state)
     )
+    # D22: `attempts` (sliced from this node's own visit baseline) may hold
+    # more than one PAST resolution's own deciders if a GATE loop has been
+    # taken more than once before a replay walk catches up to it — the
+    # same class of gap D20/D21 fixed for STEP/ROUTE. Feeding all of them
+    # into resolve_gate at once would silently merge two separate,
+    # already-decided resolutions into one (using only the earliest
+    # decider's verdict and never seeing the rest), rather than replaying
+    # each resolution as its own. Narrow to the earliest resolution's own
+    # prefix first.
+    attempts = _gate_visit_prefix(node, attempts, person_required=person_required)
+    outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
     gate_decision = resolve_gate(node, outcomes, person_required=person_required)
 
     if gate_decision.resolution is GateResolution.DECIDED:
@@ -1757,10 +1798,18 @@ async def _advance_gate(
             )
             if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
                 return _Advance(
-                    next_node_id=_resolve_route_target(budget_decision.on_exhausted)
+                    next_node_id=_resolve_route_target(budget_decision.on_exhausted),
+                    visit_attempts_used=len(attempts),
                 )
-            return _Advance(next_node_id=_resolve_route_target(target), took_loop=True)
-        return _Advance(next_node_id=_resolve_route_target(target))
+            return _Advance(
+                next_node_id=_resolve_route_target(target),
+                took_loop=True,
+                visit_attempts_used=len(attempts),
+            )
+        return _Advance(
+            next_node_id=_resolve_route_target(target),
+            visit_attempts_used=len(attempts),
+        )
 
     if gate_decision.resolution is GateResolution.NEEDS_POLICY:
         assert gate_decision.next_decider_index is not None

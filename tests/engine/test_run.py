@@ -38,7 +38,11 @@ from sulis_workflows.domain.ports.code_tool import (
     StubCodeToolAdapter,
     ToolTransientError,
 )
-from sulis_workflows.domain.ports.policy import StubPolicyAdapter, Verdict
+from sulis_workflows.domain.ports.policy import (
+    PolicyDecision,
+    StubPolicyAdapter,
+    Verdict,
+)
 from sulis_workflows.domain.ports.records import StubRecordsAdapter
 from sulis_workflows.engine.run import (
     AnswerKind,
@@ -1233,6 +1237,245 @@ def test_gate_deny_loop_budget_is_enforced_across_askings():
     )
     assert answer.ending == "GAVE_UP"
     assert answer.outcome == "STOPPED"
+
+
+def test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per_resolution():
+    """D22: the D20/D21 bug class, found a third time — this time in
+    `_advance_gate`. `test_gate_deny_loop_budget_is_enforced_across_askings`
+    above loops the gate directly back to itself with no hand-off in
+    between, so its own policy decider resolves the whole loop inside one
+    `next_()` call and never touches the multi-call replay path this bug
+    lives in. Here the gate's own DENY route loops back through TWO
+    SKILL hand-offs (`work-a`, `work-b`) before reaching the gate again —
+    the same shape as D20/D21's own STEP/ROUTE loop bodies, just for a
+    GATE. Before the fix, once budget-2's worth of loop-backs had
+    accumulated, a later replay call fed BOTH already-decided
+    resolutions' attempts into `resolve_gate` at once, corrupting the
+    loop-budget count and the durable record (5 `sign-off` attempts
+    recorded for what should have been exactly 3 resolutions, one of them
+    landing out of order relative to `work-b`'s own report)."""
+
+    work_a_tool = Tool(
+        header=_header("work-a", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/a"),
+        effect="QUERY",
+        permission="workflows.work-a.dispatch",
+    )
+    work_b_tool = Tool(
+        header=_header("work-b", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/b"),
+        effect="QUERY",
+        permission="workflows.work-b.dispatch",
+    )
+    process = Process(
+        header=_header("gate-loop-two-handoffs", "PROCESS"),
+        start="work-a",
+        permission="workflows.gate-loop-two-handoffs.start",
+        nodes={
+            "work-a": StepNode(
+                id="work-a", tool="work-a@1", in_={}, out={}, next="work-b"
+            ),
+            "work-b": StepNode(
+                id="work-b", tool="work-b@1", in_={}, out={}, next="sign-off"
+            ),
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="always-deny@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="work-a",
+                        loop=LoopSpec(
+                            budget=2, on_exhausted=RouteTarget(end="GAVE_UP")
+                        ),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(outcome="SUCCESS", says="Gave up."),
+        },
+    )
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(policy_denies={"always-deny@1"}),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([work_a_tool, work_b_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    answer = _run(
+        next_(process, "run-gate-loop-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    a_dispatches = 0
+    b_dispatches = 0
+    for _ in range(20):
+        assert answer.kind is not AnswerKind.ENDED, "never reached an ending"
+        if answer.node_id == "work-a":
+            a_dispatches += 1
+            answer = _run(
+                report(
+                    process,
+                    "run-gate-loop-2",
+                    "root",
+                    "work-a",
+                    ctx,
+                    inputs={},
+                    host_inputs={},
+                    output={"x": "ok"},
+                )
+            )
+        elif answer.node_id == "work-b":
+            b_dispatches += 1
+            answer = _run(
+                report(
+                    process,
+                    "run-gate-loop-2",
+                    "root",
+                    "work-b",
+                    ctx,
+                    inputs={},
+                    host_inputs={},
+                    output={"x": "ok"},
+                )
+            )
+        else:
+            raise AssertionError(f"unexpected hand-off: {answer.node_id!r}")
+        if answer.kind is AnswerKind.ENDED:
+            break
+    assert answer.ending == "GAVE_UP"
+    assert answer.outcome == "SUCCESS"
+    # budget=2 permits 2 loop-backs -> exactly 3 sign-off resolutions
+    # (asked, denied, asked, denied, asked, exhausted) -> work-a/work-b
+    # each dispatched exactly 3 times, matching the 3 resolutions, not 5.
+    assert a_dispatches == 3
+    assert b_dispatches == 3
+    sign_off_attempts = _run(
+        records.get_attempts(
+            "run-gate-loop-2",
+            "root",
+            "sign-off",
+            platform_id="tenant-1",
+            run_id="run-gate-loop-2",
+        )
+    )
+    assert [rec.verdict for rec in sign_off_attempts] == ["DENY", "DENY", "DENY"]
+
+
+def test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own_verdict():
+    """D22, the sharper failure mode the count-based test above cannot show
+    on its own: before the fix, merging two resolutions' attempts into one
+    `resolve_gate` call used only the FIRST decider's verdict and silently
+    discarded the rest — if the first happened to be DENY and the second
+    (the real, later verdict) was PERMIT, the run would never see the
+    PERMIT at all. Same two-hand-off loop shape as above, but the policy
+    decider answers DENY once, then PERMIT."""
+
+    class FlipPolicy:
+        def __init__(self, verdicts):
+            self._verdicts = list(verdicts)
+            self._calls = 0
+
+        async def authorize(self, permission, *, identity, platform_id, run_id):
+            return PolicyDecision(verdict=Verdict.PERMIT)
+
+        async def evaluate_policy(
+            self, ref, *, reviewing, identity, platform_id, run_id
+        ):
+            verdict = self._verdicts[min(self._calls, len(self._verdicts) - 1)]
+            self._calls += 1
+            return PolicyDecision(verdict=verdict, rationale=f"call {self._calls}")
+
+    work_a_tool = Tool(
+        header=_header("work-a", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/a"),
+        effect="QUERY",
+        permission="workflows.work-a.dispatch",
+    )
+    work_b_tool = Tool(
+        header=_header("work-b", "TOOL"),
+        output={"x": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/b"),
+        effect="QUERY",
+        permission="workflows.work-b.dispatch",
+    )
+    process = Process(
+        header=_header("gate-loop-two-handoffs-flip", "PROCESS"),
+        start="work-a",
+        permission="workflows.gate-loop-two-handoffs-flip.start",
+        nodes={
+            "work-a": StepNode(
+                id="work-a", tool="work-a@1", in_={}, out={}, next="work-b"
+            ),
+            "work-b": StepNode(
+                id="work-b", tool="work-b@1", in_={}, out={}, next="sign-off"
+            ),
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="flip@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="work-a",
+                        loop=LoopSpec(
+                            budget=5, on_exhausted=RouteTarget(end="GAVE_UP")
+                        ),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(outcome="SUCCESS", says="Gave up."),
+        },
+    )
+    ctx = EngineContext(
+        policy=FlipPolicy([Verdict.DENY, Verdict.PERMIT]),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([work_a_tool, work_b_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    answer = _run(
+        next_(process, "run-gate-loop-3", "root", ctx, inputs={}, host_inputs={})
+    )
+    for _ in range(20):
+        if answer.kind is AnswerKind.ENDED:
+            break
+        answer = _run(
+            report(
+                process,
+                "run-gate-loop-3",
+                "root",
+                answer.node_id,
+                ctx,
+                inputs={},
+                host_inputs={},
+                output={"x": "ok"},
+            )
+        )
+    assert answer.ending == "COMPLETE"
+    assert answer.outcome == "SUCCESS"
 
 
 def test_control_fail_repair_gives_one_more_attempt_before_then():
