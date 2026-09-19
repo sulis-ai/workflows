@@ -90,7 +90,7 @@ from sulis_workflows.engine.routes import (
     check_loop_budget,
     evaluate_route,
 )
-from sulis_workflows.engine.state import apply_output
+from sulis_workflows.engine.state import ReducerMismatch, apply_output
 from sulis_workflows.engine.steps import StepAttemptResult, StepOutcome, attempt_step
 
 __all__ = [
@@ -726,11 +726,18 @@ async def _drive_scope(
                 else steps.get(node_id)
             )
             # This visit is done — the next time (if ever) this same node_id
-            # comes up in this call, it is a genuinely new visit.
-            refreshed = await ctx.records.get_attempts(
-                run_id, scope, node_id, platform_id=ctx.platform_id, run_id=run_id
-            )
-            visit_baseline[node_id] = len(refreshed)
+            # comes up in this call, it is a genuinely new visit. Advance the
+            # baseline by exactly what THIS visit consumed (D20), not by
+            # however many attempts the store now holds in total — those two
+            # only coincide when nothing later in a multi-node loop body has
+            # already recorded a future revisit's own attempts.
+            if advance.visit_attempts_used is not None:
+                visit_baseline[node_id] = baseline + advance.visit_attempts_used
+            else:
+                refreshed = await ctx.records.get_attempts(
+                    run_id, scope, node_id, platform_id=ctx.platform_id, run_id=run_id
+                )
+                visit_baseline[node_id] = len(refreshed)
             node_id = advance.next_node_id  # type: ignore[assignment]
     except EngineRefusal as exc:
         return _DriveResult(
@@ -752,6 +759,20 @@ class _Advance:
     build `produced_by` (§7.6's "no deciding on your own work" needs to
     know which identity produced each reviewed state path, not just which
     Tool ran)."""
+    visit_attempts_used: int | None = None
+    """How many attempts, counting from this node's own visit baseline,
+    this resolution actually consumed — `_drive_scope` advances
+    `visit_baseline` by exactly this many, not by "however many attempts
+    now exist in the store." A STEP or GATE revisited via a loop whose
+    body spans more than one hand-off (D20) can otherwise have attempts
+    belonging to a LATER, not-yet-reached revisit already sitting in the
+    store by the time this one is walked — jumping the baseline straight
+    to the store's total silently treats those as already consumed,
+    stranding the run on the first node of the loop body forever. `None`
+    (ROUTE, and the hand-off case, where nothing is consumed this call)
+    keeps the old "however many attempts now exist" behaviour, which is
+    exactly right there: a ROUTE's own visit is always exactly one
+    attempt, and a hand-off records nothing yet to bump past."""
 
 
 def _resolve_tool(ref: str, registry: Registry) -> Tool:
@@ -948,6 +969,13 @@ async def _advance_step(
     depth: int,
 ) -> _Advance:
     tool = _resolve_tool(node.tool, ctx.registry)
+    # D20: `attempts` (sliced from this node's own visit baseline) may hold
+    # more than this visit's own history if a later node in a multi-node
+    # loop body already recorded a future revisit before this one was
+    # walked — narrow to the earliest visit's own prefix before deciding
+    # anything, so a stale or premature attempt is never mistaken for the
+    # current one.
+    attempts = _visit_prefix(attempts)
 
     if attempts:
         last = attempts[-1]
@@ -955,7 +983,9 @@ async def _advance_step(
             # §6: an ADVISORY skip() call already recorded this — proceed as
             # the step's own declared route says, without ever dispatching
             # the Tool or writing anything into state (there is no output).
-            return _Advance(next_node_id=_success_target(node))
+            return _Advance(
+                next_node_id=_success_target(node), visit_attempts_used=len(attempts)
+            )
         outcome = (
             _parse_step_outcome(last.verdict) if last.verdict is not None else None
         )
@@ -968,7 +998,10 @@ async def _advance_step(
             if error_class == "TRANSIENT" and len(attempts) <= max_retries:
                 pass  # fall through to dispatch another attempt below
             else:
-                return _Advance(next_node_id=_route_for_step_failure(node, last, tool))
+                return _Advance(
+                    next_node_id=_route_for_step_failure(node, last, tool),
+                    visit_attempts_used=len(attempts),
+                )
         elif outcome is StepOutcome.SUCCESS:
             new_state = apply_output(
                 scope_def.state, run_state["state"], node.out, last.output or {}
@@ -978,12 +1011,16 @@ async def _advance_step(
                 state=new_state,
                 step_record={"output": last.output, "attempt": len(attempts)},
                 performed_by=last.performed_by,
+                visit_attempts_used=len(attempts),
             )
         elif outcome is StepOutcome.CONTROL_FAILED:
             if _repair_count(attempts) <= _repair_budget(node):
                 pass  # fall through to dispatch another (repair) attempt below
             else:
-                return _Advance(next_node_id=_route_for_step_failure(node, last, tool))
+                return _Advance(
+                    next_node_id=_route_for_step_failure(node, last, tool),
+                    visit_attempts_used=len(attempts),
+                )
         elif outcome in (
             StepOutcome.CONTROLS_UNCHECKABLE,
             StepOutcome.FORBIDDEN,
@@ -991,7 +1028,10 @@ async def _advance_step(
             StepOutcome.NOT_DISPATCHABLE,
             StepOutcome.INPUT_UNRESOLVED,
         ):
-            return _Advance(next_node_id=_route_for_step_failure(node, last, tool))
+            return _Advance(
+                next_node_id=_route_for_step_failure(node, last, tool),
+                visit_attempts_used=len(attempts),
+            )
         # outcome is None (a hand-off record already exists, e.g. from report()) —
         # treated as resolved above via the branches; fall through only for TRANSIENT retry.
 
@@ -1166,6 +1206,22 @@ async def _record_step_result(
     both dispatch paths get identical recording/retry/repair/routing
     semantics rather than two copies that could drift apart.
     """
+    new_state: dict[str, Any] | None = None
+    if result.outcome is StepOutcome.SUCCESS:
+        try:
+            new_state = apply_output(
+                scope_def.state, run_state["state"], node.out, result.output or {}
+            )
+        except ReducerMismatch as exc:
+            # §2.3: "a write that does not match the channel type is refused
+            # and recorded as a failed attempt" — checked BEFORE recording
+            # (D19), so the durable record itself reflects the refusal
+            # rather than a SUCCESS record a state write then breaks.
+            result = StepAttemptResult(
+                outcome=StepOutcome.STATE_MISMATCH,
+                rationale=str(exc),
+            )
+
     key = AttemptKey(
         run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
     )
@@ -1201,13 +1257,11 @@ async def _record_step_result(
     await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
 
     if result.outcome is StepOutcome.SUCCESS:
-        new_state = apply_output(
-            scope_def.state, run_state["state"], node.out, result.output or {}
-        )
         return _Advance(
             next_node_id=_success_target(node),
             state=new_state,
             performed_by=performed_by,
+            visit_attempts_used=len(attempts) + 1,
         )
     if result.outcome is StepOutcome.ERROR and result.error_class == "TRANSIENT":
         retry = node.retry
@@ -1244,7 +1298,10 @@ async def _record_step_result(
             ctx,
             depth,
         )
-    return _Advance(next_node_id=_route_for_step_failure(node, record, tool))
+    return _Advance(
+        next_node_id=_route_for_step_failure(node, record, tool),
+        visit_attempts_used=len(attempts) + 1,
+    )
 
 
 def _parse_step_outcome(value: str) -> StepOutcome | None:
@@ -1252,6 +1309,37 @@ def _parse_step_outcome(value: str) -> StepOutcome | None:
         return StepOutcome(value)
     except ValueError:
         return None
+
+
+def _visit_prefix(attempts: list[AttemptRecord]) -> list[AttemptRecord]:
+    """D20: the prefix of `attempts` (already sliced from this node's own
+    visit baseline) belonging to the EARLIEST visit that has not yet been
+    resolved — up to and including the first attempt that ends a visit
+    one way or another. Anything after that prefix belongs to a revisit
+    this replay pass has not reached yet.
+
+    Only `TRANSIENT` `ERROR` and `CONTROL_FAILED` ever continue a visit
+    (§12.4, §10.2 step 5 — retry and repair); every other outcome,
+    `SKIPPED`, and an unparseable verdict all end it. This mirrors
+    `_advance_step`'s own retry/repair fall-through exactly, so it never
+    needs its own view of the repair/retry budget: once a budget is
+    genuinely exhausted, `_advance_step` stops dispatching, so there is
+    simply no further attempt in the store to over-include."""
+    for index, record in enumerate(attempts):
+        if record.verdict == "SKIPPED":
+            return attempts[: index + 1]
+        outcome = (
+            _parse_step_outcome(record.verdict) if record.verdict is not None else None
+        )
+        if outcome is StepOutcome.ERROR:
+            error_class = (record.output or {}).get("error_class", "PERMANENT")
+            if error_class == "TRANSIENT":
+                continue
+            return attempts[: index + 1]
+        if outcome is StepOutcome.CONTROL_FAILED:
+            continue
+        return attempts[: index + 1]
+    return attempts
 
 
 def _repair_budget(node: StepNode) -> int:
@@ -1584,10 +1672,22 @@ async def _advance_route(
         await ctx.records.record_attempt(
             record, platform_id=ctx.platform_id, run_id=run_id
         )
-        attempts = [record]
         target = decision.target
     else:
-        matched_index = (attempts[-1].output or {}).get("matched_index")
+        # D20-shaped gap, found pressure-testing the real grounded-inquiry
+        # process (spec Appendix A) once its `after-interrogate` REVISED
+        # loop had looped back more than once: `attempts` here is every
+        # attempt from `baseline` onward this SAME walk has not yet
+        # consumed, which holds more than one PAST visit's own record once
+        # a loop has looped back more than once by the time this walk
+        # catches up to it. Only the earliest of those (`attempts[0]`)
+        # belongs to the visit being resolved right now; jumping straight
+        # to the latest (the old `attempts[-1]`) replayed a LATER visit's
+        # decision in its place, silently skipping every node the walk
+        # should have passed through first (here, a genuine re-ask of
+        # `interrogate`) and could apply the loop-budget check to a visit
+        # whose state was never actually reached fresh.
+        matched_index = (attempts[0].output or {}).get("matched_index")
         target = (
             RouteTarget(
                 next=node.when[matched_index].next,
@@ -1600,25 +1700,58 @@ async def _advance_route(
 
     assert target is not None
     if target.loop is not None:
-        # Loop budgets accumulate across every PAST visit to this route, not
-        # just this one — `baseline` (prior visits' own attempt, one each)
-        # plus this visit's own attempts-so-far (always 1, minus the one
-        # being evaluated right now) is the count taken strictly BEFORE this
-        # occurrence, which is what decides whether taking it again (now) is
-        # still within budget.
-        prior_taken_count = baseline + len(attempts) - 1
+        # `baseline` is exactly how many times this loop has been taken
+        # before this occurrence: every route visit before the final one in
+        # a loop's own visit sequence takes the loop by construction (a
+        # visit that doesn't take it ends the sequence), and this function
+        # always resolves exactly one visit's own attempt now
+        # (`visit_attempts_used=1` below, matching `attempts[0]` above), so
+        # `baseline` alone — not `baseline` plus any part of the unconsumed
+        # slice — is the count taken strictly BEFORE this occurrence.
         budget_decision = check_loop_budget(
-            target.loop, taken_count=prior_taken_count, process_default_budget=None
+            target.loop, taken_count=baseline, process_default_budget=None
         )
         if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
             return _Advance(
-                next_node_id=_resolve_route_target(budget_decision.on_exhausted)
+                next_node_id=_resolve_route_target(budget_decision.on_exhausted),
+                visit_attempts_used=1,
             )
 
-    return _Advance(next_node_id=_resolve_route_target(target))
+    return _Advance(next_node_id=_resolve_route_target(target), visit_attempts_used=1)
 
 
 # ------------------------------------------------------------------------------ GATE --
+
+
+def _gate_visit_prefix(
+    node: GateNode, attempts: list[AttemptRecord], *, person_required: bool
+) -> list[AttemptRecord]:
+    """D22: `_visit_prefix` (D20)'s counterpart for GATE nodes. `attempts`
+    (already sliced from this node's own visit baseline) may hold more
+    than one PAST resolution's own deciders once a gate loop has been
+    taken more than once before a replay walk catches up to it — the same
+    shape of gap D20/D21 fixed for STEP/ROUTE. Unlike those two, a GATE
+    resolution's own attempt count varies (1 to `len(node.deciders)`,
+    however many deciders were actually asked before one decided or every
+    one answered `INDETERMINATE`), so there is no fixed-size prefix to
+    take — this replays `resolve_gate` itself, one attempt at a time, and
+    stops at the first prefix it calls `DECIDED`. If nothing in `attempts`
+    ever decides it, the whole slice genuinely belongs to one still-open
+    resolution (matches the existing NEEDS_*/PAUSED handling) and is
+    returned unchanged.
+
+    `resolve_gate` is pure, so replaying it here costs nothing beyond a
+    few extra calls over a small, bounded list (at most `len(node.deciders)`
+    attempts belong to any one resolution)."""
+    for index in range(1, len(attempts) + 1):
+        prefix = attempts[:index]
+        outcomes = [_outcome_from_record(i, rec) for i, rec in enumerate(prefix)]
+        if (
+            resolve_gate(node, outcomes, person_required=person_required).resolution
+            is GateResolution.DECIDED
+        ):
+            return prefix
+    return attempts
 
 
 async def _advance_gate(
@@ -1635,10 +1768,20 @@ async def _advance_gate(
     pending_decision: Mapping[str, Any] | None,
     produced_by: Mapping[str, str],
 ) -> _Advance:
-    outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
     person_required = node.person_required_when is not None and bool(
         _evaluate(node.person_required_when, run_state)
     )
+    # D22: `attempts` (sliced from this node's own visit baseline) may hold
+    # more than one PAST resolution's own deciders if a GATE loop has been
+    # taken more than once before a replay walk catches up to it — the
+    # same class of gap D20/D21 fixed for STEP/ROUTE. Feeding all of them
+    # into resolve_gate at once would silently merge two separate,
+    # already-decided resolutions into one (using only the earliest
+    # decider's verdict and never seeing the rest), rather than replaying
+    # each resolution as its own. Narrow to the earliest resolution's own
+    # prefix first.
+    attempts = _gate_visit_prefix(node, attempts, person_required=person_required)
+    outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
     gate_decision = resolve_gate(node, outcomes, person_required=person_required)
 
     if gate_decision.resolution is GateResolution.DECIDED:
@@ -1655,10 +1798,18 @@ async def _advance_gate(
             )
             if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
                 return _Advance(
-                    next_node_id=_resolve_route_target(budget_decision.on_exhausted)
+                    next_node_id=_resolve_route_target(budget_decision.on_exhausted),
+                    visit_attempts_used=len(attempts),
                 )
-            return _Advance(next_node_id=_resolve_route_target(target), took_loop=True)
-        return _Advance(next_node_id=_resolve_route_target(target))
+            return _Advance(
+                next_node_id=_resolve_route_target(target),
+                took_loop=True,
+                visit_attempts_used=len(attempts),
+            )
+        return _Advance(
+            next_node_id=_resolve_route_target(target),
+            visit_attempts_used=len(attempts),
+        )
 
     if gate_decision.resolution is GateResolution.NEEDS_POLICY:
         assert gate_decision.next_decider_index is not None
