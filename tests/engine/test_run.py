@@ -843,6 +843,268 @@ def test_decide_uses_the_gates_own_permission_when_no_deciders_are_declared():
     assert answer.ending == "COMPLETE"
 
 
+def test_decide_after_a_deny_loop_back_still_uses_the_person_deciders_permission():
+    """WP-03a Fault 1: `decide()` used to compute which decider it was
+    satisfying from `len(attempts)` — the gate's TOTAL attempt count
+    across every past visit, not this visit's own. A person GATE with no
+    gate-level `permission` and exactly one `person` decider, looped back
+    on DENY: after the loop-back, the gate's store already holds one
+    attempt (the first DENY), so the second `decide()` computed
+    `decider_index = 1`, overshot `len(node.deciders) == 1`, and fell
+    back to the (undeclared) gate-level permission — refusing FORBIDDEN
+    a decision the person decider's own permission should have allowed.
+    Same D20/D21/D22 visit-baseline bug class, in `decide()`."""
+    draft_tool = Tool(
+        header=_header("draft", "TOOL"),
+        output={"text": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/draft"),
+        effect="QUERY",
+        permission="notes.note.draft",
+    )
+    process = Process(
+        header=_header("resend-for-approval", "PROCESS"),
+        start="draft",
+        permission="workflows.resend-for-approval.start",
+        nodes={
+            "draft": StepNode(
+                id="draft", tool="draft@1", in_={}, out={}, next="approve"
+            ),
+            "approve": GateNode(
+                id="approve",
+                kind="APPROVAL",
+                asks="Approve this note?",
+                reviewing=(),
+                deciders=(Decider(kind="person", permission="notes.note.approve"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="draft",
+                        loop=LoopSpec(budget=2, on_exhausted=RouteTarget(end="DENIED")),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Approved."),
+            "DENIED": Ending(outcome="STOPPED", says="Denied too many times."),
+        },
+    )
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([draft_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    answer = _run(
+        next_(process, "run-decide-loop-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "draft"
+
+    answer = _run(
+        report(
+            process,
+            "run-decide-loop-1",
+            "root",
+            "draft",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"text": "v1"},
+        )
+    )
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+    assert answer.node_id == "approve"
+
+    answer = _run(
+        decide(
+            process,
+            "run-decide-loop-1",
+            "root",
+            "approve",
+            ctx,
+            inputs={},
+            host_inputs={},
+            verdict=Verdict.DENY,
+            note="not yet",
+            subject="reviewer-1",
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP, answer
+    assert answer.node_id == "draft"
+
+    answer = _run(
+        report(
+            process,
+            "run-decide-loop-1",
+            "root",
+            "draft",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"text": "v2"},
+        )
+    )
+    assert answer.kind is AnswerKind.AWAITING_DECISION, answer
+    assert answer.node_id == "approve"
+
+    answer = _run(
+        decide(
+            process,
+            "run-decide-loop-1",
+            "root",
+            "approve",
+            ctx,
+            inputs={},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note="looks good now",
+            subject="reviewer-1",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED, answer
+    assert answer.ending == "COMPLETE"
+    assert answer.outcome == "SUCCESS"
+
+
+def test_decide_after_a_policy_indeterminate_loop_uses_the_correct_decider_index():
+    """WP-03a Fault 1, the general case: `approve`'s deciders are
+    `[policy, person]`. Visit 1 the policy decider DENYs outright
+    (decided at decider_index 0, one attempt) and loops back; visit 2 the
+    same policy ref answers INDETERMINATE instead (decided at
+    decider_index 1, two attempts, falling through to the person decider)
+    — a resolution of a DIFFERENT length than visit 1's. `decide()` must
+    still identify decider_index 1 (the person) correctly, proving the
+    fix replays each visit's own resolution rather than just repeating a
+    fixed offset."""
+
+    class FlipPolicy:
+        def __init__(self, verdicts):
+            self._verdicts = list(verdicts)
+            self._calls = 0
+
+        async def authorize(self, permission, *, identity, platform_id, run_id):
+            return PolicyDecision(verdict=Verdict.PERMIT)
+
+        async def evaluate_policy(
+            self, ref, *, reviewing, identity, platform_id, run_id
+        ):
+            verdict = self._verdicts[min(self._calls, len(self._verdicts) - 1)]
+            self._calls += 1
+            return PolicyDecision(verdict=verdict, rationale=f"call {self._calls}")
+
+    draft_tool = Tool(
+        header=_header("draft", "TOOL"),
+        output={"text": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/draft"),
+        effect="QUERY",
+        permission="notes.note.draft",
+    )
+    process = Process(
+        header=_header("resend-for-approval-2", "PROCESS"),
+        start="draft",
+        permission="workflows.resend-for-approval-2.start",
+        nodes={
+            "draft": StepNode(
+                id="draft", tool="draft@1", in_={}, out={}, next="approve"
+            ),
+            "approve": GateNode(
+                id="approve",
+                kind="APPROVAL",
+                asks="Approve this note?",
+                reviewing=(),
+                deciders=(
+                    Decider(kind="policy", ref="auto-approve@1"),
+                    Decider(kind="person", permission="notes.note.approve"),
+                ),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="draft",
+                        loop=LoopSpec(budget=2, on_exhausted=RouteTarget(end="DENIED")),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Approved."),
+            "DENIED": Ending(outcome="STOPPED", says="Denied too many times."),
+        },
+    )
+    records = StubRecordsAdapter()
+    policy = FlipPolicy([Verdict.DENY, Verdict.INDETERMINATE])
+    ctx = EngineContext(
+        policy=policy,
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([draft_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    answer = _run(
+        next_(process, "run-decide-loop-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    answer = _run(
+        report(
+            process,
+            "run-decide-loop-2",
+            "root",
+            "draft",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"text": "v1"},
+        )
+    )
+    # policy DENYs outright -> loop back to draft, no person decision needed this visit.
+    assert answer.kind is AnswerKind.TOOL_STEP, answer
+    assert answer.node_id == "draft"
+
+    answer = _run(
+        report(
+            process,
+            "run-decide-loop-2",
+            "root",
+            "draft",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"text": "v2"},
+        )
+    )
+    # policy now answers INDETERMINATE -> falls through to the person decider.
+    assert answer.kind is AnswerKind.AWAITING_DECISION, answer
+    assert answer.node_id == "approve"
+
+    answer = _run(
+        decide(
+            process,
+            "run-decide-loop-2",
+            "root",
+            "approve",
+            ctx,
+            inputs={},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note="ok",
+            subject="reviewer-1",
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED, answer
+    assert answer.ending == "COMPLETE"
+    assert answer.outcome == "SUCCESS"
+
+
 def test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission():
     """§10.1/D12: permission is checked before ANY dispatch — a `TOOL_STEP`
     hand-off is the dispatch for a `SKILL` Tool, so a Tool with no
