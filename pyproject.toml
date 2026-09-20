@@ -1,6 +1,6 @@
 [project]
 name = "sulis-workflows"
-version = "0.12.1"
+version = "0.12.2"
 description = "The Sulis workflow engine — a shared, published library. Compiles canonical Workflow entities to a LangGraph graph and executes it under injected adapters; the same library runs server-side or client-side (per DR-040)."
 authors = [{ name = "Sulis AI", email = "iain@llma.ai" }]
 license = "MIT"
@@ -45,6 +45,21 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The definition package ships data, not only code: the v1 JSON Schemas every
+# load validates against, and the built-in Profiles and checker Tools every
+# registry needs. Without this they are in the repository and not in the wheel,
+# so an installed copy raises FileNotFoundError on the first `load_definition`
+# — which is exactly what v0.12.0/v0.12.1 did (found by a consumer, 2026-09-20).
+[tool.setuptools.package-data]
+sulis_workflows = [
+    "definition/schema/*.json",
+    "definition/builtin/*.yaml",
+    # PEP 561: without this marker a consumer's type checker treats every
+    # symbol here as Any, so the annotations this library is written with
+    # stop protecting anyone downstream — silently.
+    "py.typed",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
