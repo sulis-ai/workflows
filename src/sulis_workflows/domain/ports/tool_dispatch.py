@@ -14,7 +14,7 @@ Per TDD §3.3 every method carries:
 
 - ``platform_id: str`` (NFR-21, non-optional keyword).
 - ``run_id: str`` (NFR-11, non-optional keyword).
-- ``sandbox_root: WorkspacePath`` (NFR-14, non-optional keyword).
+- ``sandbox_root: PathLike`` (NFR-14, non-optional keyword).
 
 The :class:`Sandbox` (WP-7) enforces the path-traversal contract before
 the adapter sees a path; the adapter itself MUST NOT re-validate the
@@ -27,6 +27,20 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from sulis_workflows.domain.engine_cache import WorkspacePath
+
+#: A path this port accepts or returns.
+#:
+#: ⚠️ Measured, 2026-09-20: nothing in this library or in any adapter we ship
+#: ever constructs a :class:`WorkspacePath` for these calls — the compiler's own
+#: step node declares ``sandbox_root: str | None`` and passes a string straight
+#: through, and every host adapter does the same. The port declared a
+#: value-object contract that no caller has ever honoured, so a typed consumer
+#: (a host implementing this port with plain strings, which is all any of them
+#: do) failed to satisfy it the moment the package started shipping its
+#: annotations. Accepting both is what is actually true; narrowing to the value
+#: object would be a breaking change to every adapter, and narrowing to `str`
+#: would throw away a distinction the cache still uses.
+PathLike = str | WorkspacePath
 from sulis_workflows.domain.identity import (
     AdapterIdentity,
     IdentifiedAdapter,
@@ -65,7 +79,7 @@ class RipgrepMatch:
     string fragments.
     """
 
-    path: WorkspacePath
+    path: PathLike
     line: int
     column: int
     text: str
@@ -113,9 +127,9 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
 
     async def read_file(
         self,
-        path: WorkspacePath,
+        path: PathLike,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
         offset: int = 0,
@@ -126,17 +140,17 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
         self,
         pattern: str,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
-    ) -> list[WorkspacePath]: ...
+    ) -> list[PathLike]: ...
 
     async def ripgrep(
         self,
         pattern: str,
-        paths: list[WorkspacePath],
+        paths: list[PathLike],
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
     ) -> list[RipgrepMatch]: ...
@@ -146,7 +160,7 @@ class ToolDispatchPort(IdentifiedAdapter, Protocol):
         primitive: str,
         args: dict,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
         step_outputs: dict | None = None,
@@ -179,9 +193,9 @@ class StubToolDispatchAdapter:
 
     async def read_file(
         self,
-        path: WorkspacePath,
+        path: PathLike,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
         offset: int = 0,
@@ -199,19 +213,19 @@ class StubToolDispatchAdapter:
         self,
         pattern: str,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
-    ) -> list[WorkspacePath]:
+    ) -> list[PathLike]:
         self.observed_calls.append((platform_id, run_id))
         return [WorkspacePath(f"stub-glob:{pattern}")]
 
     async def ripgrep(
         self,
         pattern: str,
-        paths: list[WorkspacePath],
+        paths: list[PathLike],
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
     ) -> list[RipgrepMatch]:
@@ -231,7 +245,7 @@ class StubToolDispatchAdapter:
         primitive: str,
         args: dict,
         *,
-        sandbox_root: WorkspacePath,
+        sandbox_root: PathLike,
         platform_id: str,
         run_id: str,
         step_outputs: dict | None = None,
