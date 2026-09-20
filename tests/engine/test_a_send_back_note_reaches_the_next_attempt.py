@@ -18,7 +18,9 @@ from sulis_workflows.domain.ports.policy import StubPolicyAdapter, Verdict
 from sulis_workflows.domain.ports.records import StubRecordsAdapter
 from sulis_workflows.engine.run import AnswerKind, EngineContext, decide, next_, report
 
-BUILTIN = Path(__file__).parents[1] / "src" / "sulis_workflows" / "definition" / "builtin"
+BUILTIN = (
+    Path(__file__).parents[1] / "src" / "sulis_workflows" / "definition" / "builtin"
+)
 
 PROFILE = """
 api_version: sulis.workflows/v1
@@ -110,7 +112,13 @@ def test_a_send_back_note_reaches_the_next_attempt() -> None:
 
         answer = await next_(process, "run-1", "run-1", ctx, **kw)
         answer = await report(
-            process, "run-1", "run-1", answer.node_id, ctx, output={"text": "first draft"}, **kw
+            process,
+            "run-1",
+            "run-1",
+            answer.node_id,
+            ctx,
+            output={"text": "first draft"},
+            **kw,
         )
         assert answer.kind is AnswerKind.AWAITING_DECISION
 
