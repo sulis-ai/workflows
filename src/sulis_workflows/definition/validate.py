@@ -1,4 +1,4 @@
-"""The v1 format's validator — spec §14, rules V1-V15. Each rule is a separate,
+"""The v1 format's validator — spec §14, rules V1-V16. Each rule is a separate,
 named function returning structured :class:`Finding`s (`{ rule, node, message,
 fix }`). V1 (schema) and V2 (references) are already enforced by `load.py` and
 `registry.py`; :func:`validate` wraps their refusals into the same Finding shape
@@ -346,6 +346,7 @@ def validate_process(process: model.Process, registry: Registry) -> list[Finding
     findings.extend(v12_for_each(process, ctx))
     findings.extend(v13_side_effects(process))
     findings.extend(v14_endings(process))
+    findings.extend(v16_state_channels(process))
     return findings
 
 
@@ -1105,5 +1106,28 @@ def v14_endings(process: model.Process) -> list[Finding]:
         if not (ending.says or "").strip():
             findings.append(
                 Finding(rule="V14", message=f"ending {name!r} has no `says`")
+            )
+    return findings
+
+
+def v16_state_channels(process: model.Process) -> list[Finding]:
+    """A channel declaring `reducer: UPSERT_BY_ID` with no `key` to upsert by
+    (spec §2.3: "`UPSERT_BY_ID` (lists of objects, replaced by `key`)" — a
+    channel that never names one is not that reducer's shape, whatever it
+    calls itself). The schema (V1) leaves `key` optional on every reducer,
+    since only `UPSERT_BY_ID` needs it; this rule closes that gap."""
+
+    findings: list[Finding] = []
+    for name, channel in process.state.items():
+        if channel.reducer == "UPSERT_BY_ID" and not channel.key:
+            findings.append(
+                Finding(
+                    rule="V16",
+                    message=(
+                        f"state channel {name!r} declares reducer UPSERT_BY_ID "
+                        "with no `key`"
+                    ),
+                    fix="add `key: <field>` naming the object field to upsert by",
+                )
             )
     return findings
