@@ -5,6 +5,25 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-09-20
+
+### Fixed — five engine correctness bugs found by actually running processes, not just validating them (D19–D23)
+- **D19:** `MERGE`/`APPEND`/`UPSERT_BY_ID` state-channel reducers (spec §2.3) were never implemented;
+  a step writing to one crashed `report()` instead of failing that one attempt cleanly. New
+  validator rule **V16** (an `UPSERT_BY_ID` channel must declare `key`).
+- **D20, D21, D22:** a loop body spanning more than one hand-off could get permanently stuck
+  (`STEP`), silently skip a node's fresh re-ask (`ROUTE`), or silently discard a later, genuinely
+  different decider verdict in favour of an earlier stale one (`GATE`) — three instances of the
+  same replay-baseline miscount, found and fixed one node type at a time.
+- **D23:** `decide()` (the `person`-decider half of §12.1) had a separate, untouched copy of the
+  same miscount — a reviewer who sent work back on a `GATE` could never approve it afterwards,
+  wrongly refused as unauthorized on the second decision. `decide()` now drives through the same
+  already-correct replay `report()`'s own agent-decider path uses, rather than recomputing its
+  position independently.
+- New end-to-end regression suite (`tests/engine/test_grounded_inquiry_e2e.py`) driving spec
+  Appendix A's own worked example through the real engine for the first time.
+- Decisions D19–D23 recorded in `docs/spec/process-definition.md` §18.
+
 ## [0.12.0] — 2026-09-18
 
 ### Added — the v1 process-definition format and its execution engine (`definition/`, `engine/`)

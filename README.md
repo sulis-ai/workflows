@@ -61,7 +61,7 @@ See **[docs/getting-started.md](docs/getting-started.md)** for a compile-and-run
 Pin a released tag:
 
 ```bash
-pip install "git+https://github.com/sulis-ai/workflows.git@v0.12.0"
+pip install "git+https://github.com/sulis-ai/workflows.git@v0.12.1"
 ```
 
 (PyPI publication is a later option; git-tag install is the zero-infra default.)
@@ -75,7 +75,7 @@ explicit on both server and client runners.
 
 ## Status
 
-**v0.12.0.** Two things are true at once:
+**v0.12.1.** Two things are true at once:
 
 - The original `compiler/` path — engine core + the generic port mechanism, `v0.3.0`'s own
   milestone — is unchanged: the core (`compiler/` + `domain/`) compiles a `Workflow` entity to a
