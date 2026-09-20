@@ -106,7 +106,7 @@ def test_a_send_back_note_reaches_the_next_attempt() -> None:
     async def run() -> None:
         process = load_definition(PROCESS, fmt="yaml")
         ctx = _ctx()
-        kw = dict(inputs={"ask": "write the release note"}, host_inputs={})
+        kw = {"inputs": {"ask": "write the release note"}, "host_inputs": {}}
 
         answer = await next_(process, "run-1", "run-1", ctx, **kw)
         answer = await report(
