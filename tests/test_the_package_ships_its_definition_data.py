@@ -54,3 +54,11 @@ def test_a_definition_loads_against_the_installed_schemas() -> None:
         loaded = load_definition_file(path)
 
     assert loaded.header.id == "decision"
+
+
+def test_the_package_declares_itself_typed() -> None:
+    """PEP 561: without `py.typed`, a consumer's type checker reads every symbol
+    here as `Any` — the annotations stop protecting anyone downstream, and
+    nothing says so."""
+    marker = resources.files("sulis_workflows") / "py.typed"
+    assert marker.is_file(), "py.typed is missing from the installed package"
