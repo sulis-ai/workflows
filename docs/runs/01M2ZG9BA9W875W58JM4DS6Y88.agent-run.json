@@ -1,0 +1,158 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2ZG9BA9W875W58JM4DS6Y88",
+  "started_at": "2026-09-20T11:00:00Z",
+  "completed_at": "2026-09-20T12:20:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a Fault 1: a person cannot approve after they have sent work back",
+  "branch": "fix/gate-decide-visit-baseline",
+  "summary_for_principal": "You asked me to fix a bug found by driving the engine by hand: once a reviewer sends work back for changes, they can never approve it afterwards — the system wrongly refuses their second decision as unauthorized, even though they hold exactly the permission needed. I confirmed your exact scenario reproduces, fixed it, and proved the fix with a test that fails without it and passes with it.\n\nRoot cause: the code counted a reviewer's TOTAL past decisions on that approval, not just this round's, so after one \"send back\" it miscounted and fell back to a permission nobody had granted. Fixed using a technique already proven elsewhere in this engine for a closely related bug. Full test suite: 344 passing, up from 342.\n\nThis is Fault 1 of the two you asked me to fix; Fault 2 (input-gathering gates that pass checks but crash when used) is separate and not started — I'll report on it separately.\n\nNumbered actions:\n1. Nothing needs your decision — an implementation bug, not a judgment call.\n2. Opinion: merge this once comfortable, then say go and I'll start Fault 2.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new regression tests reproducing Fault 1 exactly (a person-only gate looped on DENY, and a [policy, person] gate whose resolution length differs between visits), both failing before the fix and passing after; the three pre-existing decide() tests (no permission, permission denied, gate-level fallback) re-run unchanged to confirm no regression to the single-visit case."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Added D23 to the §18 decision log (MADR form), and an Update annotation on D22 correcting its own now-overstated claim that every GATE loop-back case was fixed — decide()'s person-decider path was a separate, untouched copy of the same bug class."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "WP-03a Fault 1 (serious) — a person cannot approve after they have sent work back. Take a process: STEP draft (SKILL) -> GATE approve with deciders: [{person:{permission: notes.note.approve}}], on: {PERMIT:{end:COMPLETE}, DENY:{next:draft, loop:{budget:2, on_exhausted:{end:DENIED}}}} and NO gate-level permission. Drive: next -> report(draft) -> decide(DENY) -> report(draft) -> decide(PERMIT). Expected COMPLETE; actual the run ends FORBIDDEN. Cause named as run.py:402's decider_index = len(attempts) counting every attempt the gate has ever had — the same visit-baseline bug class as D20/D21/D22. Fix it the same way (resolve one visit's attempts), and add regression tests for: a gate with no gate-level permission decided twice; a gate whose deciders differ between visits. Rules for the wider work package: one PR per fault, tests first, spec silence goes to a proposed spec change not a code guess, two-channel reporting per PR, stop after each PR and report the link before starting the next.",
+    "read_as": "Fix exactly Fault 1, as its own pull request, with the two named regression tests, before touching Fault 2 or any of the reported-but-unverified items — those are explicitly later PRs per the work package's own rules, not this one's scope.",
+    "filled_in": [
+      {
+        "gap": "The instruction named the fix direction ('resolve one visit's attempts', 'the same visit-baseline bug class as D20/D21/D22') but not the concrete mechanism — decide() has no run_state (person_required_when depends on accumulated state decide() never builds), so D20/D21/D22's own local-replay-of-the-node's-attempts approach could not be copied verbatim.",
+        "assumed": "Routed decide() through _drive_scope via a pending_decision, mirroring report()'s already-established pattern for the GATE agent-decider case (_report_gate_decision) — reusing the ALREADY-correct state/baseline machinery rather than building a second, separately-fallible copy of it. Widened pending_decision to a 3-tuple (node_id, kind, payload) so a person's verdict/note/subject payload and an agent's verdict/evidence/rationale payload can never be misread as each other.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "This repository's own established precedent: _report_gate_decision's docstring names exactly this pattern (hand the raw decision to _drive_scope, let _advance_gate apply it where its own replay actually reaches it) for the structurally identical agent-decider problem.",
+        "reversal_cost": "Low — the 3-tuple pending_decision shape is a mechanical widening of the existing 2-tuple one, every current caller already updated in this same change; decide()'s own new body is a thin wrapper with no durable-record shape change.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "decide() no longer computes which decider slot it is satisfying itself; it hands the verdict to _drive_scope as a pending_decision, the same channel report()'s own agent-decider path already used, and lets _advance_gate's already-correct replay (D22) apply it at the point it is actually reached.",
+      "problem": "decide() computed decider_index = len(get_attempts(...)) — the gate's TOTAL attempt count across every PAST visit, not this still-open visit's own. A person-only GATE looped back on DENY: on the second visit the store already held one attempt from the first, so decider_index overshot len(node.deciders), and decide() fell through to the D13 gate-level-permission fallback — refusing a real, correctly-permissioned person decision because the process (by design) declares no gate-level permission at all.",
+      "options_rejected": [
+        "Give decide() its own local replay of the gate's attempt history (mirroring _gate_visit_prefix, repeated to find the current open visit's start): rejected — resolve_gate's own interpretation of past attempts depends on person_required_when, a function of the run's accumulated state, and decide() has no state to evaluate it against (only _drive_scope's own walk builds state up from records). A decide()-local replay would need to either ignore person_required_when (silently wrong the moment a process actually uses it) or duplicate a materially complete second copy of _drive_scope's own state-building walk."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — pending_decision's 3-tuple widening and decide()'s new thin-wrapper body are both additive/local; AttemptRecord's own shape is untouched.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, the exact scenario in the work package (STEP draft SKILL -> GATE approve, one person decider, no gate-level permission, DENY loops to draft) reproduces: next -> report(draft) -> decide(DENY) -> report(draft) -> decide(PERMIT) ends FORBIDDEN, not COMPLETE.",
+          "source": "Ad hoc repro script against the stub adapters, this run, before the fix; confirmed the failing assertion matches the work package's own description exactly."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same exact scenario ends COMPLETE.",
+          "source": "Same repro script re-run after the fix, and tests/engine/test_run.py::test_decide_after_a_deny_loop_back_still_uses_the_person_deciders_permission, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A gate whose deciders' resolution length genuinely differs between visits ([policy, person]: visit 1 the policy decider DENYs outright at decider_index 0; visit 2 the same policy ref answers INDETERMINATE and falls through to the person at decider_index 1) is decided correctly — proving the fix replays each visit's own resolution rather than assuming a fixed offset from the first.",
+          "source": "tests/engine/test_run.py::test_decide_after_a_policy_indeterminate_loop_uses_the_correct_decider_index, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The three pre-existing decide() tests (no permission declared, declared permission denied by policy, gate-level D13 fallback used when no deciders are declared) pass unchanged — the single-visit case is not regressed.",
+          "source": "tests/engine/test_run.py::test_decide_is_refused_when_the_person_decider_declares_no_permission, ::test_decide_is_refused_when_the_person_deciders_permission_is_denied, ::test_decide_uses_the_gates_own_permission_when_no_deciders_are_declared, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after this fix: 344 tests, 0 failed (342 before this run's changes + 2 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "A future third decider kind or a person-decider variant is added to GATE that does not fit the agent/person binary pending_decision now assumes."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Whether Fault 1, as described in the work package, actually reproduces against v0.12.0 with the stub adapters before any fix.",
+      "method": "Wrote the exact process from the work package's own description and drove it by hand (next/report/decide/report/decide) against StubPolicyAdapter/StubRecordsAdapter/StubClaimsAdapter.",
+      "location": "Ad hoc script, this run.",
+      "result": "Confirmed: ends FORBIDDEN where COMPLETE is expected, matching the work package's own claim exactly."
+    },
+    {
+      "subject": "Full test suite after the fix.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "344 passed, 0 failed (342 pre-existing + 2 new regression tests for this fault)."
+    },
+    {
+      "subject": "Lint, format and type-check on every path CI actually scopes.",
+      "method": "python -m ruff check / python -m ruff format --check / python -m mypy, run with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "src/sulis_workflows/definition/, src/sulis_workflows/engine/, tests/definition/, tests/engine/, the four named domain/ports/*.py files and their test files.",
+      "result": "0 findings from ruff check, 0 reformatting needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "wp-03a-fault-2-and-verification-items-not-in-this-pr",
+      "location": "engine/run.py, definition/validate.py, engine/routes.py, cli.py, engine/__init__.py, CHANGELOG.md (all named in the work package)",
+      "divergence": "The work package names a second fault (INPUT gates validate but cannot run) and eight further reported-but-unverified items (loop-budget defaults ignored at runtime, AttemptRecord.inputs always {}, EXTERNAL/TOOL-composite mechanisms mishandled, inline process: bodies unvalidated, V10's own gap, several accepted-but-inert fields, DuplicateAttempt never caught, and four stale-docs claims) — none of these are touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "The work package's own rules require one pull request per fault, then a separate PR per verified item or small batch — this PR is Fault 1 only, by explicit instruction, not an oversight."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a fix establishes a replay/baseline discipline for one entry point into shared engine state (here, GATE resolution), audit every OTHER entry point that touches the same state before declaring the bug class closed — a sibling function reimplementing its own copy of the same computation is exactly where the fix will have failed to reach.",
+      "incident": "D20 fixed this bug class for STEP, D21 for ROUTE, D22 for _advance_gate's own internal replay — each time reasoning or testing that the fix's own scope was complete. None of the three ever noticed that decide() (a fourth entry point into the SAME gate attempt history, called directly rather than through _advance_gate's replay) had an independent, unfixed copy of the identical miscount. It was found only because this work package explicitly asked to drive the engine by hand rather than trust the prior passes' own stated scope.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "docs/spec/process-definition.md's own D22 entry now carries an Update annotation naming this gap directly, as the artefact this lesson changed.",
+      "proposed_check": "Before closing out any future fix to a shared replay/state computation, grep for every OTHER function that independently reads the same durable records or recomputes the same position, not just the one function the bug was found in.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A person-decided GATE now decides correctly on every visit after a loop-back, not only the first — the exact scenario the work package described now ends COMPLETE as expected."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Fault 2 (INPUT gates validate but cannot run) and the eight reported-but-unverified items in the work package are not started.",
+        "untouched_id": "wp-03a-fault-2-and-verification-items-not-in-this-pr",
+        "trigger": "This PR merging — the work package's own rules say stop and report after each PR, so Fault 2 starts as its own pull request next.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Fault 1 was independent of Fault 2 and the verification items; none of them are blocked or made worse by leaving them for their own PRs."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Start Fault 2 (INPUT gates) as its own pull request, per the work package's own one-PR-per-fault rule.",
+        "action": "Investigate whether implementing INPUT gates per spec §7.6 is right-sized for one PR, or whether refusing INPUT at validation time until the engine supports it is the safer interim step; decide and say which, then build it with tests first.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-fault-2-and-verification-items-not-in-this-pr",
+        "effort": "MEDIUM"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Merge this once you're comfortable, then say go and Fault 2 starts as its own PR.",
+      "reason": "The work package's own rules require stopping and reporting after each PR — this one is done and independently mergeable; Fault 2 is unrelated code and does not need to wait on anything else in this PR.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

@@ -61,6 +61,7 @@ from typing import Any
 from sulis_workflows.definition import defaults as fmt_defaults
 from sulis_workflows.definition.expressions import evaluate, parse
 from sulis_workflows.definition.model import (
+    Decider,
     Ending,
     GateNode,
     Mechanism,
@@ -330,6 +331,12 @@ async def _report_gate_decision(
     at exactly the point it is reached, with the same state it would use
     to check whether the gate is even still awaiting this decider.
 
+    `decide()` (a `person` decider's own hand-off, below) hands `_advance_gate`
+    a differently-shaped payload through the same channel — the middle
+    element of the 3-tuple tags which shape it is (`"agent"` here), so a
+    gate that turns out to actually be awaiting the OTHER kind never
+    misreads one payload's fields as the other's.
+
     If this call turns out not to actually correspond to what the gate is
     currently awaiting (a stale hand-off, a second `report()` for the same
     decider, wrong node), `_advance_gate` simply never consumes the
@@ -357,7 +364,7 @@ async def _report_gate_decision(
         ctx,
         inputs,
         host_inputs,
-        pending_decision=(node_id, output),
+        pending_decision=(node_id, "agent", output),
     )
     return result.answer
 
@@ -380,17 +387,33 @@ async def decide(
     forward.
 
     §10.1: "...or accepts any decision, it asks the host's `PolicyPort`" —
-    checked here before recording, the same as `_advance_step`'s STEP
-    dispatch and `_advance_gate`'s agent-decider vote. Which permission:
-    if `decide()` is satisfying a declared `person`-kind decider at its
-    rightful sequence position, that decider's own `permission` (§7.6:
-    `person: { permission: <host permission> }`); otherwise (no deciders
-    declared, or every declared decider already answered INDETERMINATE)
-    the gate's own `permission` (D13's fallback, §7.6: "the gate stays
-    open for a person with the gate's permission"). A `person` decider
-    declared with `role` instead of `permission` is refused outright —
-    `PolicyPort.authorize()` has no way to check a role, only an opaque
-    permission string, and nothing here invents one.
+    checked before recording, the same as `_advance_step`'s STEP dispatch
+    and `_advance_gate`'s agent-decider vote. Which permission: if this
+    decision satisfies a declared `person`-kind decider at its rightful
+    sequence position, that decider's own `permission` (§7.6: `person: {
+    permission: <host permission> }`); otherwise (no deciders declared, or
+    every declared decider already answered INDETERMINATE) the gate's own
+    `permission` (D13's fallback, §7.6: "the gate stays open for a person
+    with the gate's permission"). A `person` decider declared with `role`
+    instead of `permission` is refused outright — `PolicyPort.authorize()`
+    has no way to check a role, only an opaque permission string, and
+    nothing here invents one.
+
+    Fault 1 (WP-03a): this used to compute "which decider slot am I
+    satisfying" itself, from `len(get_attempts(...))` — the gate's TOTAL
+    attempt count across every PAST visit, not this specific, still-open
+    visit's own. A gate looped back on DENY (§7.6's own worked example)
+    and decided a second time overshot `len(node.deciders)` the moment the
+    store held even one attempt from the FIRST visit, and silently fell
+    through to the D13 gate-level-permission branch — refusing a real
+    person decider's own, correctly-permissioned decision. The correct
+    "which visit, which decider slot" answer needs exactly the replay
+    `_advance_gate` already does (D20/D21/D22's own baseline discipline),
+    so — mirroring `_report_gate_decision`'s own `pending_decision` shape
+    for the `agent` case — this hands the raw verdict to `_drive_scope`
+    and lets `_advance_gate` apply it at the point its own already-correct
+    replay actually reaches it, rather than recomputing that position here
+    a second, differently-shaped, and wrong way.
     """
     scope_def = _resolve_scope(process, scope, ctx.registry)
     node = scope_def.nodes[gate_id]
@@ -399,55 +422,6 @@ async def decide(
             f"decide() called for {gate_id!r}, which is not a GATE node"
         )
 
-    attempts = await ctx.records.get_attempts(
-        run_id, scope, gate_id, platform_id=ctx.platform_id, run_id=run_id
-    )
-    decider_index = len(attempts)
-
-    permission: str | None
-    if (
-        decider_index < len(node.deciders)
-        and node.deciders[decider_index].kind == "person"
-    ):
-        decider = node.deciders[decider_index]
-        if decider.permission is None and decider.role is not None:
-            return _forbidden(
-                process,
-                f"gate {gate_id!r}: person decider declares `role`, which "
-                "this engine's PolicyPort cannot check (permission strings "
-                "only) — refusing rather than accepting an unchecked decision.",
-            )
-        permission = decider.permission
-    else:
-        # D13: no declared decider at this slot — either none were
-        # declared at all, or every declared decider has already answered
-        # (the pause state) — the gate's own permission is who may decide.
-        permission = node.permission
-
-    if permission is None:
-        return _forbidden(
-            process,
-            f"gate {gate_id!r} declares no permission for a person to "
-            "decide it here — refusing rather than accepting it unchecked.",
-        )
-    decision = await ctx.policy.authorize(
-        permission, identity=ctx.identity, platform_id=ctx.platform_id, run_id=run_id
-    )
-    if decision.verdict is not Verdict.PERMIT:
-        return _forbidden(process, decision.rationale or "decision permission refused")
-
-    key = AttemptKey(run=run_id, scope=scope, node=gate_id, attempt=decider_index + 1)
-    record = AttemptRecord(
-        key=key,
-        inputs={},
-        output={"note": note} if note else None,
-        control_results=[],
-        verdict=verdict.value,
-        performed_by=f"PERSON:{subject}",
-        started_at=_now(),
-        ended_at=_now(),
-    )
-    await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
     top_scope = scope.split("/")[0]
     result = await _drive_scope(
         process,
@@ -457,6 +431,11 @@ async def decide(
         ctx,
         inputs,
         host_inputs,
+        pending_decision=(
+            gate_id,
+            "person",
+            {"verdict": verdict, "note": note, "subject": subject},
+        ),
     )
     return result.answer
 
@@ -574,7 +553,7 @@ async def _drive_scope(
     host_inputs: Mapping[str, Any],
     *,
     depth: int = 0,
-    pending_decision: tuple[str, Mapping[str, Any]] | None = None,
+    pending_decision: tuple[str, str, Mapping[str, Any]] | None = None,
 ) -> _DriveResult:
     """Drives one scope level — the top-level run (`depth == 0`) or a
     nested `PROCESS`-mechanism call (§9, delegated from
@@ -686,6 +665,7 @@ async def _drive_scope(
                 )
             elif isinstance(node, GateNode):
                 advance = await _advance_gate(
+                    process,
                     node,
                     node_id,
                     visit_attempts,
@@ -696,7 +676,7 @@ async def _drive_scope(
                     scope,
                     ctx,
                     pending_decision=(
-                        pending_decision[1]
+                        (pending_decision[1], pending_decision[2])
                         if pending_decision is not None
                         and pending_decision[0] == node_id
                         else None
@@ -1755,6 +1735,7 @@ def _gate_visit_prefix(
 
 
 async def _advance_gate(
+    process: Process,
     node: GateNode,
     node_id: str,
     attempts: list[AttemptRecord],
@@ -1765,9 +1746,20 @@ async def _advance_gate(
     scope: str,
     ctx: EngineContext,
     *,
-    pending_decision: Mapping[str, Any] | None,
+    pending_decision: tuple[str, Mapping[str, Any]] | None,
     produced_by: Mapping[str, str],
 ) -> _Advance:
+    """`pending_decision`, when present, is `(kind, payload)` — `kind` is
+    `"agent"` (a `report()`-completed `DECISION_STEP`, `payload` shaped
+    like a Tool's own output: `verdict`/`evidence`/`rationale`) or
+    `"person"` (a `decide()` call, `payload` shaped `verdict`/`note`/
+    `subject`). The two are never interchangeable — a gate that turns out
+    to actually be awaiting the OTHER kind must never misread one
+    payload's fields as the other's — so each consuming branch below
+    checks its own `kind` before touching `payload` at all; a mismatched
+    `pending_decision` is simply never consumed here, same as the
+    established node-id mismatch case (`_report_gate_decision`'s own
+    docstring)."""
     person_required = node.person_required_when is not None and bool(
         _evaluate(node.person_required_when, run_state)
     )
@@ -1843,6 +1835,7 @@ async def _advance_gate(
             record, platform_id=ctx.platform_id, run_id=run_id
         )
         return await _advance_gate(
+            process,
             node,
             node_id,
             attempts + [record],
@@ -1861,7 +1854,8 @@ async def _advance_gate(
         decider_index = gate_decision.next_decider_index
         decider = node.deciders[decider_index]
 
-        if pending_decision is not None:
+        if pending_decision is not None and pending_decision[0] == "agent":
+            agent_output = pending_decision[1]
             # §10.1/D12, mirroring the STEP-side fix: the reviewing agent's
             # own permission is checked before its vote counts, the same as
             # any other Tool dispatch. An unauthorized/undeclared-permission
@@ -1899,7 +1893,7 @@ async def _advance_gate(
                 )
             else:
                 outcome = check_agent_decision(
-                    pending_decision,
+                    agent_output,
                     decider,
                     decider_index,
                     gate=node,
@@ -1931,6 +1925,7 @@ async def _advance_gate(
                 record, platform_id=ctx.platform_id, run_id=run_id
             )
             return await _advance_gate(
+                process,
                 node,
                 node_id,
                 attempts + [record],
@@ -1959,6 +1954,65 @@ async def _advance_gate(
         )
 
     if gate_decision.resolution is GateResolution.NEEDS_PERSON:
+        assert gate_decision.next_decider_index is not None
+        decider_index = gate_decision.next_decider_index
+        decider = node.deciders[
+            decider_index
+        ]  # NEEDS_PERSON only ever names a `person` decider
+
+        if pending_decision is not None and pending_decision[0] == "person":
+            # Fault 1 (WP-03a): `decider_index` here comes from `resolve_gate`
+            # over THIS visit's own, correctly-replayed `outcomes` (D22's own
+            # `_gate_visit_prefix` truncation above already narrowed `attempts`
+            # to just this resolution) — never from a bare count of every
+            # attempt the gate has ever had. That was the bug: a second visit
+            # after a DENY loop-back used to overshoot `len(node.deciders)`
+            # and silently fall back to the gate's own permission instead of
+            # this decider's.
+            forbidden = _check_person_decider_permission(process, node_id, decider)
+            if forbidden is not None:
+                return _Advance(answer=forbidden)
+            assert (
+                decider.permission is not None
+            )  # checked by _check_person_decider_permission
+            permission_decision = await ctx.policy.authorize(
+                decider.permission,
+                identity=ctx.identity,
+                platform_id=ctx.platform_id,
+                run_id=run_id,
+            )
+            if permission_decision.verdict is not Verdict.PERMIT:
+                return _Advance(
+                    answer=_forbidden(
+                        process,
+                        permission_decision.rationale or "decision permission refused",
+                    )
+                )
+            record = _person_decision_record(
+                run_id,
+                scope,
+                node_id,
+                baseline + decider_index + 1,
+                pending_decision[1],
+            )
+            await ctx.records.record_attempt(
+                record, platform_id=ctx.platform_id, run_id=run_id
+            )
+            return await _advance_gate(
+                process,
+                node,
+                node_id,
+                attempts + [record],
+                baseline,
+                prior_loop_takes,
+                run_state,
+                run_id,
+                scope,
+                ctx,
+                pending_decision=None,
+                produced_by=produced_by,
+            )
+
         return _Advance(
             answer=NextAnswer(
                 kind=AnswerKind.AWAITING_DECISION,
@@ -1968,7 +2022,52 @@ async def _advance_gate(
             )
         )
 
-    # PAUSED — every decider asked, all INDETERMINATE (or none declared).
+    # PAUSED — every declared decider asked and answered INDETERMINATE, or
+    # none were declared at all: D13's fallback, the gate's OWN permission
+    # decides who may act, not any specific decider's.
+    if pending_decision is not None and pending_decision[0] == "person":
+        if node.permission is None:
+            return _Advance(
+                answer=_forbidden(
+                    process,
+                    f"gate {node_id!r} declares no permission for a person to "
+                    "decide it here — refusing rather than accepting it unchecked.",
+                )
+            )
+        permission_decision = await ctx.policy.authorize(
+            node.permission,
+            identity=ctx.identity,
+            platform_id=ctx.platform_id,
+            run_id=run_id,
+        )
+        if permission_decision.verdict is not Verdict.PERMIT:
+            return _Advance(
+                answer=_forbidden(
+                    process,
+                    permission_decision.rationale or "decision permission refused",
+                )
+            )
+        record = _person_decision_record(
+            run_id, scope, node_id, baseline + len(attempts) + 1, pending_decision[1]
+        )
+        await ctx.records.record_attempt(
+            record, platform_id=ctx.platform_id, run_id=run_id
+        )
+        return await _advance_gate(
+            process,
+            node,
+            node_id,
+            attempts + [record],
+            baseline,
+            prior_loop_takes,
+            run_state,
+            run_id,
+            scope,
+            ctx,
+            pending_decision=None,
+            produced_by=produced_by,
+        )
+
     return _Advance(
         answer=NextAnswer(
             kind=AnswerKind.AWAITING_DECISION,
@@ -1976,6 +2075,48 @@ async def _advance_gate(
             node_id=node_id,
             scope=scope,
         )
+    )
+
+
+def _check_person_decider_permission(
+    process: Process, node_id: str, decider: Decider
+) -> NextAnswer | None:
+    """A `person` decider declared with `role` instead of `permission` is
+    refused outright — `PolicyPort.authorize()` has no way to check a
+    role, only an opaque permission string, and nothing here invents one.
+    Returns the refusal answer, or `None` when `decider.permission` is
+    safe to use."""
+    if decider.permission is None and decider.role is not None:
+        return _forbidden(
+            process,
+            f"gate {node_id!r}: person decider declares `role`, which "
+            "this engine's PolicyPort cannot check (permission strings "
+            "only) — refusing rather than accepting an unchecked decision.",
+        )
+    if decider.permission is None:
+        return _forbidden(
+            process,
+            f"gate {node_id!r} declares no permission for a person to "
+            "decide it here — refusing rather than accepting it unchecked.",
+        )
+    return None
+
+
+def _person_decision_record(
+    run_id: str, scope: str, node_id: str, attempt: int, payload: Mapping[str, Any]
+) -> AttemptRecord:
+    verdict: Verdict = payload["verdict"]
+    note: str | None = payload.get("note")
+    subject: str = payload["subject"]
+    return AttemptRecord(
+        key=AttemptKey(run=run_id, scope=scope, node=node_id, attempt=attempt),
+        inputs={},
+        output={"note": note} if note else None,
+        control_results=[],
+        verdict=verdict.value,
+        performed_by=f"PERSON:{subject}",
+        started_at=_now(),
+        ended_at=_now(),
     )
 
 
