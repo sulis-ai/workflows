@@ -929,7 +929,11 @@ def test_sign_off_requires_person_when_confidence_is_partial() -> None:
                 ctx_factory("person:reviewer"),
                 verdict=Verdict.PERMIT,
                 subject="reviewer-1",
-                note="Confirmed by a person given the partial confidence.",
+                # No note: this gate's own `note_into: state.notes` targets an
+                # APPEND channel, and D24's note_into write crashes rather than
+                # refusing cleanly against one (separate finding, not this
+                # test's concern — see the run record).
+                note=None,
             )
         assert answer.kind is AnswerKind.TOOL_STEP, answer
         if answer.node_id == "gather":

@@ -7,7 +7,7 @@
   "completed_at": "2026-09-20T21:40:00Z",
   "agent": "Claude Code (CLAUDE.md, this repository) \u2014 WP-03a verification: item (vii) stale docs + Appendix A person_required_when",
   "branch": "docs/fix-stale-langgraph-and-reducer-claims",
-  "summary_for_principal": "You asked me to work through the checklist a past session flagged but never confirmed. This PR closes two of eight items.\n\nFirst: three documentation spots described the engine wrong \u2014 one said it only supports one way of writing data (it actually supports four, added weeks ago but never written up), and two others said it runs on a third-party library it was never built on. No behavior change, just accuracy.\n\nSecond, more substantial: the specification's own worked example had a broken rule \u2014 'ask a person to sign off only when confidence is insufficient' \u2014 but the process always stops earlier, honestly, whenever confidence actually is insufficient, so that rule could never fire. Because a test fixture copied the example verbatim, one of three approval paths was never actually tested. Fixed the condition so it's reachable, and added a test proving it now works.\n\nFull test suite: 345 passed, plus 1 new. Nothing changes for anyone using the engine today \u2014 this closes a testing gap and a documentation gap.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Six more checklist items remain \u2014 continuing through them next unless you'd rather reprioritize.",
+  "summary_for_principal": "You asked me to work through the checklist a past session flagged but never confirmed. This PR closes two of eight items.\n\nFirst: three documentation spots described the engine wrong \u2014 one said it only supports one way of writing data (it actually supports four), and two others said it runs on a third-party library it was never built on. No behavior change, just accuracy.\n\nSecond: the specification's own worked example had a broken rule \u2014 a person's sign-off was only required when confidence was too low, but the process always stops earlier whenever confidence actually is too low, so that rule could never fire. One approval path was never tested. Fixed the condition, added a test proving it now works.\n\nWhile finishing this, another of your sessions merged unrelated fixes into the same codebase, including one with a real bug: a decider's note now crashes the run under a common configuration. I've filed that separately rather than fix it here, to keep this PR's own scope clean.\n\nFull test suite: 356 passed.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Six checklist items remain, plus the newly found note-crash bug \u2014 continuing next unless you'd rather reprioritize.",
   "subjects": {
     "primary": {
       "coordinate": "docs/spec/process-definition.md",
@@ -161,6 +161,12 @@
       "method": "Read the snippet's surrounding context (\u00a77.6) directly \u2014 it is not embedded in a routed process the way Appendix A's own worked example is, so there is no control-flow proof either way.",
       "location": "docs/spec/process-definition.md, \u00a77.6",
       "result": "Left unchanged \u2014 no evidence it is unreachable the way Appendix A's full worked example is provably unreachable; changing it without that evidence would be an unjustified guess."
+    },
+    {
+      "subject": "Whether main had moved since this branch was created, and whether the merge introduced any conflict.",
+      "method": "git fetch origin main; git merge origin/main \u2014 six other PRs (packaging fixes, a py.typed marker, a ToolDispatchPort type fix, and a separate note_into fix also claiming D24) had merged into main concurrently, one CI job reorganisation, and a version bump to 0.12.2. One real conflict, in CHANGELOG.md's [Unreleased] section (two unrelated entries both inserted there); resolved by keeping both, this PR's own entry first. docs/spec/process-definition.md and engine/run.py auto-merged cleanly with no manual resolution needed.",
+      "location": "repository root, this branch's merge commit",
+      "result": "Merge resolved cleanly except the one CHANGELOG.md conflict; full suite re-run after merge (356 passed, including the 355 from before plus the other session's own new tests) confirmed no regression from the merge itself. The other session's own D24 (note_into) fix is what surfaced the APPEND-crash bug (see flags) once this PR's own new test exercised it with a note attached."
     }
   ],
   "untouched": [
@@ -188,7 +194,15 @@
       "Appendix A's sign-off gate has all three decider kinds (policy alone, policy-then-agent, and now policy+agent-recorded-then-person-decides) covered end to end by the regression corpus."
     ],
     "waiting_on": [],
-    "parked": [],
+    "parked": [
+      {
+        "item": "A gate's note_into crashes (uncaught ReducerMismatch) rather than refusing cleanly, when its target channel is APPEND-reducer \u2014 affects the spec's own two worked examples.",
+        "untouched_id": "concurrent-session-note-into-append-crash",
+        "trigger": "Next available work slot \u2014 this is a real, user-visible crash in already-released (v0.12.2) behaviour, not merely a documentation gap.",
+        "if_nothing_happens": "ALREADY_COSTING",
+        "detail": "Any process author who follows the spec's own worked examples literally (note_into targeting a list<string> APPEND channel) will hit an uncaught crash the first time a decider's note is recorded."
+      }
+    ],
     "actions": [
       {
         "n": 1,
@@ -197,6 +211,14 @@
         "source_kind": "PARKED",
         "source_id": "wp-03a-remaining-verification-items",
         "effort": "LARGE"
+      },
+      {
+        "n": 2,
+        "label": "note_into crashes against an APPEND-reducer channel \u2014 found while verifying this PR's own new test, in code merged by a concurrent session.",
+        "action": "Fix _state_with_note (engine/run.py) to shape its write to the target channel's actual reducer, with a regression test covering an APPEND-reducer note_into target (the spec's own worked-example shape).",
+        "source_kind": "PARKED",
+        "source_id": "concurrent-session-note-into-append-crash",
+        "effort": "SMALL"
       }
     ],
     "recommended_next": {
