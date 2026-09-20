@@ -5,6 +5,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+### Fixed — `GATE kind: INPUT` refused cleanly instead of crashing at runtime (D24)
+- `kind: INPUT` gates (spec §7.6) validated but then failed at runtime with a confusing
+  `"no route declared for verdict 'PERMIT'"`, since the engine never implemented them. Now
+  refused outright, with a clear reason, at validation time (**V9**) and — in case validation is
+  bypassed — at engine runtime too, the same defence-in-depth `PARALLEL`/`JOIN`/`FOR_EACH`
+  already have. See D24 (`docs/spec/process-definition.md` §18) for the open spec questions real
+  `INPUT` support would need answered first.
+
 ## [0.12.1] — 2026-09-20
 
 ### Fixed — five engine correctness bugs found by actually running processes, not just validating them (D19–D23)

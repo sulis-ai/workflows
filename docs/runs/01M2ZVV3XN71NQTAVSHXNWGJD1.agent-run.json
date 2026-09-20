@@ -1,0 +1,184 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M2ZVV3XN71NQTAVSHXNWGJD1",
+  "started_at": "2026-09-20T17:10:00Z",
+  "completed_at": "2026-09-20T18:05:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a Fault 2: GATE kind INPUT validates but cannot run",
+  "branch": "fix/refuse-input-gates",
+  "summary_for_principal": "You asked me to fix the second bug: a workflow step that gathers an answer from someone (an \"INPUT\" gate) passes every check when written, then crashes with a confusing error the moment anyone runs it. The work package gave me two choices: build real support, or refuse it cleanly up front instead. I chose to refuse it, and proved the fix with tests.\n\nWhy refuse rather than build: building this properly needs three genuine design decisions only a product call can settle — which reviewers (automated policy, AI, or a person) may answer this kind of gate; what shape an AI reviewer's answer must take; and how a person actually submits their answer. None are written down anywhere, and guessing risks building the wrong thing. They're written up plainly in the technical record for whenever you want that work done.\n\nWhat changed: authoring this kind of gate is now refused immediately with a clear reason, instead of passing checks and failing confusingly later. Full suite: 346 tests passing.\n\nNumbered actions:\n1. Nothing needs deciding right now — I made the call the work package authorized.\n2. Opinion: when you want real support for this, the three open questions above are what to resolve first.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "_advance_gate now refuses kind: INPUT with a clear EngineRefusal the moment it is reached, the same defence-in-depth PARALLEL/JOIN/FOR_EACH already have against a caller that bypasses validation."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V9 regression test: an otherwise well-formed INPUT gate (real answer_type/answer_into, an ANSWERED route) is still refused, since the gap is engine support, not gate shape."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New engine-level regression test proving the validator-bypass case: before the fix the run ended with the confusing 'no route declared for verdict PERMIT' message; after, a clear message naming INPUT specifically."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Added D24 to the §18 decision log (MADR form) with the three proposed spec clarifications real INPUT support would need, and a note on V9's rule-table row."
+      },
+      {
+        "coordinate": "README.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Added GATE kind: INPUT to the live 'known gaps, refused rather than silently mishandled' list alongside PARALLEL/JOIN/FOR_EACH."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for this fix."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "FAULT 2 — INPUT gates validate but cannot run. A GATE with kind: INPUT, answer_type, answer_into and on: { ANSWERED: ... } passes validation (validate.py:786 accepts INPUT) and then dies at runtime with \"gate 'x': no route declared for verdict 'PERMIT'\" -> ending FAILED, because _advance_gate never reads node.kind, answer_type, answer_into or ANSWERED. Implement INPUT gates per spec §7.6 (the answer is written through answer_into and routed on ANSWERED; INDETERMINATE passes on as for APPROVAL), or, if you judge that too large for this pass, make the validator refuse INPUT until the engine supports it — do not leave the silent path. Say which you chose and why. One PR per fault, tests first, spec silence goes to a proposed spec change not a code guess, two-channel reporting per PR, stop after each PR and report the link before starting the next.",
+    "read_as": "Decide between the two named options and commit to one, rather than partially implementing or leaving the crash in place; if refusing, do it at both the validator and the engine (since the validator is advisory), and if the spec is silent on details a real implementation would need, name those gaps explicitly rather than guessing at them in code.",
+    "filled_in": [
+      {
+        "gap": "The work package left the implement-vs-refuse choice to my own judgement ('if you judge that too large').",
+        "assumed": "Refuse, not implement. Tracing what a real implementation needs surfaced three genuinely unspecified design questions (which decider kinds may answer an INPUT gate, given PolicyPort has no channel for a typed answer; what output shape an agent decider's Tool must return, given decision@1 has no field for one; how a person submits an answer at all, given decide()'s public signature only accepts an ADR-028 verdict) — each would need either a PolicyPort/API change or a guessed answer. Guessing at any of them would be exactly the 'invent a rule in code where the spec is silent' CLAUDE.md asks me not to do; refusing cleanly avoids inventing anything while still closing the actual reported bug (the confusing runtime crash).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change in your PR and flag it in the run record' — applied directly, since all three gaps are the spec (§7.6) being silent, not an implementation detail I could reasonably infer.",
+        "reversal_cost": "Low — both refusals (V9, _advance_gate) are early returns; the V9 route-shape check for INPUT already existed and is left in place, dormant, ready for whichever future pass actually implements it.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "kind: INPUT gates (spec §7.6) are refused, at both validation (V9) and engine runtime, rather than implemented in this pass — D24.",
+      "problem": "An INPUT gate passes validation and then fails at runtime with a confusing message ('no route declared for verdict PERMIT') naming a verdict the gate's own author never wrote into `on` anywhere, because _advance_gate has never read node.kind (or answer_type/answer_into/ANSWERED) at all — every gate is resolved as if it were APPROVAL.",
+      "options_rejected": [
+        "Implement INPUT gates per spec §7.6: rejected for this pass — §7.6's own text is one sentence and does not say which decider kinds may answer an INPUT gate (PolicyPort's evaluate_policy has no field for a typed answer), what output shape an agent decider's Tool must return (decision@1 has nowhere to carry one), or how a person submits an answer at all (decide()'s public signature only accepts an ADR-028 verdict, and §12.1 names no fourth call). Guessing at any of these would invent unauthorised schema/API surface rather than follow the spec."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — both refusals are early returns (V9's existing ANSWERED-route shape check is left dormant, not deleted, ready for real implementation).",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before this fix, an INPUT gate built directly (bypassing validation, as every engine test in this repo does) reproduces the exact reported crash: the run ends FAILED with 'no route declared for verdict PERMIT'.",
+          "source": "tests/engine/test_run.py::test_input_gate_is_refused_cleanly_rather_than_misrouted, confirmed failing before the fix with exactly that message."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After this fix, the same construction ends FAILED with a message naming INPUT specifically, not the old confusing one.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "An otherwise well-formed INPUT gate (real answer_type, answer_into, an ANSWERED route) is refused at validation time by V9, unconditionally.",
+          "source": "tests/definition/test_validate.py::test_v9_refused_input_gate_not_yet_supported, passing; confirmed failing before the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after this fix: 346 tests, 0 failed (344 pre-existing + 2 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal commissions real INPUT gate support — the three proposed spec clarifications in D24 (docs/spec/process-definition.md §18) are the starting point."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Whether any existing fixture or corpus process in this repository already declares an INPUT gate.",
+      "method": "grep -rln 'kind: INPUT' across tests/, src/, docs/",
+      "location": "repository root",
+      "result": "None found outside this pass's own new test and the spec's own §7.6 worked example — no existing behaviour depends on INPUT gates running, confirming this refusal cannot regress a working feature."
+    },
+    {
+      "subject": "Full test suite after the fix.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "346 passed, 0 failed (344 pre-existing + 2 new regression tests for this fault)."
+    },
+    {
+      "subject": "Lint, format and type-check on every path CI actually scopes.",
+      "method": "python -m ruff check / python -m ruff format --check / python -m mypy, run with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "src/sulis_workflows/definition/, src/sulis_workflows/engine/, tests/definition/, tests/engine/, the four named domain/ports/*.py files and their test files.",
+      "result": "0 findings from ruff check, 0 reformatting needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, engine/routes.py, cli.py, engine/__init__.py, CHANGELOG.md (all named in the work package)",
+      "divergence": "The work package's own list of eight reported-but-unverified items (loop-budget defaults ignored at runtime, AttemptRecord.inputs always {}, EXTERNAL/TOOL-composite mechanisms mishandled, inline process: bodies unvalidated, V10's own gap, several accepted-but-inert fields, DuplicateAttempt never caught, and stale LangGraph doc claims) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "The work package's own rules require one pull request per fault, then a separate PR per verified item or small batch — this PR is Fault 2 only, by explicit instruction."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a work package offers 'implement it, or refuse it if implementing is too large' as an explicit choice, trace what a real implementation would actually need BEFORE picking — the tracing itself is what tells you whether the size problem is effort (a reason to just build it) or unresolved design (a reason to refuse and name the gaps), and the two calls need different justifications.",
+      "incident": "Tracing a real INPUT-gate implementation surfaced three genuinely unspecified design questions in the space of a few minutes, each blocking on a spec clarification or a port/API change rather than on engineering effort — confirming refuse-and-name-the-gaps was the right call here, not a shortcut. Writing that reasoning down (rather than just asserting 'too large') is what makes the choice auditable and gives the principal something concrete to commission later.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "docs/spec/process-definition.md's own D24 entry carries this reasoning directly, as the artefact this lesson changed.",
+      "proposed_check": "Before choosing 'refuse, too large to implement' on any future gap, write out the concrete blocking questions a real implementation would hit, the same way D24 does — if none surface, effort alone is not sufficient grounds to refuse rather than build.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "Authoring an INPUT gate is refused immediately with a clear reason, at both validation and runtime — no process author or operator will hit the old confusing crash again."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Real INPUT gate support remains unbuilt; the work package's own eight verification items are also untouched.",
+        "untouched_id": "wp-03a-remaining-verification-items",
+        "trigger": "The principal says which to pick up next: the verification items, or commissioning real INPUT gate support (starting from D24's three proposed spec clarifications).",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Nothing currently depends on either; both are safe to leave until asked for."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The work package's eight verification items are still unstarted.",
+        "action": "Verify each reported item (loop-budget defaults, AttemptRecord.inputs, EXTERNAL/TOOL-composite mechanisms, inline process: validation, V10's gap, inert fields, DuplicateAttempt, stale docs) and fix what is real, recording what is not, per the work package's own instructions.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items",
+        "effort": "MEDIUM"
+      },
+      {
+        "n": 2,
+        "label": "Real support for INPUT gates is not built yet.",
+        "action": "Resolve D24's three proposed spec clarifications (which decider kinds may answer, the agent decider's output shape, the person's own submission call), then implement.",
+        "source_kind": "RECOMMENDATION",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Pick up the verification items next (action 1) rather than INPUT gate support (action 2).",
+      "reason": "The verification items are independent, smaller, and several may turn out to be quick fixes or non-issues once actually checked; INPUT gate support needs your own input on the three open design questions first, so starting it now would stall partway through.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
