@@ -13,7 +13,7 @@ path for the **platform** (the server runner, which has an in-app copy at
 
 ```toml
 # pyproject.toml
-dependencies = ["sulis-workflows @ git+https://github.com/sulis-ai/workflows.git@v0.12.0"]
+dependencies = ["sulis-workflows @ git+https://github.com/sulis-ai/workflows.git@v0.12.1"]
 ```
 
 Pin a tag. Server and client runners pin the **same** version — that's what "one engine"
