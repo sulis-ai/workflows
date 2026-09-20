@@ -23,29 +23,6 @@ jobs:
           pip install -e ".[dev]"
       - name: Test
         run: pytest
-
-  wheel:
-    # The suite above runs against the source tree, where the v1 schemas and
-    # built-in definitions are always present. A wheel that omits them passes
-    # every one of those tests and then fails on a consumer's first load —
-    # which is what v0.12.0 and v0.12.1 shipped. This job is the only place
-    # that can catch it: build, install into a clean environment, and read the
-    # data back the way an installed copy does.
-    name: the wheel carries its data
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4.1.7
-      - uses: actions/setup-python@v5.1.1
-        with:
-          python-version: "3.12"
-      - name: Build the wheel
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build --wheel --outdir dist
-      - name: Install the wheel alone, then test it
-        run: |
-          python -m pip install dist/*.whl pytest
-          python -m pytest tests/test_the_package_ships_its_definition_data.py -q
       - name: Lint (ruff check)
         run: >
           python -m ruff check
@@ -75,3 +52,26 @@ jobs:
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
           src/sulis_workflows/domain/ports/code_tool.py
+
+  wheel:
+    # The suite above runs against the source tree, where the v1 schemas and
+    # built-in definitions are always present. A wheel that omits them passes
+    # every one of those tests and then fails on a consumer's first load —
+    # which is what v0.12.0 and v0.12.1 shipped. This job is the only place
+    # that can catch it: build, install into a clean environment, and read the
+    # data back the way an installed copy does.
+    name: the wheel carries its data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.1.7
+      - uses: actions/setup-python@v5.1.1
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+      - name: Install the wheel alone, then test it
+        run: |
+          python -m pip install dist/*.whl pytest
+          python -m pytest tests/test_the_package_ships_its_definition_data.py -q
