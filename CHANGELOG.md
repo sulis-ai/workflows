@@ -5,6 +5,21 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+### Fixed
+- **D25:** the spec's own Appendix A worked example (and its mirrored fixture) declared
+  `sign-off.person_required_when: state.confidence == "INSUFFICIENT"` — a condition that could
+  never actually evaluate true in a real run, since `honest-stop` already diverts `INSUFFICIENT`
+  away before `sign-off` is ever reached. Corrected to `state.confidence == "PARTIAL"`, a value
+  `sign-off` is actually reached with; the person-required decider path (previously untested end
+  to end, since it was unreachable) now has a regression test.
+
+### Docs
+- Corrected stale claims: `engine/run.py`'s module docstring said state writes support only the
+  `REPLACE` reducer (D19 implemented `MERGE`/`APPEND`/`UPSERT_BY_ID` without updating this line);
+  `engine/__init__.py` and `docs/work-packages/WP-02-execution-engine.md` said the engine "targets
+  LangGraph directly" and resumes via a LangGraph checkpointer — `engine/` imports no `langgraph`
+  anywhere and resumes by replaying durable attempt records instead (WP-03a verification pass).
+
 ## [0.12.1] — 2026-09-20
 
 ### Fixed — five engine correctness bugs found by actually running processes, not just validating them (D19–D23)

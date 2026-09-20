@@ -1,0 +1,208 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M307QSCSMY2PP6CQH2W3WFWD",
+  "started_at": "2026-09-20T20:15:00Z",
+  "completed_at": "2026-09-20T21:40:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) \u2014 WP-03a verification: item (vii) stale docs + Appendix A person_required_when",
+  "branch": "docs/fix-stale-langgraph-and-reducer-claims",
+  "summary_for_principal": "You asked me to work through the checklist a past session flagged but never confirmed. This PR closes two of eight items.\n\nFirst: three documentation spots described the engine wrong \u2014 one said it only supports one way of writing data (it actually supports four, added weeks ago but never written up), and two others said it runs on a third-party library it was never built on. No behavior change, just accuracy.\n\nSecond, more substantial: the specification's own worked example had a broken rule \u2014 'ask a person to sign off only when confidence is insufficient' \u2014 but the process always stops earlier, honestly, whenever confidence actually is insufficient, so that rule could never fire. Because a test fixture copied the example verbatim, one of three approval paths was never actually tested. Fixed the condition so it's reachable, and added a test proving it now works.\n\nFull test suite: 345 passed, plus 1 new. Nothing changes for anyone using the engine today \u2014 this closes a testing gap and a documentation gap.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Six more checklist items remain \u2014 continuing through them next unless you'd rather reprioritize.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/spec/process-definition.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Module docstring's 'REPLACE reducer only' claim (line 29) corrected \u2014 D19 implemented MERGE/APPEND/UPSERT_BY_ID without updating this line."
+      },
+      {
+        "coordinate": "src/sulis_workflows/engine/__init__.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Package docstring's 'Targets LangGraph directly' claim removed \u2014 self-contradictory with its own next sentence ('No sulis. import, no vendor SDK') and factually wrong (engine/ imports no langgraph anywhere)."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-02-execution-engine.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Corrected 'Why this shape' section and engine/run.py's scope item, both of which described the engine recompiling a LangGraph graph and resuming via a LangGraph checkpointer \u2014 the actual, shipped design replays durable RecordsPort attempt records instead, with no compiled graph and no checkpointer."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/accepted/process-appendix-a.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "sign-off.person_required_when changed from the unreachable 'state.confidence == \"INSUFFICIENT\"' to 'state.confidence == \"PARTIAL\"', matching the corrected spec."
+      },
+      {
+        "coordinate": "tests/engine/test_grounded_inquiry_e2e.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test exercising the previously-unreachable person-required decider path; module docstring and one other test's stale cross-reference corrected; one unrelated test's incidental confidence value changed from PARTIAL to GROUNDED to keep it decoupled from sign-off's now-real person-required requirement."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entries for D25 and the doc corrections."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vii): stale docs \u2014 run.py:29 says REPLACE-only reducers; engine/__init__.py and WP-02 say the engine uses LangGraph (it imports none); CHANGELOG says V1-V15 and has an empty Unreleased. Also, separately reported: spec Appendix A's own person_required_when condition is unreachable. Fix what is real, record what is not, tests first, one PR per verified item or small batch of related ones, stop and report after each PR.",
+    "read_as": "Read each named claim against the actual current code/docs rather than trusting the earlier report; batch the doc-only fixes together as a small, low-risk group since none change runtime behaviour; treat the Appendix A finding as belonging in the same batch since it is also a documentation-accuracy fix (a spec worked example describing an impossible condition) even though it also required a fixture and test change to actually close the coverage gap it caused.",
+    "filled_in": [
+      {
+        "gap": "The work package did not say whether the Appendix A finding (reported separately, in a prior turn, not as one of the numbered eight items) should be bundled with item (vii) or treated as its own PR.",
+        "assumed": "Bundle it with item (vii) \u2014 both are pure documentation-accuracy fixes (no runtime behaviour changes), found by the same kind of read-the-actual-code-and-compare-to-the-doc verification pass, and the work package's own rule permits 'a small batch of related ones'.",
+        "basis": "JUDGMENT",
+        "grounded_in": "CLAUDE.md's PR-scoping guidance ('one per verified item or small batch of related ones') and 'Keep PRs to one reviewable concern' \u2014 both fixes are the same concern (spec/doc says X, code does Y) even though they live in different files.",
+        "reversal_cost": "Low \u2014 the two fix-sets touch disjoint files and could be split into separate commits or PRs after the fact with no rework.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Fixing Appendix A's unreachable condition requires choosing a NEW, reachable condition \u2014 the spec doesn't say what person_required_when 'should' have meant.",
+        "assumed": "state.confidence == \"PARTIAL\" \u2014 the only other reachable confidence value at sign-off besides GROUNDED (INSUFFICIENT is proven unreachable; PARTIAL and GROUNDED both survive honest-stop's routing).",
+        "basis": "JUDGMENT",
+        "grounded_in": "PARTIAL is the value a process author would plausibly want a person's own judgement for \u2014 'evidence points somewhere but isn't fully grounded' is exactly ADR-028's person-decider use case; GROUNDED would make the condition true whenever confidence is not fully grounded, a valid but less illustrative choice for a worked example specifically meant to show person_required_when in use. Recorded as D25 in the spec's own decision log with this reasoning spelled out, per CLAUDE.md's 'do not invent a rule in code \u2014 write the gap as a proposed spec change'.",
+        "reversal_cost": "Low \u2014 a one-line value change in the spec, the fixture, and this decision's own entry.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "Three stale documentation claims (run.py's REPLACE-only reducer claim; engine/__init__.py's and the WP-02 doc's LangGraph claims) are corrected to match what the engine actually does; the CHANGELOG's V1-V15 claim was checked and found NOT stale.",
+      "problem": "engine/run.py's own module docstring said state writes support only the REPLACE reducer, though D19 (v0.12.1) implemented MERGE/APPEND/UPSERT_BY_ID without updating this line. engine/__init__.py said the engine 'Targets LangGraph directly' \u2014 self-contradictory with its own next sentence ('No sulis. import, no vendor SDK') and confirmed false by grep (zero langgraph references anywhere in engine/). docs/work-packages/WP-02-execution-engine.md made the same claim at greater length, describing a LangGraph-recompile-and-checkpointer design that contradicts run.py's own docstring (durable-record replay, no compiled graph, no checkpointer) \u2014 the plan was written before implementation and never updated after the actual design diverged from it.",
+      "options_rejected": [
+        "Leave the WP-02 doc's original 'Why this shape' section untouched and only fix the two shorter claims: rejected \u2014 the longer section is the root of the contradiction (it is where the original LangGraph-reuse plan was stated) and leaving it would mean the shorter fixes contradict a still-present, more detailed wrong claim nearby."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Trivial \u2014 documentation only, no schema, code or test-fixture dependency on the wording.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "engine/state.py implements all four reducers (REPLACE, MERGE, APPEND, UPSERT_BY_ID) per its own module docstring and D19's CHANGELOG entry.",
+          "source": "src/sulis_workflows/engine/state.py lines 1-9, 74-144; CHANGELOG.md's D19 entry."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "grep -rn 'langgraph' -i across src/sulis_workflows/engine/ returns zero matches after this fix's own edits are excluded (the pre-fix engine/__init__.py line was the only hit).",
+          "source": "Direct grep, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "CHANGELOG.md's 'V1-V15' claim is in the DATED, HISTORICAL v0.12.0 entry describing that release's own state accurately; the very next (newest) entry already documents V16, and validate.py's own docstring confirms V16 is the current highest rule. The [Unreleased] section was genuinely empty, and correctly so \u2014 HEAD was exactly the v0.12.1 tag commit, with no unreleased work on main at the time of the check.",
+          "source": "CHANGELOG.md; src/sulis_workflows/definition/validate.py docstring and V16 finding; git log v0.12.1..HEAD (empty) at verification time."
+        }
+      ],
+      "revisit_if": "engine/state.py gains a fifth reducer, or the engine adopts a durable checkpointer mechanism for real \u2014 either would need this same set of lines updated again."
+    },
+    {
+      "headline": "D25 \u2014 Appendix A's own worked example is corrected to a person_required_when condition it can actually reach (PARTIAL, not INSUFFICIENT); the mirrored fixture and a new engine test close the resulting coverage gap.",
+      "problem": "sign-off.person_required_when: state.confidence == \"INSUFFICIENT\" can never evaluate true in a real run, because honest-stop already diverts INSUFFICIENT confidence to its own ending before sign-off is ever reached \u2014 a gap the prior session's own test-file docstring had already found and documented, but left as an unfixed finding. Because the process-appendix-a.yaml fixture reproduces the spec's worked example verbatim, this also meant the engine's own regression corpus never exercised sign-off's person-required decider path end to end.",
+      "options_rejected": [
+        "Leave it as a documented, permanent gap (a second time): rejected \u2014 this pass exists specifically to close reported-but-unverified gaps rather than re-file the same finding again with no action taken.",
+        "Rewrite the worked example around a different field entirely: rejected \u2014 changes what the example illustrates for no reason; the fix needed is narrower.",
+        "Change person_required_when to GROUNDED instead of PARTIAL: rejected \u2014 would make the condition true whenever confidence is not fully grounded (a valid choice) but is less illustrative of person_required_when's own purpose (a specific, bounded judgement call) than PARTIAL is."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low \u2014 a one-line spec/fixture value change and one additive test; no engine behaviour changed, only which branch of already-correct code a worked example exercises.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "A first draft of the new test asserted only final.ending == \"COMPLETE\", which the OLD unreachable condition also produced (via the policy decider alone, since person_required was silently False) \u2014 run against the unfixed fixture, it passed, proving the assertion was too weak to detect the bug.",
+          "source": "This session's own test run, before strengthening the test with decider-invocation counters."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The strengthened test (asserting agent_decisions == 1 and person_decisions == 1) fails against the unfixed fixture (agent_decisions == 0 \u2014 the policy decider alone decides the gate) and passes after the fixture's person_required_when is corrected to PARTIAL.",
+          "source": "tests/engine/test_grounded_inquiry_e2e.py::test_sign_off_requires_person_when_confidence_is_partial, run both before and after the fixture edit, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "One pre-existing test (test_interrogate_revised_loop_exhausts_its_budget_and_still_converges) incidentally used confidence: PARTIAL and broke once the fixture's person_required_when became reachable at that value, because it did not handle the sign-off gate's DECISION_STEP/AWAITING_DECISION hand-offs. Changed to confidence: GROUNDED (its actual subject is the after-interrogate loop, not sign-off) rather than adding gate-handling logic unrelated to what it tests.",
+          "source": "This session's own test run after the fixture edit, before and after the confidence-value change."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after both fixes: 345 tests (344 pre-existing + 1 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "A future change to resolve_gate's person_required filtering, or to how decide() threads a person's verdict through a multi-decider gate, should be checked against this test alongside the narrower, synthetic tests/engine/test_gates.py fixtures."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite after all fixes in this PR.",
+      "method": "python -m pytest -q",
+      "location": "repository root",
+      "result": "345 passed, 0 failed (344 pre-existing + 1 new regression test)."
+    },
+    {
+      "subject": "Lint, format and type-check on every path CI actually scopes.",
+      "method": "python -m ruff check / python -m ruff format --check / python -m mypy, run with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "src/sulis_workflows/definition/, src/sulis_workflows/engine/, tests/definition/, tests/engine/, the four named domain/ports/*.py files and their test files.",
+      "result": "0 findings from ruff check, 36 files already correctly formatted, mypy clean (\"Success: no issues found in 18 source files\")."
+    },
+    {
+      "subject": "Whether the \u00a77.6 field-example snippet (a separate, standalone illustration of person_required_when's syntax, not embedded in a full process) shares Appendix A's unreachability bug.",
+      "method": "Read the snippet's surrounding context (\u00a77.6) directly \u2014 it is not embedded in a routed process the way Appendix A's own worked example is, so there is no control-flow proof either way.",
+      "location": "docs/spec/process-definition.md, \u00a77.6",
+      "result": "Left unchanged \u2014 no evidence it is unreachable the way Appendix A's full worked example is provably unreachable; changing it without that evidence would be an unjustified guess."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, engine/routes.py, cli.py, definition/validate.py",
+      "divergence": "The work package's own list of six other reported-but-unverified items (loop-budget defaults ignored at runtime, AttemptRecord.inputs always {}, EXTERNAL/TOOL-composite mechanisms mishandled, inline process: bodies unvalidated, V10's caller-routing gap, several accepted-but-inert fields plus uncaught DuplicateAttempt) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "The work package's own rules require one PR per verified item or small batch of related ones \u2014 this PR is the doc-accuracy batch (item vii + the Appendix A finding) only. All six remaining items have already been verified TRUE by background investigation in this same session and are queued as the next PRs."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a fix makes a previously-unreachable branch reachable, check whether the test asserting the fix would ALSO have passed against the unfixed code \u2014 if so, the assertion is too weak to prove anything, however plausible it looks.",
+      "incident": "The first draft of test_sign_off_requires_person_when_confidence_is_partial asserted only final.ending == \"COMPLETE\", which the unfixed (unreachable-condition) fixture also produced, via a completely different code path (the policy decider deciding alone). Running the test against the unfixed fixture before committing to the fix \u2014 not just after \u2014 caught that the assertion proved nothing; adding decider-invocation counters made it a real regression test.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "tests/engine/test_grounded_inquiry_e2e.py::test_sign_off_requires_person_when_confidence_is_partial carries the counters directly, as the artefact this lesson changed.",
+      "proposed_check": "For any test asserting a fix, run it against the pre-fix code first (not just post-fix), and treat a pass there as a signal the assertion needs strengthening, not as confirmation the fix is unnecessary.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "The engine's own documentation (run.py, engine/__init__.py, the WP-02 work package) now accurately describes how state writes and resume actually work.",
+      "Appendix A's sign-off gate has all three decider kinds (policy alone, policy-then-agent, and now policy+agent-recorded-then-person-decides) covered end to end by the regression corpus."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Six more WP-03a verification items are already confirmed real and queued.",
+        "action": "Continue through items (i) loop-budget defaults, (ii) AttemptRecord.inputs, (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap, and (vi) inert fields plus uncaught DuplicateAttempt \u2014 one PR per item or small batch, tests first, per the work package's own rules.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with item (i) (loop-budget default disagreement) next.",
+      "reason": "It is a real, narrow, well-understood bug (process.defaults.loop_budget is silently ignored at runtime) with a clear fix already scoped by this session's investigation, and its confusion (explain reports one budget, the engine enforces another) is the kind of thing that misleads a process author quietly.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
