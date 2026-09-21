@@ -6,6 +6,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D39:** spec §9.1's own worked example used `mechanism.inputs: { brief: brief }` (a bare,
+  unqualified name) — the only place in this entire document, or in the real corpus, that a
+  `mechanism.inputs` path is not fully qualified (`state.*`/`inputs.*`/`host.*`/`steps.*`, the
+  same as every `in:`/`out:`/`if:` path elsewhere). Confirmed, by actually driving this exact
+  example through `next()`/`report()` for the first time, that the bare form silently resolves to
+  `None` against the real engine (`_resolve_call_inputs` reads `mechanism.inputs` straight off the
+  calling process's own run state; the calling STEP's own `in:` mapping is never consulted for a
+  `PROCESS`-mechanism dispatch). Spec §9.1 now shows `{ brief: state.brief }`, matching the
+  convention `tests/engine/test_run.py`'s own `PROCESS`-mechanism coverage already tests; a new
+  bullet states the rule plainly. `examples/recursive-refinement/`'s own two affected Tools are
+  fixed the same way.
 - **V8 loop-budget checking, and `explain`'s own loop listing, now see a loop declared on a
   ROUTE's `otherwise` clause** — both only ever walked a `RouteNode`'s `when` options for `.loop`
   before, silently missing a bad-but-conformant budget (or `counts: FAILURES`) declared on

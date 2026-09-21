@@ -4,6 +4,14 @@
 # the shared recursive call both FOR_EACH bodies dispatch — a process that
 # can reach itself MUST declare on_depth_exhausted (spec §9.2); that lives
 # on the calling STEP in recursive-refinement.process.yaml, not here.
+#
+# `mechanism.inputs: { node_brief: state.current_node_brief }` uses a
+# fully-qualified path, not the bare `{ node_brief: node_brief }` spec
+# §9.1's own worked example shows — see run-grounded-inquiry.tool.yaml's
+# own comment for why: the bare form silently resolves to `None` against
+# the current engine. Both callers of this shared Tool
+# (extract-recommendation-brief-step, extract-child-brief-step) write the
+# value here first, into the same shared channel, before dispatching.
 api_version: sulis.workflows/v1
 kind: TOOL
 id: recurse-into-node
@@ -17,7 +25,7 @@ controls: [ { conventions: refinement-output-present@1 } ]
 mechanism:
   kind: PROCESS
   ref: recursive-refinement@1.0.0
-  inputs: { node_brief: node_brief }
+  inputs: { node_brief: state.current_node_brief }
   result:
     outputs: {}
     endings:
