@@ -796,6 +796,95 @@ endings:
     assert "V10" not in _rules(findings)
 
 
+# ------------------------------------------------------------------------- D36 (V10) --
+# §9.1: "`result.endings` MUST map every ending the child can reach" names no
+# distinction between a `ref`'d Process and an inline `process:` body — both
+# are checked the same way now.
+
+_CALL_INLINE_CHILD_TOOL_FULLY_MAPPED = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: call-inline-child
+version: 1.0.0
+title: Call inline child
+inputs: { x: { type: string } }
+output: { ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]" } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: PROCESS
+  process:
+    start: a
+    nodes:
+      a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: CHILD_DONE }
+    endings:
+      CHILD_DONE: { outcome: SUCCESS, says: "Child done." }
+  result:
+    endings: { CHILD_DONE: CHILD_DONE, ESCALATED: ESCALATED, FAILED: FAILED, FORBIDDEN: FORBIDDEN, CANCELLED: CANCELLED }
+effect: QUERY
+"""
+
+_CALL_INLINE_CHILD_TOOL_MISSING_FORBIDDEN = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: call-inline-child
+version: 1.0.0
+title: Call inline child
+inputs: { x: { type: string } }
+output: { ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]" } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: PROCESS
+  process:
+    start: a
+    nodes:
+      a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: CHILD_DONE }
+    endings:
+      CHILD_DONE: { outcome: SUCCESS, says: "Child done." }
+  result:
+    endings: { CHILD_DONE: CHILD_DONE, ESCALATED: ESCALATED, FAILED: FAILED, CANCELLED: CANCELLED }
+effect: QUERY
+"""
+
+
+def _parent_process_calling_inline_child() -> str:
+    return """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: string, reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-inline-child@1, in: { x: inputs.x }, out: { ending: state.ending }, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+
+
+def test_v10_accepted_inline_call_mapping_every_child_ending() -> None:
+    doc = _parent_process_calling_inline_child()
+    registry = _base_registry(_CALL_INLINE_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V10" not in _rules(findings)
+
+
+def test_v10_refused_inline_call_missing_forbidden_ending() -> None:
+    """D36: before this fix, `v10_calls` only ever derived `child_endings`
+    from a `ref`'d Process — `_resolve(registry, "PROCESS", None)` returns
+    `(None, None)` with no error at all for an inline call's `ref=None`,
+    silently skipping this entire check. An inline body missing one of its
+    own declared endings from `result.endings` (the same bad-but-conformant
+    shape `test_v10_refused_call_missing_forbidden_ending` already covers
+    for a `ref`'d call) passed with zero findings before this fix."""
+    doc = _parent_process_calling_inline_child()
+    registry = _base_registry(_CALL_INLINE_CHILD_TOOL_MISSING_FORBIDDEN)
+    findings = validate(doc, registry=registry)
+    assert "V10" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ V11 --
 
 
