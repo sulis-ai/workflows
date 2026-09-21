@@ -1,0 +1,76 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M32CRJ7YJHCN6XVWSJTYGXFV",
+  "started_at": "2026-09-21T16:25:00Z",
+  "completed_at": "2026-09-21T16:28:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — fix: V8 and explain's own loop detection miss a ROUTE otherwise loop",
+  "branch": "fix/v8-loop-detection-misses-route-otherwise",
+  "summary_for_principal": "A small, separate fix found while building the previous PR's example.\n\nA loop can be declared two ways on a routing step: on one of its named branches, or on its fallback ('otherwise'). The system's own checker for bad loop settings (an impossible budget, or a setting that only makes sense elsewhere) only ever looked at the named-branch kind — a loop declared on the fallback passed unchecked. The same blind spot existed in the command that explains a process back to a person: it silently left such a loop out of its own listing.\n\nFixed both, test first (confirmed each failed before the fix, passes after). Full test suite: 392 passed, 3 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/cli.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "The same gap, independently implemented, in `explain`'s own loop listing (`_iter_loops`) — fixed identically."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new regression tests (zero budget, counts: FAILURES) for a loop declared on `otherwise`, confirmed failing before the fix."
+      },
+      {
+        "coordinate": "tests/definition/test_cli.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "One new regression test proving `explain` now lists a loop declared on `otherwise`, confirmed failing before the fix."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "No new ask — this is a self-initiated fix for a real gap found incidentally while validating examples/recursive-refinement/ (the previous PR), whose own completeness-gate node declares a loop on `otherwise` rather than a `when` option.",
+    "read_as": "Fix what is real once found (CLAUDE.md), as its own single-concern PR rather than folding it into the example PR it was found in — the example's own validity does not depend on this fix (its chosen loop budget happens to be valid regardless of whether V8 checks it), so bundling would have mixed two unrelated concerns into one review.",
+    "filled_in": [],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "392 passed, 0 failed (389 pre-existing + 3 new). ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    },
+    {
+      "subject": "Whether the gap was real and reachable, not hypothetical.",
+      "method": "Wrote both new V8 tests and the new explain test, ran them against the unfixed code, confirmed all three failed (V8: 'assert V8 in set()'; explain: the expected 'budget=5' string absent from its output) before applying either fix.",
+      "location": "tests/definition/test_validate.py, tests/definition/test_cli.py",
+      "result": "All three confirmed failing pre-fix, passing post-fix."
+    }
+  ],
+  "untouched": [],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "V8 (loop-budget validation) and `explain`'s own loop listing both now see a loop declared on a ROUTE's `otherwise` clause, not only on a `when` option."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "No further action needed.",
+      "reason": "Self-contained fix, fully tested, no open questions.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

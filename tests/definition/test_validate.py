@@ -446,6 +446,46 @@ def test_v8_refused_route_loop_counts_failures() -> None:
     assert "V8" in _rules(findings)
 
 
+_OTHERWISE_LOOP_PROCESS = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  verdict: { type: "enum[SURVIVED, DROPPED]", reducer: REPLACE }
+start: route
+nodes:
+  route:
+    type: ROUTE
+    when:
+      - { if: 'state.verdict == "SURVIVED"', end: SURVIVED_END }
+    otherwise: { next: route, loop: %s }
+endings:
+  SURVIVED_END: { outcome: SUCCESS, says: "Survived." }
+  DROPPED_END: { outcome: SUCCESS, says: "Dropped." }
+"""
+
+
+def test_v8_refused_zero_loop_budget_declared_on_otherwise() -> None:
+    """A3 bad-but-conformant: `_all_loops` (V8) only ever walked a
+    RouteNode's `when` options for `.loop`, never `otherwise` — a loop
+    declared there (a real, legal shape: `otherwise` is itself a
+    RouteTarget with its own `loop` field) passed with zero findings
+    regardless of how bad its budget was. Found while building a real
+    process that loops back via `otherwise` rather than a `when` option."""
+    doc = _OTHERWISE_LOOP_PROCESS % "{ budget: 0 }"
+    findings = validate(doc, registry=Registry())
+    assert "V8" in _rules(findings)
+
+
+def test_v8_refused_route_loop_counts_failures_declared_on_otherwise() -> None:
+    """Same gap as above, for the `counts: FAILURES` half of V8 (D33)."""
+    doc = _OTHERWISE_LOOP_PROCESS % "{ budget: 3, counts: FAILURES }"
+    findings = validate(doc, registry=Registry())
+    assert "V8" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ V9 --
 
 _GATE_PROCESS = """

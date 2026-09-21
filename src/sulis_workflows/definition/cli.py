@@ -85,6 +85,8 @@ def _iter_loops(process: model.Process):
             for option in node.when:
                 if option.loop:
                     yield node_id, option.loop
+            if node.otherwise is not None and node.otherwise.loop:
+                yield f"{node_id}.otherwise", node.otherwise.loop
         elif isinstance(node, model.GateNode):
             for verdict, route in node.on.items():
                 if route.loop:
