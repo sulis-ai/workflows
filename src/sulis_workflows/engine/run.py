@@ -666,6 +666,7 @@ async def _drive_scope(
             elif isinstance(node, GateNode):
                 advance = await _advance_gate(
                     process,
+                    scope_def,
                     node,
                     node_id,
                     visit_attempts,
@@ -1736,6 +1737,7 @@ def _gate_visit_prefix(
 
 async def _advance_gate(
     process: Process,
+    scope_def: _ScopeDef,
     node: GateNode,
     node_id: str,
     attempts: list[AttemptRecord],
@@ -1761,7 +1763,7 @@ async def _advance_gate(
     established node-id mismatch case (`_report_gate_decision`'s own
     docstring)."""
     if node.kind == "INPUT":
-        # WP-03a Fault 2 (D24): spec-legal (§7.6), schema- and
+        # WP-03a Fault 2 (D26): spec-legal (§7.6), schema- and
         # model-accepted, but never implemented — nothing below reads
         # `node.kind`/`answer_type`/`answer_into`/`ANSWERED` at all, so a
         # policy/agent/person decider's PERMIT/DENY was evaluated as an
@@ -1774,7 +1776,7 @@ async def _advance_gate(
         # engine a Process directly.
         raise EngineRefusal(
             f"gate {node_id!r}: kind INPUT is not yet executed by this "
-            "engine (spec §7.6, D24) — refused rather than misreading a "
+            "engine (spec §7.6, D26) — refused rather than misreading a "
             "decider's verdict against the wrong route"
         )
     person_required = node.person_required_when is not None and bool(
@@ -1795,6 +1797,12 @@ async def _advance_gate(
 
     if gate_decision.resolution is GateResolution.DECIDED:
         assert gate_decision.verdict is not None  # DECIDED always carries a verdict
+        # §7.6's `note_into`: what the decider wrote is the whole point of a
+        # send-back — it is the instruction for the next attempt. Written into
+        # state here, on the decision's own replay, so the step the run loops
+        # back to reads it exactly like any other input (declared and unwritten,
+        # a DENY sent work back with the reason silently dropped).
+        decided_state = _state_with_note(scope_def, node, attempts, run_state)
         target = node.on.get(gate_decision.verdict.value)
         if target is None:
             raise EngineRefusal(
@@ -1808,15 +1816,18 @@ async def _advance_gate(
             if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
                 return _Advance(
                     next_node_id=_resolve_route_target(budget_decision.on_exhausted),
+                    state=decided_state,
                     visit_attempts_used=len(attempts),
                 )
             return _Advance(
                 next_node_id=_resolve_route_target(target),
+                state=decided_state,
                 took_loop=True,
                 visit_attempts_used=len(attempts),
             )
         return _Advance(
             next_node_id=_resolve_route_target(target),
+            state=decided_state,
             visit_attempts_used=len(attempts),
         )
 
@@ -1853,6 +1864,7 @@ async def _advance_gate(
         )
         return await _advance_gate(
             process,
+            scope_def,
             node,
             node_id,
             attempts + [record],
@@ -1943,6 +1955,7 @@ async def _advance_gate(
             )
             return await _advance_gate(
                 process,
+                scope_def,
                 node,
                 node_id,
                 attempts + [record],
@@ -2017,6 +2030,7 @@ async def _advance_gate(
             )
             return await _advance_gate(
                 process,
+                scope_def,
                 node,
                 node_id,
                 attempts + [record],
@@ -2072,6 +2086,7 @@ async def _advance_gate(
         )
         return await _advance_gate(
             process,
+            scope_def,
             node,
             node_id,
             attempts + [record],
@@ -2134,6 +2149,35 @@ def _person_decision_record(
         performed_by=f"PERSON:{subject}",
         started_at=_now(),
         ended_at=_now(),
+    )
+
+
+def _state_with_note(
+    scope_def: _ScopeDef,
+    node: GateNode,
+    attempts: list[AttemptRecord],
+    run_state: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """This gate's decision note, written where the gate says it goes (§7.6).
+
+    The latest note wins: a gate asked twice carries the decider's most recent
+    words, not the first ones, or a second send-back would re-run the step with
+    the previous round's instruction.
+    """
+    if not node.note_into:
+        return None
+    note = next(
+        (
+            (record.output or {}).get("note")
+            for record in reversed(attempts)
+            if (record.output or {}).get("note")
+        ),
+        None,
+    )
+    if not note:
+        return None
+    return apply_output(
+        scope_def.state, run_state["state"], {"note": node.note_into}, {"note": note}
     )
 
 

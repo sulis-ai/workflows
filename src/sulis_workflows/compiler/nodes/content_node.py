@@ -12,8 +12,11 @@ Protocol; the consumer provides the implementation.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
+from sulis_workflows._tracing import span_context
+from sulis_workflows.compiler.metrics import get_compiler_metrics
 from sulis_workflows.domain.ports.llm import LLMPort, LLMRequest
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,7 @@ def make_content_node(
     """
 
     async def content_fn(state: dict) -> dict:
+        metrics = get_compiler_metrics()
         outputs = state.get("step_outputs") or {}
         prompt = outputs.get(state_input_key, "")
         if not prompt:
@@ -66,22 +70,32 @@ def make_content_node(
         meta = state.get("metadata") or {}
         eff_platform_id = platform_id or str(meta.get("platform_id", ""))
         eff_run_id = run_id or str(state.get("execution_id", ""))
-        response = await llm.complete(
-            LLMRequest(
-                prompt=prompt, model=model, max_tokens=max_tokens,
-                system_prompt=system_prompt or None,
-            ),
-            platform_id=eff_platform_id,
-            run_id=eff_run_id,
-            timeout_s=timeout_s,
-        )
-        logger.info(
-            "Content node '%s' produced %d chars ('%s' -> '%s')",
-            node_id,
-            len(response.text),
-            state_input_key,
-            state_output_key,
-        )
+
+        with span_context(
+            "compiler.node.content",
+            attributes={"node_id": node_id, "input_key": state_input_key, "output_key": state_output_key},
+        ):
+            start = time.monotonic()
+            logger.info("Node execution start: %s (content)", node_id)
+            response = await llm.complete(
+                LLMRequest(
+                    prompt=prompt, model=model, max_tokens=max_tokens,
+                    system_prompt=system_prompt or None,
+                ),
+                platform_id=eff_platform_id,
+                run_id=eff_run_id,
+                timeout_s=timeout_s,
+            )
+            elapsed_ms = (time.monotonic() - start) * 1000
+            metrics.record_node_execution_time(node_id, "content", elapsed_ms)
+            logger.info(
+                "Node execution end: %s (%.1fms, produced %d chars, '%s' -> '%s')",
+                node_id,
+                elapsed_ms,
+                len(response.text),
+                state_input_key,
+                state_output_key,
+            )
         return {"step_outputs": {state_output_key: response.text}, "completed_nodes": [node_id]}
 
     content_fn.__name__ = f"content_{node_id}"

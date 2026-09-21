@@ -847,7 +847,7 @@ def _v9_one_gate(
         # only ever declare `ANSWERED`), so the engine raised "no route
         # declared for verdict 'PERMIT'" — a confusing failure for a
         # definition that had already passed validation. Refused here
-        # instead (D24, spec decision log): "an incomplete definition is
+        # instead (D26, spec decision log): "an incomplete definition is
         # invalid, not a TODO" applies to engine support the same way it
         # applies to the definition's own shape. This is deliberately
         # unconditional — even an otherwise well-formed INPUT gate (a
@@ -861,7 +861,7 @@ def _v9_one_gate(
             node=node_id,
             message=(
                 f"gate {node_id!r} declares kind INPUT, which this engine "
-                "does not execute yet (see the spec's own decision log, D24) "
+                "does not execute yet (see the spec's own decision log, D26) "
                 "— refused rather than validating a definition it would "
                 "crash on"
             ),

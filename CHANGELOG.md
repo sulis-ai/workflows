@@ -5,13 +5,42 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
-### Fixed — `GATE kind: INPUT` refused cleanly instead of crashing at runtime (D24)
+### Fixed — `GATE kind: INPUT` refused cleanly instead of crashing at runtime (D26)
 - `kind: INPUT` gates (spec §7.6) validated but then failed at runtime with a confusing
   `"no route declared for verdict 'PERMIT'"`, since the engine never implemented them. Now
   refused outright, with a clear reason, at validation time (**V9**) and — in case validation is
   bypassed — at engine runtime too, the same defence-in-depth `PARALLEL`/`JOIN`/`FOR_EACH`
-  already have. See D24 (`docs/spec/process-definition.md` §18) for the open spec questions real
+  already have. See D26 (`docs/spec/process-definition.md` §18) for the open spec questions real
   `INPUT` support would need answered first.
+
+## [0.12.2] — 2026-09-20
+
+### Fixed — four faults found by building a consumer on v0.12.1, each with its own regression test
+- **Packaging:** the wheel shipped without `definition/schema/` and `definition/builtin/`, so an
+  installed copy could not load any definition at all — every test in this repository passes
+  against the source tree, where the data is always present. `pyproject.toml` now declares the
+  package data, and a new CI job (`the wheel carries its data`) builds the wheel, installs it
+  alone and reads the data back; `tests/test_the_package_ships_its_definition_data.py` is what it
+  runs. This is the only check that can catch the class of fault, and it is why v0.12.0 and
+  v0.12.1 shipped broken.
+- **D24, `note_into`:** a decider's send-back note never reached the attempt it sent work back to.
+  The field was in the schema, the model and the validator, and the reducer dropped it. It is now
+  written onto the decision's replay state (latest note wins) and resolves as an input to the step
+  the loop returns to; four internal `_advance_gate` call sites gained the scope definition they
+  need to do it. Regression:
+  `tests/engine/test_a_send_back_note_reaches_the_next_attempt.py`. Recorded as D24 in
+  `docs/spec/process-definition.md` §18.
+- **PEP 561:** the package shipped no `py.typed`, so a typed consumer saw every public name as
+  `Any` and its own type checking silently weakened. Adding the marker then surfaced a genuine
+  port mismatch (below).
+- **`ToolDispatchPort`:** the port declared a workspace value object for paths and a bare mapping
+  for arguments, while every caller passes a string and a string-keyed mapping. The port now
+  declares what its callers actually pass.
+
+### Changed
+- CI: the lint, format and type checks run in the job that installs the development extra. They
+  had been appended to the wheel job, which installs the built wheel alone, so they failed on a
+  missing module rather than on the code — and had not been running at all on the branches above.
 
 ## [0.12.1] — 2026-09-20
 
