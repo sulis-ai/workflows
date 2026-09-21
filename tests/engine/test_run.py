@@ -3114,13 +3114,16 @@ def test_process_call_ref_translates_outputs_and_endings():
         header=_header("parent-proc", "PROCESS"),
         start="call-child",
         permission="workflows.parent-proc.start",
-        state={"summary": StateChannel(type="string", reducer="REPLACE")},
+        state={
+            "summary": StateChannel(type="string", reducer="REPLACE"),
+            "call_ending": StateChannel(type="string", reducer="REPLACE"),
+        },
         nodes={
             "call-child": StepNode(
                 id="call-child",
                 tool="call-child@1",
                 in_={},
-                out={"note": "state.summary"},
+                out={"note": "state.summary", "ending": "state.call_ending"},
                 end="DONE",
             ),
         },
@@ -3188,13 +3191,16 @@ def test_process_call_inline_hands_off_and_resumes_via_report():
         header=_header("parent-inline", "PROCESS"),
         start="call-inline",
         permission="workflows.parent-inline.start",
-        state={"summary": StateChannel(type="string", reducer="REPLACE")},
+        state={
+            "summary": StateChannel(type="string", reducer="REPLACE"),
+            "call_ending": StateChannel(type="string", reducer="REPLACE"),
+        },
         nodes={
             "call-inline": StepNode(
                 id="call-inline",
                 tool="call-inline@1",
                 in_={},
-                out={"note": "state.summary"},
+                out={"note": "state.summary", "ending": "state.call_ending"},
                 end="DONE",
             ),
         },
@@ -3392,6 +3398,7 @@ def test_process_call_control_failure_on_translated_output_routes_via_then():
         ControlFail,
         ControlRef,
         Profile,
+        StateChannel,
     )
 
     child_work_tool = Tool(
@@ -3437,12 +3444,13 @@ def test_process_call_control_failure_on_translated_output_routes_via_then():
         header=_header("parent-proc", "PROCESS"),
         start="call-child",
         permission="workflows.parent-proc.start",
+        state={"call_ending": StateChannel(type="string", reducer="REPLACE")},
         nodes={
             "call-child": StepNode(
                 id="call-child",
                 tool="call-child@1",
                 in_={},
-                out={},
+                out={"ending": "state.call_ending"},
                 end="DONE",
                 on_control_fail=ControlFail(repair=0, then=RouteTarget(end="GAVE_UP")),
             ),
@@ -3468,6 +3476,79 @@ def test_process_call_control_failure_on_translated_output_routes_via_then():
         next_(parent, "run-ctrlfail-1", "root", ctx, inputs={}, host_inputs={})
     )
     assert answer.ending == "GAVE_UP"
+
+
+def test_process_call_not_capturing_ending_is_refused_cleanly():
+    """D40: §9.1's own "the calling step MUST route every value of
+    `ending`" has no dedicated check yet (D36's own proposed clarification
+    — proving every value is actually ROUTED on is still undecided), but
+    the narrower, unambiguous half — a calling STEP whose `out:` never
+    even CAPTURES the mapped `ending` into state, making it categorically
+    impossible for anything downstream to ever read it — is now refused,
+    the validator-bypass case for the new V10 check."""
+    from sulis_workflows.definition.model import CallResult
+
+    child_process = Process(
+        header=_header("child-proc", "PROCESS"),
+        start="do-work",
+        permission="workflows.child-proc.start",
+        nodes={
+            "do-work": StepNode(
+                id="do-work", tool="child-work@1", in_={}, out={}, end="CHILD_DONE"
+            ),
+        },
+        endings={"CHILD_DONE": Ending(outcome="SUCCESS", says="Child done.")},
+    )
+    child_work_tool = Tool(
+        header=_header("child-work", "TOOL"),
+        output={"y": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:child_work"),
+        effect="QUERY",
+        permission="workflows.child-work.dispatch",
+    )
+    call_child_tool = Tool(
+        header=_header("call-child", "TOOL"),
+        output={"note": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(
+            kind="PROCESS",
+            ref="child-proc@1",
+            result=CallResult(endings={"CHILD_DONE": "DONE"}),
+        ),
+        effect="QUERY",
+        permission="workflows.call-child.dispatch",
+    )
+    parent = Process(
+        header=_header("parent-proc", "PROCESS"),
+        start="call-child",
+        permission="workflows.parent-proc.start",
+        nodes={
+            "call-child": StepNode(
+                id="call-child",
+                tool="call-child@1",
+                in_={},
+                out={},  # never captures "ending" — the bad-but-conformant shape
+                end="DONE",
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Parent done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(responses={"mod:child_work": {"y": "hello"}}),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([child_work_tool, child_process, call_child_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(parent, "run-noending-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert "ending" in answer.says
 
 
 # ---------------------------------------------------------- state reducers (§2.3, D19) --

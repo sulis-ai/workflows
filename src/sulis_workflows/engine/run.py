@@ -1686,6 +1686,19 @@ async def _advance_process_call(
                 f"process call {node_id!r}: child ending {child_ending!r} has no "
                 "result.endings mapping (V10 should have refused this at validation time)"
             )
+        # D40: the mapped ending is always synthesised under the literal
+        # key "ending" below — if the calling STEP's own `out:` never
+        # captures it into state, the child's own ending (which can be a
+        # failure or a stop, not just a success) is unreadable by anything
+        # downstream, silently masked as this step's own plain SUCCESS the
+        # moment its controls (if any) pass regardless. V10 should have
+        # refused this at validation time; this is the runtime half.
+        if "ending" not in node.out:
+            raise EngineRefusal(
+                f"step {node_id!r} calls a process but its `out:` mapping does not "
+                "capture the result's `ending` into state (V10 should have refused "
+                "this at validation time)"
+            )
         final_run_state = {"state": drive_result.final_state or {}}
         output = {
             name: _evaluate(path, final_run_state)

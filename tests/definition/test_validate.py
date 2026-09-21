@@ -782,6 +782,32 @@ def test_v10_refused_call_missing_forbidden_ending() -> None:
     assert "V10" in _rules(findings)
 
 
+def test_v10_refused_call_not_capturing_ending_into_state() -> None:
+    """D40: every ending is correctly mapped by the Tool's own
+    result.endings (the V10 check above is satisfied), but the calling
+    STEP's own `out:` never captures the synthesised "ending" key into
+    state — a bad-but-conformant shape: nothing downstream can ever read
+    whether the call succeeded, so a FAILED/STOPPED child is silently
+    indistinguishable from a clean one."""
+
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V10" in _rules(findings)
+
+
 _SELF_CALL_TOOL = """
 api_version: sulis.workflows/v1
 kind: TOOL
