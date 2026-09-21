@@ -26,6 +26,7 @@ from sulis_workflows.definition.model import (
     Mechanism,
     OutputSpec,
     Process,
+    ProcessDefaults,
     RouteNode,
     RouteOption,
     RouteTarget,
@@ -1332,6 +1333,49 @@ def test_route_loop_budget_is_enforced_across_revisits():
     assert answer.ending == "LOOP_DONE"
 
 
+def test_route_loop_with_no_own_budget_uses_the_process_declared_default():
+    """§7.3/§15: a loop's own `budget` beats the process's `defaults.loop_budget`,
+    which beats the format default (10, `definition/defaults.py`). Before this
+    fix, `_advance_route` always passed `process_default_budget=None` to
+    `check_loop_budget`, so a loop with no `budget` of its own silently fell
+    straight through to the format default even when the process declared its
+    own — the same disagreement `explain` (`cli.py`) never had, since it
+    already implements the full 3-tier fallback."""
+
+    process = Process(
+        header=_header("loopy-process", "PROCESS"),
+        start="loopy",
+        permission="workflows.loopy.start",
+        defaults=ProcessDefaults(loop_budget=2),
+        nodes={
+            "loopy": RouteNode(
+                id="loopy",
+                when=(
+                    RouteOption(
+                        if_="true",
+                        next="loopy",
+                        loop=LoopSpec(on_exhausted=RouteTarget(end="LOOP_DONE")),
+                    ),
+                ),
+            ),
+        },
+        endings={"LOOP_DONE": Ending(outcome="SUCCESS", says="Loop finished.")},
+    )
+    records = StubRecordsAdapter()
+    ctx = _fresh_ctx(records=records)
+    answer = _run(next_(process, "run-loop-3", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.ending == "LOOP_DONE"
+    attempts = _run(
+        records.get_attempts(
+            "run-loop-3", "root", "loopy", platform_id="tenant-1", run_id="run-loop-3"
+        )
+    )
+    # The process's own defaults.loop_budget=2 permits exactly 2 loop-backs
+    # (3 attempts total). Before the fix, the format default (10) applied
+    # instead, so this would have kept looping to 11 attempts.
+    assert len(attempts) == 3
+
+
 def test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time():
     # A STEP looped back to by a ROUTE must be re-dispatched each visit,
     # not resolved from a stale prior-visit record (the same class of bug
@@ -1555,6 +1599,68 @@ def test_gate_deny_loop_budget_is_enforced_across_askings():
     )
     assert answer.ending == "GAVE_UP"
     assert answer.outcome == "STOPPED"
+
+
+def test_gate_deny_loop_with_no_own_budget_uses_the_process_declared_default():
+    """Same disagreement as the ROUTE case, for a GATE's own DENY loop-back:
+    before the fix, `_advance_gate` always passed `process_default_budget=None`
+    to `check_loop_budget`, so `defaults.loop_budget` was silently ignored."""
+
+    process = Process(
+        header=_header("gate-loop-process", "PROCESS"),
+        start="sign-off",
+        permission="workflows.gate-loop.start",
+        defaults=ProcessDefaults(loop_budget=2),
+        nodes={
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="always-deny@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(
+                        next="sign-off",
+                        loop=LoopSpec(on_exhausted=RouteTarget(end="GAVE_UP")),
+                    ),
+                },
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "GAVE_UP": Ending(
+                outcome="STOPPED", says="Gave up after too many denials."
+            ),
+        },
+    )
+    policy = StubPolicyAdapter(policy_denies={"always-deny@1"})
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=policy,
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-gate-loop-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.ending == "GAVE_UP"
+    attempts = _run(
+        records.get_attempts(
+            "run-gate-loop-2",
+            "root",
+            "sign-off",
+            platform_id="tenant-1",
+            run_id="run-gate-loop-2",
+        )
+    )
+    # defaults.loop_budget=2 permits exactly 2 loop-backs (3 attempts total).
+    # Before the fix, the format default (10) applied instead.
+    assert len(attempts) == 3
 
 
 def test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per_resolution():
@@ -1794,6 +1900,58 @@ def test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own
         )
     assert answer.ending == "COMPLETE"
     assert answer.outcome == "SUCCESS"
+
+
+def test_input_gate_is_refused_cleanly_rather_than_misrouted():
+    """WP-03a Fault 2: `kind: INPUT` gates are refused at validation time
+    (V9), but the validator is advisory — nothing stops a Process built
+    directly (as every test here does) or loaded without going through
+    `sulis-workflows validate` from reaching the engine with one. Before
+    this fix, `_advance_gate` never read `node.kind` at all: a `policy`
+    decider's PERMIT/DENY answer was evaluated as if this were an
+    APPROVAL gate, found no matching route in `on` (an INPUT gate only
+    ever declares `ANSWERED`), and raised the genuinely confusing "no
+    route declared for verdict 'PERMIT'" — naming a verdict the gate's
+    own author never wrote anywhere. The engine now recognises `kind:
+    INPUT` itself and refuses with a clear, correctly-worded reason
+    instead, the same defence-in-depth PARALLEL/JOIN/FOR_EACH already
+    have against a validator bypass."""
+
+    process = Process(
+        header=_header("input-gate-process", "PROCESS"),
+        start="ask",
+        permission="workflows.input-gate.start",
+        nodes={
+            "ask": GateNode(
+                id="ask",
+                kind="INPUT",
+                asks="What is the target date?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="always-permit@1"),),
+                answer_type="string",
+                answer_into="state.target_date",
+                on={"ANSWERED": RouteTarget(end="COMPLETE")},
+            ),
+        },
+        endings={"COMPLETE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-input-gate-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "INPUT" in answer.says
+    assert "no route declared for verdict" not in answer.says
 
 
 def test_control_fail_repair_gives_one_more_attempt_before_then():

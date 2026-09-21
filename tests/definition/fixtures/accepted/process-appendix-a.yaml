@@ -91,7 +91,7 @@ nodes:
       - policy: grounded-inquiry-sign-off@1
       - agent: review-recommendations@1
       - person: { permission: agents.recommendation.approve }
-    person_required_when: 'state.confidence == "INSUFFICIENT"'
+    person_required_when: 'state.confidence == "PARTIAL"'
     note_into: state.note
     on:
       PERMIT: { end: COMPLETE }

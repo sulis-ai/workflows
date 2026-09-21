@@ -26,7 +26,8 @@ honest, tested slice over a guessed-at complete one):
   own `scope` (§9.3) for `report()`/`decide()` to target directly. §9.1's
   `path` override is not yet supported and refuses cleanly rather than
   being silently ignored.
-- State writes: `REPLACE` reducer only (`engine/state.py`).
+- State writes: all four reducers spec §2.3 names — `REPLACE`, `MERGE`,
+  `APPEND`, `UPSERT_BY_ID` (`engine/state.py`, D19).
 - Loop budgets: `engine/routes.py`'s `check_loop_budget`, with the taken
   count read from how many attempts the looping node already has.
 - `PARALLEL`/`JOIN`/`FOR_EACH`, triggers and templates are all out of
@@ -654,6 +655,7 @@ async def _drive_scope(
                 )
             elif isinstance(node, RouteNode):
                 advance = await _advance_route(
+                    process,
                     node,
                     node_id,
                     visit_attempts,
@@ -1625,6 +1627,7 @@ async def _advance_process_call(
 
 
 async def _advance_route(
+    process: Process,
     node: RouteNode,
     node_id: str,
     attempts: list[AttemptRecord],
@@ -1690,7 +1693,11 @@ async def _advance_route(
         # `baseline` alone — not `baseline` plus any part of the unconsumed
         # slice — is the count taken strictly BEFORE this occurrence.
         budget_decision = check_loop_budget(
-            target.loop, taken_count=baseline, process_default_budget=None
+            target.loop,
+            taken_count=baseline,
+            process_default_budget=(
+                process.defaults.loop_budget if process.defaults is not None else None
+            ),
         )
         if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
             return _Advance(
@@ -1762,6 +1769,23 @@ async def _advance_gate(
     `pending_decision` is simply never consumed here, same as the
     established node-id mismatch case (`_report_gate_decision`'s own
     docstring)."""
+    if node.kind == "INPUT":
+        # WP-03a Fault 2 (D26): spec-legal (§7.6), schema- and
+        # model-accepted, but never implemented — nothing below reads
+        # `node.kind`/`answer_type`/`answer_into`/`ANSWERED` at all, so a
+        # policy/agent/person decider's PERMIT/DENY was evaluated as an
+        # APPROVAL verdict against an `on` map that only ever declares
+        # `ANSWERED`, raising a confusing "no route declared for verdict
+        # 'PERMIT'" for a definition the author never wrote that verdict
+        # into. V9 already refuses this at validation time; this is the
+        # same defence PARALLEL/JOIN/FOR_EACH already have against a
+        # caller that bypasses `sulis-workflows validate` and hands the
+        # engine a Process directly.
+        raise EngineRefusal(
+            f"gate {node_id!r}: kind INPUT is not yet executed by this "
+            "engine (spec §7.6, D26) — refused rather than misreading a "
+            "decider's verdict against the wrong route"
+        )
     person_required = node.person_required_when is not None and bool(
         _evaluate(node.person_required_when, run_state)
     )
@@ -1794,7 +1818,13 @@ async def _advance_gate(
             )
         if target.loop is not None:
             budget_decision = check_loop_budget(
-                target.loop, taken_count=prior_loop_takes, process_default_budget=None
+                target.loop,
+                taken_count=prior_loop_takes,
+                process_default_budget=(
+                    process.defaults.loop_budget
+                    if process.defaults is not None
+                    else None
+                ),
             )
             if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
                 return _Advance(

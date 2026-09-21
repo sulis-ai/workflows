@@ -836,6 +836,38 @@ def _v9_one_gate(
         )
         return  # the checks below assume a known kind
 
+    if node.kind == "INPUT":
+        # WP-03a Fault 2: `kind: INPUT` is spec-legal (§7.6) — schema and
+        # model both already accept it — but the engine has never
+        # implemented it (`_advance_gate` does not read `node.kind`,
+        # `answer_type`, `answer_into`, or the `ANSWERED` verdict), so a
+        # validated INPUT gate crashed at runtime instead of running: a
+        # policy/agent/person decider's PERMIT/DENY answer, evaluated as
+        # if this were an APPROVAL gate, has no route in `on` (INPUT gates
+        # only ever declare `ANSWERED`), so the engine raised "no route
+        # declared for verdict 'PERMIT'" — a confusing failure for a
+        # definition that had already passed validation. Refused here
+        # instead (D26, spec decision log): "an incomplete definition is
+        # invalid, not a TODO" applies to engine support the same way it
+        # applies to the definition's own shape. This is deliberately
+        # unconditional — even an otherwise well-formed INPUT gate (a
+        # real `answer_type`/`answer_into`, an `ANSWERED` route, no
+        # `INDETERMINATE` route) is refused, since the gap is engine
+        # support, not gate shape; the checks below (which are already
+        # written INPUT-aware, ready for when support lands) are skipped
+        # rather than run against a shape nothing can act on yet.
+        yield Finding(
+            rule="V9",
+            node=node_id,
+            message=(
+                f"gate {node_id!r} declares kind INPUT, which this engine "
+                "does not execute yet (see the spec's own decision log, D26) "
+                "— refused rather than validating a definition it would "
+                "crash on"
+            ),
+        )
+        return
+
     if "INDETERMINATE" in node.on:
         yield Finding(
             rule="V9",
@@ -843,7 +875,10 @@ def _v9_one_gate(
             message=f"gate {node_id!r} routes INDETERMINATE, which must pass on, not route",
         )
 
-    required_verdicts = ("PERMIT", "DENY") if node.kind == "APPROVAL" else ("ANSWERED",)
+    # Only APPROVAL reaches here today (INPUT is refused above); this stays
+    # a lookup rather than a bare tuple so it needs no change the day INPUT
+    # support lands and rejoins this shared shape check.
+    required_verdicts = {"APPROVAL": ("PERMIT", "DENY")}[node.kind]
     for verdict in required_verdicts:
         if verdict not in node.on:
             yield Finding(

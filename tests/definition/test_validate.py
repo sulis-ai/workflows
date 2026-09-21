@@ -483,6 +483,23 @@ def test_v9_refused_unknown_gate_kind() -> None:
     assert "V9" in _rules(findings)
 
 
+def test_v9_refused_input_gate_not_yet_supported() -> None:
+    """WP-03a Fault 2: `kind: INPUT` is spec-legal (§7.6) but this engine
+    does not implement it yet — `_advance_gate` never reads `node.kind`,
+    `answer_type`, `answer_into` or the `ANSWERED` verdict, so a validated
+    INPUT gate crashed at runtime instead ("no route declared for verdict
+    'PERMIT'"). Refused at validation time instead of only failing when
+    someone actually runs it — even a fully well-formed INPUT gate (a
+    real `answer_type`/`answer_into`, an `ANSWERED` route) is refused,
+    since the refusal is about engine support, not gate shape."""
+    doc = _gate_process(
+        '    { type: GATE, kind: INPUT, asks: "What is the target date?", '
+        "answer_type: string, answer_into: state.target_date, on: { ANSWERED: { end: COMPLETE } } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V9" in _rules(findings)
+
+
 def test_v9_refused_person_required_when_with_no_person_decider() -> None:
     doc = _gate_process(
         '    { type: GATE, asks: "Proceed?", deciders: [ { policy: may-run@1 } ],\n'
