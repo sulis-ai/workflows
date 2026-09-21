@@ -26,7 +26,8 @@ honest, tested slice over a guessed-at complete one):
   own `scope` (§9.3) for `report()`/`decide()` to target directly. §9.1's
   `path` override is not yet supported and refuses cleanly rather than
   being silently ignored.
-- State writes: `REPLACE` reducer only (`engine/state.py`).
+- State writes: all four reducers spec §2.3 names — `REPLACE`, `MERGE`,
+  `APPEND`, `UPSERT_BY_ID` (`engine/state.py`, D19).
 - Loop budgets: `engine/routes.py`'s `check_loop_budget`, with the taken
   count read from how many attempts the looping node already has.
 - `PARALLEL`/`JOIN`/`FOR_EACH`, triggers and templates are all out of

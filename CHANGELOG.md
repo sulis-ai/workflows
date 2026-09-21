@@ -5,13 +5,27 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
-### Fixed — `GATE kind: INPUT` refused cleanly instead of crashing at runtime (D26)
-- `kind: INPUT` gates (spec §7.6) validated but then failed at runtime with a confusing
+### Fixed
+- **D25:** the spec's own Appendix A worked example (and its mirrored fixture) declared
+  `sign-off.person_required_when: state.confidence == "INSUFFICIENT"` — a condition that could
+  never actually evaluate true in a real run, since `honest-stop` already diverts `INSUFFICIENT`
+  away before `sign-off` is ever reached. Corrected to `state.confidence == "PARTIAL"`, a value
+  `sign-off` is actually reached with; the person-required decider path (previously untested end
+  to end, since it was unreachable) now has a regression test.
+- **`GATE kind: INPUT` refused cleanly instead of crashing at runtime (D26):** `kind: INPUT` gates
+  (spec §7.6) validated but then failed at runtime with a confusing
   `"no route declared for verdict 'PERMIT'"`, since the engine never implemented them. Now
   refused outright, with a clear reason, at validation time (**V9**) and — in case validation is
   bypassed — at engine runtime too, the same defence-in-depth `PARALLEL`/`JOIN`/`FOR_EACH`
   already have. See D26 (`docs/spec/process-definition.md` §18) for the open spec questions real
   `INPUT` support would need answered first.
+
+### Docs
+- Corrected stale claims: `engine/run.py`'s module docstring said state writes support only the
+  `REPLACE` reducer (D19 implemented `MERGE`/`APPEND`/`UPSERT_BY_ID` without updating this line);
+  `engine/__init__.py` and `docs/work-packages/WP-02-execution-engine.md` said the engine "targets
+  LangGraph directly" and resumes via a LangGraph checkpointer — `engine/` imports no `langgraph`
+  anywhere and resumes by replaying durable attempt records instead (WP-03a verification pass).
 
 ## [0.12.2] — 2026-09-20
 

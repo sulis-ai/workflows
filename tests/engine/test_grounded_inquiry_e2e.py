@@ -15,19 +15,21 @@ first node forever). These tests are the regression corpus for both, and
 the first fixtures to exercise every routing branch Appendix A itself
 declares: the REVISED loop at both `after-interrogate` and
 `after-fidelity`, the DROPPED short-circuits, the honest INSUFFICIENT
-stop, all three `sign-off` decider kinds, and the RECURSIVE stub branch.
+stop, all three `sign-off` decider kinds (including the person-required
+path, D25), and the RECURSIVE stub branch.
 
-One declared branch is deliberately NOT exercised here:
-`sign-off.person_required_when: 'state.confidence == "INSUFFICIENT"'` can
-never actually evaluate true in a real run of this process, because
+D25 (WP-03a verification pass): `sign-off.person_required_when` originally
+read `state.confidence == "INSUFFICIENT"`, a condition that could never
+actually evaluate true in a real run of this process, because
 `honest-stop` already diverts `INSUFFICIENT` straight to the
 `INSUFFICIENT` ending before `recommend`/`check-fidelity`/`sign-off` are
-ever reached — found by trying to write that scenario and finding no path
-reaches it. The `person_required_when` mechanism itself is still correct
-and covered on its own terms by `tests/engine/test_gates.py`; this is
-Appendix A's own worked example declaring a condition it can never need,
-left as a finding (see the run record) rather than rewritten here, since
-fixing the example is outside this pass's scope.
+ever reached — found by trying to write a scenario for it and finding no
+path reaches it, left as a finding at the time rather than fixed. The spec
+(both its §7.6 field example and Appendix A) and this fixture now read
+`state.confidence == "PARTIAL"` instead — a value `sign-off` can actually
+be reached with (only `INSUFFICIENT` is filtered out earlier; `GROUNDED`
+and `PARTIAL` both reach `sign-off`) — so the person-required path is a
+real, reachable branch and is exercised below.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ from sulis_workflows.engine.run import (
     AnswerKind,
     EngineContext,
     NextAnswer,
+    decide,
     next_,
     report,
 )
@@ -298,6 +301,23 @@ def _report(process, run_id, answer, ctx, *, output):
     )
 
 
+def _decide(process, run_id, answer, ctx, *, verdict, subject, note=None):
+    return _run(
+        decide(
+            process,
+            run_id,
+            answer.scope or "root",
+            answer.node_id,
+            ctx,
+            inputs={"brief": BRIEF},
+            host_inputs=HOST_INPUTS,
+            verdict=verdict,
+            note=note,
+            subject=subject,
+        )
+    )
+
+
 # ---------------------------------------------------------------------------- scenarios --
 
 
@@ -389,9 +409,9 @@ def test_interrogate_revised_loop_exhausts_its_budget_and_still_converges() -> N
             "appendix_a_corpus.tools:frame_question": {
                 "framed_question": "What drove Q3 churn?"
             },
-            "appendix_a_corpus.tools:converge_confidence": {"confidence": "PARTIAL"},
+            "appendix_a_corpus.tools:converge_confidence": {"confidence": "GROUNDED"},
             "appendix_a_corpus.tools:conclude": {
-                "conclusion": {"summary": "Partial evidence of a pricing effect."}
+                "conclusion": {"summary": "Strong evidence of a pricing effect."}
             },
             "appendix_a_corpus.tools:check_recommendation_fidelity": {
                 "recommendations": [RECOMMENDATION_1],
@@ -499,8 +519,9 @@ def test_interrogate_dropped_ends_the_run_dropped_with_no_loop_taken() -> None:
 def test_insufficient_confidence_stops_honestly_before_ever_recommending() -> None:
     """4: `honest-stop` ends the run `INSUFFICIENT` (a declared `SUCCESS`
     outcome, per spec — an honest stop is not a failure) without ever
-    reaching `recommend` — the same finding that makes `sign-off`'s own
-    `person_required_when` unreachable in this worked example (module
+    reaching `recommend` — the same routing that makes `sign-off`'s
+    `person_required_when` (`state.confidence == "PARTIAL"`, D25) only
+    ever see `GROUNDED` or `PARTIAL`, never `INSUFFICIENT` (module
     docstring)."""
     registry = _registry()
     process = _process()
@@ -849,3 +870,105 @@ def test_recursive_path_stub_ends_dropped() -> None:
     )
     assert final.ending == "DROPPED"
     assert final.outcome == "SUCCESS"
+
+
+def test_sign_off_requires_person_when_confidence_is_partial() -> None:
+    """9 (D25's own regression — the branch its fix made reachable):
+    `confidence: PARTIAL` makes `sign-off.person_required_when` true. The
+    `policy` and `agent` deciders are still asked and recorded in order
+    (§7.6: "still asked and recorded, but only a person's verdict
+    counts") — both PERMIT here — but neither ends the run; only the
+    `person` decider's own `PERMIT`, via `decide()`, does."""
+    registry = _registry()
+    process = _process()
+    code_tool = ScriptedCodeToolAdapter(
+        static={
+            **_checker_passes(),
+            "appendix_a_corpus.tools:classify_inquiry": {"path": "SINGLE"},
+            "appendix_a_corpus.tools:frame_question": {
+                "framed_question": "What drove Q3 churn?"
+            },
+            "appendix_a_corpus.tools:converge_confidence": {"confidence": "PARTIAL"},
+            "appendix_a_corpus.tools:conclude": {
+                "conclusion": {"summary": "Partial evidence of a pricing effect."}
+            },
+            "appendix_a_corpus.tools:check_recommendation_fidelity": {
+                "recommendations": [RECOMMENDATION_1],
+                "verdict": "ENTAILED",
+            },
+        }
+    )
+    records = StubRecordsAdapter()
+    claims = StubClaimsAdapter()
+    agent_decisions = 0
+    person_decisions = 0
+
+    def respond(answer: NextAnswer, ctx_factory):
+        nonlocal agent_decisions, person_decisions
+        if answer.kind is AnswerKind.DECISION_STEP:
+            assert answer.node_id == "sign-off"
+            agent_decisions += 1
+            return _report(
+                process,
+                "run-e2e-9",
+                answer,
+                ctx_factory("agent:reviewer"),
+                output={
+                    "verdict": "PERMIT",
+                    "evidence": [{"path": "state.conclusion"}],
+                    "rationale": "Grounded enough to proceed, pending sign-off.",
+                },
+            )
+        if answer.kind is AnswerKind.AWAITING_DECISION:
+            assert answer.node_id == "sign-off"
+            person_decisions += 1
+            return _decide(
+                process,
+                "run-e2e-9",
+                answer,
+                ctx_factory("person:reviewer"),
+                verdict=Verdict.PERMIT,
+                subject="reviewer-1",
+                # No note: this gate's own `note_into: state.notes` targets an
+                # APPEND channel, and D24's note_into write crashes rather than
+                # refusing cleanly against one (separate finding, not this
+                # test's concern — see the run record).
+                note=None,
+            )
+        assert answer.kind is AnswerKind.TOOL_STEP, answer
+        if answer.node_id == "gather":
+            return _report(
+                process,
+                "run-e2e-9",
+                answer,
+                ctx_factory(),
+                output={"findings": [FINDING_1]},
+            )
+        if answer.node_id == "interrogate":
+            return _report(
+                process,
+                "run-e2e-9",
+                answer,
+                ctx_factory(),
+                output={"insights": [INSIGHT_1], "verdict": "SURVIVED"},
+            )
+        if answer.node_id == "recommend":
+            return _report(
+                process,
+                "run-e2e-9",
+                answer,
+                ctx_factory(),
+                output={"recommendations": [RECOMMENDATION_1]},
+            )
+        raise AssertionError(f"unexpected hand-off: {answer.node_id!r}")
+
+    final = _drive(
+        process, "run-e2e-9", registry, code_tool, records, claims, respond=respond
+    )
+    assert final.ending == "COMPLETE"
+    assert final.outcome == "SUCCESS"
+    # Proves person_required_when actually forced the person path, rather
+    # than the policy decider's own PERMIT deciding the gate outright (which
+    # would also end COMPLETE, but without ever asking agent or person).
+    assert agent_decisions == 1
+    assert person_decisions == 1
