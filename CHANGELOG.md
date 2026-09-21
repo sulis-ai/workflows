@@ -6,6 +6,12 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D29:** an attempt record's `inputs` (spec §12.2, "inputs used") was always written `{}`, for
+  every node type. Fixed where it was cheap and exact: `_record_step_result` (the shared recorder
+  for every `CODE`-mechanism dispatch and every STEP-node failure recorded before a hand-off) now
+  carries the STEP's real resolved inputs. A `report()`-completed hand-off's own SUCCESS/ERROR
+  record, and every `ROUTE`/`skip()`/GATE-decider record, remain `{}` — a verified, deliberately
+  unfixed gap needing a design decision named in D29, not guessed at.
 - **D27:** a gate's `note_into` (D24, v0.12.2) crashed with an uncaught `ReducerMismatch` when its
   target channel's reducer was `APPEND` — exactly the shape both the spec's §7.6 example and
   Appendix A's own worked example used. The engine recomputes and re-applies a gate's note on

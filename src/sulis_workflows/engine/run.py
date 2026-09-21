@@ -1208,9 +1208,17 @@ async def _record_step_result(
     key = AttemptKey(
         run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
     )
+    # §12.2: "inputs used" — the same resolved inputs `_advance_step` already
+    # computed (and, for a hand-off, shows the caller via `resolved_inputs`)
+    # to decide whether this dispatch could even be attempted. `run_state`
+    # is unchanged since then (this function is called synchronously within
+    # the same `_advance_step`/`_record_step_result` pass, before any state
+    # write from THIS attempt is applied), so recomputing here is exact, not
+    # a guess.
+    resolved_inputs, _ = _resolve_inputs_preview(node, tool, run_state)
     record = AttemptRecord(
         key=key,
-        inputs={},
+        inputs=resolved_inputs,
         output=(
             dict(result.output)
             if result.outcome is StepOutcome.SUCCESS and result.output
