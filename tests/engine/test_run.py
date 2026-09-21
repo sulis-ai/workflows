@@ -2348,6 +2348,108 @@ def test_input_gate_is_refused_cleanly_rather_than_misrouted():
     assert "no route declared for verdict" not in answer.says
 
 
+def test_external_mechanism_step_is_refused_cleanly_rather_than_misrouted_as_a_skill():
+    """D34: spec §4.3/§12.1 — `EXTERNAL` is meant to be run BY THE ENGINE
+    (through a host adapter), the same side of the split as `CODE`. Before
+    this fix, `_advance_step`'s generic `!= "CODE"` branch treated it
+    exactly like a `SKILL` Tool, silently handing it off as a `TOOL_STEP`
+    the caller's agent session could never actually perform. V17 already
+    refuses this at validation time; this is the validator-bypass case."""
+    external_tool = Tool(
+        header=_header("notify-external", "TOOL"),
+        output={"value": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="EXTERNAL", ref="adapter:notify"),
+        effect="SIDE_EFFECT",
+        inputs={},
+        permission="workflows.notify-external.dispatch",
+    )
+    process = Process(
+        header=_header("external-process", "PROCESS"),
+        start="notify",
+        permission="workflows.external-process.start",
+        nodes={
+            "notify": StepNode(
+                id="notify", tool="notify-external@1", in_={}, out={}, end="DONE"
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([external_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-external-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "EXTERNAL" in answer.says
+    assert answer.says != "Waiting on notify-external@1 to run."
+
+
+def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted():
+    """D34: `TOOL` (composite — child Tools run in order over shared
+    values, spec §4.3) is also meant to be run BY THE ENGINE, but has no
+    `ref` at all (only `composes`). Before this fix, the same generic
+    hand-off branch produced a `TOOL_STEP` answer with `instructions_ref`
+    silently `None` and every one of `composes`'s children dropped on the
+    floor — refused instead, the validator-bypass case for V17."""
+    from sulis_workflows.definition.model import ComposeItem
+
+    composite_tool = Tool(
+        header=_header("composite-echo", "TOOL"),
+        output={"value": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(
+            kind="TOOL",
+            composes=(
+                ComposeItem(tool="echo@1", inputs={"value": "inputs.value"}, output={}),
+            ),
+        ),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.composite-echo.dispatch",
+    )
+    process = Process(
+        header=_header("composite-process", "PROCESS"),
+        start="run-composite",
+        permission="workflows.composite-process.start",
+        nodes={
+            "run-composite": StepNode(
+                id="run-composite",
+                tool="composite-echo@1",
+                in_={},
+                out={},
+                end="DONE",
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([composite_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-composite-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "TOOL" in answer.says
+
+
 def test_control_fail_repair_gives_one_more_attempt_before_then():
     from sulis_workflows.definition.model import ControlFail, ControlRef, Profile
 

@@ -204,6 +204,7 @@ def validate_tool(tool: model.Tool, registry: Registry) -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(v3_tool_controls(tool, registry))
     findings.extend(v3_checker_examples(tool))
+    findings.extend(v17_mechanism_kinds(tool))
     for control_ref in tool.controls:
         if control_ref.kind in ("conventions", "fitness", "policy"):
             _, err = _resolve(registry, "CONTROL", control_ref.ref)
@@ -1203,3 +1204,46 @@ def v16_state_channels(process: model.Process) -> list[Finding]:
                 )
             )
     return findings
+
+
+# ------------------------------------------------------------------------ V17 --
+
+_NOT_YET_EXECUTABLE_MECHANISM_KINDS = ("EXTERNAL", "TOOL")
+
+
+def v17_mechanism_kinds(tool: model.Tool) -> list[Finding]:
+    """`mechanism.kind: EXTERNAL` or `TOOL` (composite) — spec §4.3, §12.1
+    ("CODE, EXTERNAL and deterministic PROCESS steps ... are run by the
+    engine before it answers"). Both are real, schema- and model-accepted
+    mechanism kinds, but nothing in `engine/run.py`'s dispatch-or-defer
+    decision (`_advance_step`) branches on either one: a StepNode whose
+    Tool declares either kind falls into the generic non-`CODE` branch and
+    is silently handed off to the caller's agent session as a `TOOL_STEP`
+    — exactly as if it were a `SKILL` Tool, which is wrong for both
+    (`EXTERNAL` should never need a hand-off at all; `TOOL`-composite has
+    no `ref` for `instructions_ref` to even carry, and its own `composes`
+    children are never dispatched by anyone). Refused rather than
+    implemented for this pass, the same "refuse rather than guess"
+    precedent D26 (`kind: INPUT`) already set: `EXTERNAL` needs a new
+    domain port this format's spec does not yet describe the shape of
+    ("per adapter" — spec's own words — names no operational contract);
+    `TOOL`-composite needs the spec's own undefined "shared values" and
+    intermediate-hand-off semantics settled first. Both are proposed spec
+    questions, not code guesses."""
+
+    if tool.mechanism.kind in _NOT_YET_EXECUTABLE_MECHANISM_KINDS:
+        return [
+            Finding(
+                rule="V17",
+                message=(
+                    f"tool {tool.header.id!r} declares mechanism.kind: "
+                    f"{tool.mechanism.kind} — not yet executable by this "
+                    "engine (spec §4.3/§12.1, D34)"
+                ),
+                fix=(
+                    "use a CODE, SKILL, or PROCESS mechanism until EXTERNAL/TOOL "
+                    "(composite) dispatch is implemented"
+                ),
+            )
+        ]
+    return []

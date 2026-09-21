@@ -1089,3 +1089,56 @@ def test_v16_refused_upsert_by_id_channel_with_no_key() -> None:
     )
     findings = validate(doc, registry=_base_registry(_INTERROGATE_TOOL))
     assert "V16" in _rules(findings)
+
+
+# ------------------------------------------------------------------------------ V17 --
+
+
+def test_v17_accepted_code_mechanism() -> None:
+    findings = validate(ECHO_TOOL, registry=_base_registry())
+    assert "V17" not in _rules(findings)
+
+
+def test_v17_refused_external_mechanism() -> None:
+    """D34: spec §4.3/§12.1 — EXTERNAL is a real mechanism kind meant to
+    run BY THE ENGINE (through a host adapter), but nothing in the engine
+    implements dispatch for it; refused rather than silently misrouted as
+    a SKILL hand-off."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: notify-external
+version: 1.0.0
+title: Notify (external)
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism: { kind: EXTERNAL, ref: "adapter:notify" }
+effect: SIDE_EFFECT
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V17" in _rules(findings)
+
+
+def test_v17_refused_tool_composite_mechanism() -> None:
+    """D34: TOOL (composite) is a real mechanism kind — child Tools run in
+    order over shared values (spec §4.3) — but nothing in the engine
+    dispatches `composes`; refused rather than silently misrouted as an
+    opaque SKILL hand-off with no instructions."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: composite-echo
+version: 1.0.0
+title: Composite echo
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: TOOL
+  composes:
+    - { tool: echo@1, inputs: { value: inputs.value }, output: { value: value } }
+effect: QUERY
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V17" in _rules(findings)

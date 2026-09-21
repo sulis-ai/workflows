@@ -6,6 +6,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D34:** a `mechanism.kind: EXTERNAL` or `TOOL` (composite) Tool was silently dispatched as if it
+  were a `SKILL` — handed off to the caller's agent session as an ordinary `TOOL_STEP` (for
+  `TOOL`, one with no instructions at all, since this kind has no `ref`) — though spec §12.1
+  states both belong on the engine-run side of the dispatch split, alongside `CODE`. Now refused
+  at validation (**V17**, new) and engine runtime, rather than implemented (both would require
+  inventing spec-silent operational details — a host-adapter port shape for `EXTERNAL`, "shared
+  values" semantics for `TOOL`-composite — not guessed at here; see D34's own proposed spec
+  clarifications).
 - **D33:** `loop.counts` (`PASSES`/`FAILURES`, spec §7.3/§15) was accepted, parsed, and never
   read — every loop take counted toward its budget regardless of verdict, exactly `PASSES`
   semantics, whatever `counts` said. Now implemented for `GATE` loops (a take counts only when
