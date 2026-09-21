@@ -215,6 +215,39 @@ def test_full_run_reaches_complete_via_step_route_gate():
     assert answer.outcome == "SUCCESS"
 
 
+def test_code_step_attempt_record_carries_its_real_resolved_inputs():
+    """§12.2: an attempt record's `inputs` is "inputs used", not an empty
+    placeholder. Before this fix, every `AttemptRecord` in run.py was built
+    with `inputs={}` regardless of what was actually resolved and dispatched
+    — this covers the inline `CODE`-mechanism dispatch path (`_record_step_result`,
+    shared by every STEP-attempt recording site), where the real resolved
+    inputs were already computed to decide whether dispatch could even be
+    attempted, then discarded rather than recorded."""
+    records = StubRecordsAdapter()
+    process = _process()
+    _run(
+        next_(
+            process,
+            "run-inputs-1",
+            "root",
+            _fresh_ctx(records=records),
+            inputs={"question": "why did it fail"},
+            host_inputs={},
+        )
+    )
+    attempts = _run(
+        records.get_attempts(
+            "run-inputs-1",
+            "root",
+            "classify",
+            platform_id="tenant-1",
+            run_id="run-inputs-1",
+        )
+    )
+    assert len(attempts) == 1
+    assert attempts[0].inputs == {"question": "why did it fail"}
+
+
 def test_permission_denied_ends_forbidden():
     process = _process()
     policy = StubPolicyAdapter(denies={"workflows.small-process.start"})
