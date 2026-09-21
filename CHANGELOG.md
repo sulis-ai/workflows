@@ -6,6 +6,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D40:** a `PROCESS`-mechanism call whose calling STEP never captured the synthesised `ending`
+  output into state could have its child's own `FAILED`/`STOPPED` ending silently masked as the
+  step's own plain `SUCCESS` — nothing downstream could ever read what the child actually did.
+  This is the unambiguous half of spec §9.1's own "the calling step MUST route every value of
+  `ending`" (D36 found the fuller requirement genuinely unimplemented and left it that way, but
+  the field is always the literal, engine-hardcoded key `"ending"`, not something to guess at).
+  **V10** now refuses a call whose `out:` doesn't map it; `_advance_process_call` refuses the same
+  shape at runtime.
 - **D39:** spec §9.1's own worked example used `mechanism.inputs: { brief: brief }` (a bare,
   unqualified name) — the only place in this entire document, or in the real corpus, that a
   `mechanism.inputs` path is not fully qualified (`state.*`/`inputs.*`/`host.*`/`steps.*`, the

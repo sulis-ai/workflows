@@ -1,0 +1,154 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M32TSD393Q5J8MAGHK364APE",
+  "started_at": "2026-09-21T17:05:00Z",
+  "completed_at": "2026-09-21T20:33:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — close the masked-failure finding flagged (not fixed) by the previous PR, per the principal's instruction to fix any issue however small",
+  "branch": "fix/v10-process-call-must-capture-ending",
+  "summary_for_principal": "This closes the one loose end from the last round — a real gap I found but left alone at the time, since it wasn't what you'd asked for.\n\nWhen one governed process calls another, the called one can end well, badly, or stop partway. Before this fix, if the author of the calling process forgot to capture that outcome, nothing downstream could ever know — a badly-ended call looked identical to a clean one. That's now refused, the same way this system already refuses other silently-dropped values.\n\nThis was closeable now because the field in question is always named the same, fixed thing internally. An earlier pass had judged the fuller version of this problem too ambiguous and correctly left it alone — guessing at an author's own naming would have been worse than the gap.\n\nThree existing tests needed a one-line addition each to keep passing.\n\nFull test suite: 414 passed, 2 new.\n\nNumbered actions:\n1. Nothing needs deciding — done and verified.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Matching runtime EngineRefusal in _advance_process_call, in case validation is bypassed — the same validator-plus-runtime pairing every comparable fix this session has used."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V10 accepted/refused fixture pair for the new check."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test for the runtime refusal (confirmed reaching a plain DONE, not FAILED, before the fix — the exact masked-success shape this closes); three pre-existing PROCESS-mechanism tests each needed a one-line out: addition to keep passing, since they reached the newly-guarded code path without previously capturing \"ending\" (harmlessly, for what each was actually testing)."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D40 added to §18, explicitly narrowing and partially closing D36's own earlier-recorded, still-open finding."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D40."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Fix any issue, however small.\" A standing instruction, given after the principal pointed out that a prior reply of mine had wrongly asked them to weigh in on a technical decision (whether to fix this exact finding) that was mine to make, not theirs.",
+    "read_as": "Fix the specific, already-identified finding from the previous PR (docs/runs/01M32EDBYZEZGG8VNWT0E5BMWA.agent-run.json's own untouched[] entry, 'process-call-failure-can-be-masked-as-success') now, on my own technical judgement about scope and approach, without asking further questions the principal cannot evaluate.",
+    "filled_in": [
+      {
+        "gap": "The finding as originally flagged didn't specify HOW to fix it — matching D36's own earlier framing ('the calling step MUST route every value of ending'), which is a materially bigger requirement (proving every possible value is actually branched on) than what D36 itself judged closeable at the time ('would mean guessing which Tool.output field carries the ending value').",
+        "assumed": "Close only the narrower, unambiguous half: require the calling step's own out: mapping to CAPTURE the synthesised ending into state at all (a purely structural, zero-guesswork check, since the engine always uses the literal key \"ending\"), not the fuller 'every value is provably routed on' requirement, which still needs the harder work D36 already flagged and left open.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now; defer the expensive guess' — the narrower check closes the concrete failure shape actually found (a FAILED child reported as plain SUCCESS) without inventing exhaustiveness-proof machinery this pass was not asked to build.",
+        "reversal_cost": "None avoided — a future pass building the fuller requirement subsumes this one without needing to undo it.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Adding an engine-level EngineRefusal for this shape (matching this session's own established validator-plus-runtime-refusal pairing) breaks any existing test whose PROCESS-mechanism call reaches the newly-guarded code path without previously capturing \"ending\" — found, by running the suite, to be 3 of 5 such tests in tests/engine/test_run.py.",
+        "assumed": "Fix the 3 affected tests (a one-line out: mapping addition each, to a state channel nothing else in those tests reads) rather than skip the engine-level refusal to avoid touching them — consistency with the repo's own dominant convention (confirmed by checking V16's own matching runtime check in engine/state.py) was judged worth the small, mechanical test diff.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'survive the bad-but-conformant attack' and this session's own repeated precedent (D26, D33, D34, D38, D39) of pairing a validator rule with a matching runtime refusal so the check holds even if validation is skipped.",
+        "reversal_cost": "Low — each touched test's own one-line addition is independent of what it actually verifies; reverting is a clean three-line diff.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D40 — V10 now refuses a PROCESS-mechanism call whose out: mapping never captures the synthesised `ending` into state — the unambiguous half of spec §9.1's own 'the calling step MUST route every value of ending', left open by D39's own flagged finding.",
+      "problem": "A process call whose child ends badly (FAILED, STOPPED, or an engine-synthesised ending like FORBIDDEN) can be reported as the calling step's own plain SUCCESS when the calling Tool has no controls (or controls that pass regardless), because control-checking runs against the Tool's own mapped output dict — and if that dict's 'ending' key was never captured into state by the calling step's out: mapping, nothing downstream can ever read it, whatever it says.",
+      "options_rejected": [
+        "Implement the fuller requirement (proving the calling process actually branches on every possible ending value, not merely captures it) in the same pass: rejected — needs exhaustiveness-proof machinery comparable to V6's own ROUTE-coverage proof, extended across an intervening STEP into whatever (if anything) follows it; a materially bigger, more careful undertaking than this pass's own scope, and D36's own 'guessing which field' concern still genuinely applies to that fuller version (an author's own structure downstream of the capture is not itself constrained to even be a ROUTE)."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — both the validator rule and the engine refusal are simple additive checks; a future pass building the fuller requirement subsumes this one without needing to undo it.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a PROCESS-mechanism call whose child ends FAILED but whose calling step's out: mapping is {} reaches a plain DONE ending at the parent level, with the child's own failure nowhere visible.",
+          "source": "tests/engine/test_run.py::test_process_call_not_capturing_ending_is_refused_cleanly, run against the unfixed engine this session — reached ending=='DONE', not 'FAILED'."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the identical scenario is refused cleanly (ending=='FAILED', says naming 'ending').",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The new engine-level refusal, run against the existing PROCESS-mechanism test suite unmodified, broke exactly 3 of 5 existing tests (the 2 that return before ever reaching a real child dispatch — depth-exhausted, no-permission — were unaffected); each of the 3 affected tests needed only a one-line out: addition to a state channel nothing else in it reads.",
+          "source": "python -m pytest tests/engine/test_run.py -k process_call, run before and after each incremental change this session, to isolate exactly which tests the new check touched."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "examples/recursive-refinement/ (the translation whose own building surfaced this finding) is entirely unaffected — every one of its PROCESS-mechanism calling steps already captures \"ending\" into state.",
+          "source": "tests/examples/test_recursive_refinement.py (all 20 tests) and a direct sulis-workflows validate run, both re-run after this fix, both clean."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 414 tests (412 pre-existing + 2 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants the fuller 'every ending value is actually routed on' requirement built for real — needs the exhaustiveness-proof machinery this decision's own rejected option names, not guessed at here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "414 passed, 0 failed (412 pre-existing + 2 new). ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "process-call-ending-not-provably-routed-on",
+      "location": "definition/validate.py (v10_calls), engine/run.py (_advance_process_call)",
+      "divergence": "A calling step that DOES capture 'ending' into state but never actually branches on it (e.g. an unconditional next:/end: regardless of the captured value) is still not caught — only the 'never captured at all' shape is refused now.",
+      "governed_exception": true,
+      "why_not_now": "Closing this needs exhaustiveness-proof machinery comparable to V6's own ROUTE-coverage check, extended to reach across an intervening STEP into whatever (if anything) follows it — a materially larger, more careful undertaking than this pass, and D36's own original 'guessing which field carries meaning downstream' concern still applies to this fuller version specifically."
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "A PROCESS-mechanism call whose calling step never captures the child's own outcome into state is now refused, at validation time or by the engine itself if validation is skipped — closing the specific masked-success shape the previous PR found and flagged."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "The fuller 'every ending value is actually routed on' requirement (spec §9.1's own full sentence) remains unimplemented.",
+        "untouched_id": "process-call-ending-not-provably-routed-on",
+        "trigger": "The principal wants this built for real.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "The concrete, previously-found failure shape (a captured-nowhere failure) is now closed; a captured-but-unchecked failure is a narrower, less severe residual risk — the value is at least visible in state for a human or a later process to inspect, even if nothing currently forces a branch on it."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "No action required. The finding flagged in the previous PR is now closed to the extent it can be without inventing new, undecided design (the exhaustiveness-proof machinery named above).",
+      "reason": "This was a self-contained, fully-scoped, fully-tested fix with no open questions.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

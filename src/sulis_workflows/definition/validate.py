@@ -1086,6 +1086,35 @@ def v10_calls(process: model.Process, registry: Registry) -> list[Finding]:
                             f"{sorted(missing)}",
                         )
                     )
+            # D40: §9.1's "the calling step MUST route every value of
+            # `ending`" (its own sentence right after the `result.endings`
+            # rule above) has no dedicated check — the engine always
+            # synthesises the mapped ending under the literal output key
+            # "ending" (`engine/run.py`'s own `_advance_process_call`,
+            # `output["ending"] = endings_map[child_ending]`), so this much
+            # of the requirement is mechanically checkable, not the
+            # guesswork D36 found the fuller requirement to be: a Tool's
+            # `out:` mapping that never captures "ending" into state makes
+            # it categorically impossible for anything downstream to ever
+            # read it, silently turning a failed or stopped child process
+            # into an unremarkable step SUCCESS the moment the calling
+            # Tool's own controls (if any) pass regardless. Proving every
+            # VALUE is actually routed on (the fuller reading of the spec's
+            # own sentence) still needs the harder, undecided work D36's
+            # own proposed clarification names — this only closes the
+            # unambiguous "not captured at all" half.
+            if "ending" not in node.out:
+                findings.append(
+                    Finding(
+                        rule="V10",
+                        node=node_id,
+                        message=(
+                            f"step {node_id!r} calls a process but its `out:` mapping "
+                            "does not capture the result's `ending` into state — nothing "
+                            "downstream can ever route on whether the call succeeded"
+                        ),
+                    )
+                )
 
         if self_reachable and node.on_depth_exhausted is None:
             findings.append(
