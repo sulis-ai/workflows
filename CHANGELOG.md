@@ -6,6 +6,12 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D33:** `loop.counts` (`PASSES`/`FAILURES`, spec §7.3/§15) was accepted, parsed, and never
+  read — every loop take counted toward its budget regardless of verdict, exactly `PASSES`
+  semantics, whatever `counts` said. Now implemented for `GATE` loops (a take counts only when
+  the resolving verdict is `DENY` — unambiguous, since `DECIDED` only ever carries `PERMIT`/
+  `DENY`) and refused, at validation (**V8**) and engine runtime, for `ROUTE` loops, where a
+  `when` branch has no engine-visible "because a check failed" signal to read.
 - **D32:** `note_into` (D24) only ever captured a `person` decider's own `note` — a `policy`- or
   `agent`-decided verdict left its declared target channel untouched, silently dropping the
   decider's own reasoning exactly like D24's original bug, just for two of the three decider

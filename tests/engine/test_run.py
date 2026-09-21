@@ -1928,6 +1928,135 @@ def test_gate_deny_loop_with_no_own_budget_uses_the_process_declared_default():
     assert len(attempts) == 3
 
 
+def test_gate_loop_counts_failures_only_counts_deny_takes_toward_the_budget():
+    """D33: §7.3/§15's `counts: FAILURES` ("only when taken because a check
+    failed") is unambiguous for a GATE — `DECIDED` only ever carries PERMIT
+    or DENY, and DENY is ADR-028's own negative outcome. Before this fix,
+    `loop.counts` was accepted, parsed, and never read anywhere: every take
+    counted toward the budget regardless of verdict, exactly `PASSES`
+    semantics, whatever `counts` actually said.
+
+    Both PERMIT and DENY loop back to the same gate here (unusual, but
+    structurally valid) sharing one `LoopSpec` with `budget: 2,
+    counts: FAILURES` — proving PERMIT-driven takes never count (however
+    many happen) and only the 3rd DENY-driven take exhausts the budget."""
+    shared_loop = LoopSpec(
+        budget=2, counts="FAILURES", on_exhausted=RouteTarget(end="GAVE_UP")
+    )
+    process = Process(
+        header=_header("gate-loop-failures-process", "PROCESS"),
+        start="check",
+        permission="workflows.gate-loop-failures.start",
+        nodes={
+            "check": GateNode(
+                id="check",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="scripted@1"),),
+                on={
+                    "PERMIT": RouteTarget(next="check", loop=shared_loop),
+                    "DENY": RouteTarget(next="check", loop=shared_loop),
+                },
+            ),
+        },
+        endings={
+            "GAVE_UP": Ending(
+                outcome="STOPPED", says="Gave up after too many denials."
+            ),
+        },
+    )
+
+    verdicts = [
+        Verdict.PERMIT,
+        Verdict.PERMIT,
+        Verdict.DENY,
+        Verdict.PERMIT,
+        Verdict.DENY,
+        Verdict.PERMIT,
+        Verdict.DENY,
+    ]
+    call_count = {"n": 0}
+
+    class ScriptedVerdictPolicyAdapter:
+        def __init__(self):
+            self.identity = StubPolicyAdapter().identity
+
+        async def authorize(self, permission, *, identity, platform_id, run_id):
+            return PolicyDecision(verdict=Verdict.PERMIT)
+
+        async def evaluate_policy(
+            self, ref, *, reviewing, identity, platform_id, run_id
+        ):
+            verdict = verdicts[call_count["n"]]
+            call_count["n"] += 1
+            return PolicyDecision(
+                verdict=verdict, rationale=f"scripted:{verdict.value}"
+            )
+
+    ctx = EngineContext(
+        policy=ScriptedVerdictPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(
+            process,
+            "run-gate-loop-failures-1",
+            "root",
+            ctx,
+            inputs={},
+            host_inputs={},
+        )
+    )
+    assert answer.ending == "GAVE_UP"
+    assert answer.outcome == "STOPPED"
+    # 2 PERMITs (never counted) + 3 DENYs (the 3rd exhausts budget=2).
+    assert call_count["n"] == 7
+
+
+def test_route_loop_counts_failures_is_refused_cleanly_rather_than_misapplied():
+    """D33: the validator-bypass case for V8's `counts: FAILURES` refusal —
+    a ROUTE's own `when` branch has no engine-visible "because a check
+    failed" signal, unlike a GATE's DENY verdict, so this is refused rather
+    than silently treated as PASSES (or guessed at some other way)."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "after-classify": RouteNode(
+                id="after-classify",
+                when=(
+                    RouteOption(
+                        if_='state.verdict == "A"',
+                        next="classify",
+                        loop=LoopSpec(budget=3, counts="FAILURES"),
+                    ),
+                    RouteOption(if_='state.verdict == "B"', end="DROPPED"),
+                ),
+            ),
+        }
+    )
+    answer = _run(
+        next_(
+            process,
+            "run-route-loop-failures-1",
+            "root",
+            _fresh_ctx(),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "FAILURES" in answer.says
+    assert "after-classify" in answer.says
+
+
 def test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per_resolution():
     """D22: the D20/D21 bug class, found a third time — this time in
     `_advance_gate`. `test_gate_deny_loop_budget_is_enforced_across_askings`

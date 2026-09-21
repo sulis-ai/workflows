@@ -1731,6 +1731,19 @@ async def _advance_route(
 
     assert target is not None
     if target.loop is not None:
+        if target.loop.counts == "FAILURES":
+            # D33: unlike a GATE (DECIDED only ever carries PERMIT/DENY —
+            # DENY unambiguously means ADR-028's own "check failed"), a
+            # ROUTE's `when` branch is an arbitrary state expression with
+            # no engine-visible "this is a failure" signal at all. Refusing
+            # rather than guessing which branch "counts" — V8 already
+            # refuses this at validation time; this is the runtime half,
+            # in case validation is bypassed.
+            raise EngineRefusal(
+                f"route {node_id!r}: loop.counts: FAILURES is not supported for a "
+                "ROUTE loop (D33) — only a GATE's DENY verdict is an unambiguous "
+                "'because a check failed' signal; a ROUTE's `when` branch has none"
+            )
         # `baseline` is exactly how many times this loop has been taken
         # before this occurrence: every route visit before the final one in
         # a loop's own visit sequence takes the loop by construction (a
@@ -1864,25 +1877,40 @@ async def _advance_gate(
                 f"{gate_decision.verdict.value!r}"
             )
         if target.loop is not None:
-            budget_decision = check_loop_budget(
-                target.loop,
-                taken_count=prior_loop_takes,
-                process_default_budget=(
-                    process.defaults.loop_budget
-                    if process.defaults is not None
-                    else None
-                ),
+            # D33: §7.3/§15's `counts: FAILURES` ("only when taken because
+            # a check failed") is unambiguous for a GATE: DECIDED only ever
+            # carries PERMIT or DENY (never INDETERMINATE), and DENY is
+            # ADR-028's own negative outcome — the "check failed" case a
+            # `policy`/`agent`/`person` decider can produce. A take this
+            # loop's own `counts` says shouldn't count skips the budget
+            # check entirely, rather than being silently exhausted by a
+            # failure count it was never supposed to be bound by.
+            loop_counts = target.loop.counts or fmt_defaults.LOOP_COUNTS
+            counts_this_take = (
+                loop_counts != "FAILURES" or gate_decision.verdict is Verdict.DENY
             )
-            if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
-                return _Advance(
-                    next_node_id=_resolve_route_target(budget_decision.on_exhausted),
-                    state=decided_state,
-                    visit_attempts_used=len(attempts),
+            if counts_this_take:
+                budget_decision = check_loop_budget(
+                    target.loop,
+                    taken_count=prior_loop_takes,
+                    process_default_budget=(
+                        process.defaults.loop_budget
+                        if process.defaults is not None
+                        else None
+                    ),
                 )
+                if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
+                    return _Advance(
+                        next_node_id=_resolve_route_target(
+                            budget_decision.on_exhausted
+                        ),
+                        state=decided_state,
+                        visit_attempts_used=len(attempts),
+                    )
             return _Advance(
                 next_node_id=_resolve_route_target(target),
                 state=decided_state,
-                took_loop=True,
+                took_loop=counts_this_take,
                 visit_attempts_used=len(attempts),
             )
         return _Advance(

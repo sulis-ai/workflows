@@ -1,0 +1,199 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M31P1V8XGF3Z369QJ332WGSB",
+  "started_at": "2026-09-21T10:00:00Z",
+  "completed_at": "2026-09-21T10:45:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), loop.counts (PASSES/FAILURES)",
+  "branch": "fix/loop-counts-failures",
+  "summary_for_principal": "This closes another sub-part of the same checklist item as the last three PRs (declared settings the system accepts but doesn't fully act on).\n\nA loop in a process can be set to give up after too many repeats. The format lets an author say those repeats should only count when a check actually failed, not every time the loop runs — but that setting was silently ignored everywhere; every repeat counted, no matter what was declared.\n\nFixed where it's genuinely well-defined: when a decision point (not a plain routing choice) is what triggers the loop, 'a check failed' has one clear meaning — a decision that says no. That case now works correctly. For an ordinary routing choice (an if/then branch on some value), there's no reliable way for the system to know which branch represents 'a check failed' versus an unrelated path, so declaring that setting there is now refused with a clear message rather than silently doing the wrong thing or guessing.\n\nFull test suite: 371 passed, 4 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Two larger, riskier sub-parts of this item remain, plus three unrelated items.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "V8 extended to refuse loop.counts: FAILURES on a ROUTE loop at validation time, mirroring the engine-runtime refusal."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression tests for GATE FAILURES semantics and the ROUTE refusal, both confirmed failing before the fix."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V8 fixtures for the ROUTE refusal (accepted PASSES, refused FAILURES)."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D33 added to §18 (MADR form)."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D33."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi)'s 'inert accepted fields' half: a background research pass found loop.counts (PASSES/FAILURES) accepted, parsed, and never read anywhere — every loop take counts toward its budget regardless of verdict.",
+    "read_as": "Determine whether 'because a check failed' has an engine-derivable meaning at all for the two places a loop budget is actually enforced (ROUTE, GATE), implement it where it does, and refuse rather than guess where it doesn't — rather than either implementing a fragile heuristic for both, or leaving the whole field undocumented as equally inert everywhere.",
+    "filled_in": [
+      {
+        "gap": "The spec's 'because a check failed' is not defined in terms of any specific engine-visible signal — it's a plain-language description that happens to map cleanly onto GATE's own ADR-028 verdict vocabulary but not onto ROUTE's arbitrary state expressions.",
+        "assumed": "For GATE: a DENY verdict IS 'a check failed' — DECIDED only ever carries PERMIT or DENY, and DENY is ADR-028's own negative outcome, so no invention is needed. For ROUTE: nothing in a `when` branch's own shape tells the engine whether it represents a failure, so implementing FAILURES there would require guessing at author intent from branch naming or condition shape — refused instead, following the same 'refuse rather than guess' precedent D26 (kind: INPUT) and D27 (note_into's reducer restriction) already established this session.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'fail closed' and 'survive the bad-but-conformant attack' — a heuristic that infers 'failure' from a when-branch's condition text would itself be the kind of invented, unstated rule these principles refuse to let code guess at.",
+        "reversal_cost": "Low for both halves — the GATE implementation is a local conditional with no schema change; the ROUTE refusals are early-return checks a future pass (with a principal-approved schema mechanism for marking a failure branch) could remove without touching anything else.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Whether a take that doesn't count under FAILURES semantics should still be subject to the budget check at all, or skip it entirely, isn't stated by the spec's own two-sentence description.",
+        "assumed": "Skip the budget check entirely for a non-counting take — the budget exists to bound repeated FAILURES specifically ('only when taken because a check failed' describes what's being limited), so a passing take should never be blocked by a failure count it isn't part of.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "The plain reading of 'only when taken because a check failed' as describing the budget's own scope of concern, not merely which takes get tallied while all takes remain subject to the same ceiling.",
+        "reversal_cost": "Low — a one-line conditional guarding the existing check_loop_budget call.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D33 — loop.counts: FAILURES is implemented for a GATE's own looping verdict route (a take counts only when the resolving verdict is DENY) and refused, at both validation (V8) and engine runtime, for a ROUTE loop.",
+      "problem": "loop.counts was accepted, parsed, and carried by every LoopSpec, but nothing in engine/routes.py or engine/run.py ever read it — every loop take counted toward its budget regardless of verdict, exactly PASSES semantics, whatever counts actually said.",
+      "options_rejected": [
+        "Infer 'failure' from a ROUTE when-branch's own naming convention (e.g. a condition referencing a .verdict/.passed-shaped path): rejected — fragile, guesses at author intent from string shape, breaks the moment a real condition doesn't match the guessed pattern.",
+        "Add a new schema field marking a ROUTE when option as the failure branch: rejected for this pass — new schema surface decided unilaterally, without the worked-example precedent this format's other decisions have had; left as a proposed future spec change instead."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low for both halves — see interpretation.filled_in above.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "No existing fixture or worked example declares loop.counts at all (neither PASSES nor FAILURES, on either ROUTE or GATE) — confirmed by a repo-wide grep before implementing, so the ROUTE refusal is a pure narrowing with nothing to migrate.",
+          "source": "grep -rn 'counts:' tests/definition/fixtures/ docs/spec/process-definition.md src/sulis_workflows/definition/, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a GATE looping on both PERMIT and DENY under a shared budget=2/counts=FAILURES LoopSpec exhausted after only 3 total takes (2 PERMIT + 1 DENY) — PASSES-equivalent behaviour regardless of the declared counts.",
+          "source": "tests/engine/test_run.py::test_gate_loop_counts_failures_only_counts_deny_takes_toward_the_budget, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same scenario runs the full scripted 7-call sequence, exhausting only on the 3rd DENY, with PERMIT-driven takes never counted or blocked.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a ROUTE loop declaring counts: FAILURES silently ran to the format's own default on_exhausted ending (ESCALATED) rather than being refused.",
+          "source": "tests/engine/test_run.py::test_route_loop_counts_failures_is_refused_cleanly_rather_than_misapplied, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same ROUTE loop is refused cleanly (FAILED ending, EngineRefusal naming the node and FAILURES) at engine runtime, and V8 refuses the equivalent YAML at validation time.",
+          "source": "Same test plus tests/definition/test_validate.py::test_v8_refused_route_loop_counts_failures, both passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 371 tests (367 pre-existing + 4 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants ROUTE-level FAILURES support after all — needs a schema-level decision (a new field marking a when option as the failure branch, or some other mechanism) named in this decision's own rejected options, not guessed at here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "371 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "step-on-control-fail-loop-unenforced",
+      "location": "engine/run.py (on_control_fail.then.loop's budget/on_exhausted/counts are validated syntactically by V8 but never read at runtime — repair uses a separate _repair_count/_repair_budget mechanism entirely)",
+      "divergence": "A STEP's own on_control_fail.then.loop remains completely unenforced, counts included.",
+      "governed_exception": true,
+      "why_not_now": "Already a documented, deliberate WP-02 scoping decision (engine/run.py's own module docstring states loop budgets are enforced for ROUTE and GATE only) — not a new finding from this pass, and fixing the whole mechanism (wiring a second, unrelated loop-budget check into the STEP repair path) is a materially larger change than this item's own narrow loop.counts finding."
+    },
+    {
+      "id": "item-vi-remaining-inert-fields-3",
+      "location": "engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Two more sub-findings from the same background research pass are not touched in this PR: invalidates (Appendix A's own worked example already uses it, so it can't be refused — needs real, careful design work given its overlap with the same replay-correctness hazard class D20-D23 already hit four times this session) and ClaimsPort.renew (needs a new heartbeat-style public API surface, a bigger format-level decision than wiring existing pieces together).",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item or small batch of closely related ones — these two are each larger, standalone design efforts distinct from loop.counts's narrower scope."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (iii, iv, v) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Before implementing 'the same fix' across multiple node kinds that share a schema field, check whether the field's own semantics are actually symmetric across those kinds — GATE and ROUTE both accept loop.counts, but only one of them has an engine-visible signal the field's own definition can attach to.",
+      "incident": "A naive implementation might have tried one heuristic (e.g. inferring failure from a when-branch's condition text) to make FAILURES work identically for both ROUTE and GATE loops; checking each kind's own actual resolution mechanism first (GATE's fixed PERMIT/DENY vocabulary vs ROUTE's arbitrary state expressions) revealed they needed two different answers — implement for one, refuse for the other — rather than one uniform (and for ROUTE, necessarily guessed) mechanism.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D33's own MADR entry documents both halves and why they differ.",
+      "proposed_check": "When a schema field is declared generically across multiple node kinds, verify each kind's own resolution mechanism actually supports the field's stated semantics before assuming one implementation covers all of them.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A GATE loop declaring counts: FAILURES now behaves as the spec states — only DENY-driven takes count toward or can exhaust the budget.",
+      "A ROUTE loop declaring counts: FAILURES is refused cleanly at both validation and engine runtime, rather than silently behaving as PASSES."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Two more item-(vi) sub-findings remain: invalidates and ClaimsPort.renew — both larger, standalone design efforts.",
+        "untouched_id": "item-vi-remaining-inert-fields-3",
+        "trigger": "The next WP-03a session picks these up: invalidates first (real replay-correctness risk, but Appendix A's own worked example already depends on it existing, so it needs care), then ClaimsPort.renew (needs a new public API surface decision).",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Neither is unsafe left as-is — each is a declared field the engine ignores, not a source of corruption or crash; the process author's expectation and the engine's actual behaviour simply diverge, a documented, not hidden, gap."
+      },
+      {
+        "item": "ROUTE-level loop.counts: FAILURES support, if ever wanted, needs a schema-level decision (a new field marking the failure branch, or some other mechanism) that this pass deliberately did not invent.",
+        "trigger": "The principal decides they want this capability after all.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "A ROUTE loop with counts: FAILURES is refused with a clear, actionable message rather than silently misbehaving — the gap is honest, not hidden."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Two item-(vi) sub-findings and three other WP-03a items remain.",
+        "action": "Continue through invalidates, ClaimsPort.renew, then items (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap.",
+        "source_kind": "PARKED",
+        "source_id": "item-vi-remaining-inert-fields-3",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with items (iii), (iv), (v) next, saving invalidates and ClaimsPort.renew for last.",
+      "reason": "Those three were already confirmed true by an earlier investigation pass with specific file:line evidence and are likely more contained than invalidates' real replay-correctness risk or ClaimsPort.renew's new-API-surface decision — finishing the smaller, well-scoped items first keeps momentum before tackling the two largest remaining pieces of work.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

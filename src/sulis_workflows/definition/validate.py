@@ -745,7 +745,9 @@ def _bfs(start: str, graph: dict[str, set[str]]) -> set[str]:
 
 
 def v8_loops(process: model.Process) -> list[Finding]:
-    """A budget that is not a positive integer."""
+    """A budget that is not a positive integer; `counts: FAILURES` on a
+    ROUTE loop (D33), where no state expression can be read as "because a
+    check failed" the way a GATE's own DENY verdict unambiguously can."""
 
     findings: list[Finding] = []
     for node_id, node in process.nodes.items():
@@ -758,6 +760,20 @@ def v8_loops(process: model.Process) -> list[Finding]:
                         rule="V8",
                         node=node_id,
                         message=f"{where} has budget {loop.budget!r}, which is not a positive integer",
+                    )
+                )
+            if isinstance(node, model.RouteNode) and loop.counts == "FAILURES":
+                findings.append(
+                    Finding(
+                        rule="V8",
+                        node=node_id,
+                        message=(
+                            f"{where} declares loop.counts: FAILURES, not supported "
+                            "for a ROUTE loop (D33) — a ROUTE's `when` branch is an "
+                            "arbitrary state expression with no engine-visible "
+                            "'because a check failed' signal, unlike a GATE's own "
+                            "DENY verdict"
+                        ),
                     )
                 )
     return findings
