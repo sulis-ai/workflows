@@ -6,6 +6,12 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **V8 loop-budget checking, and `explain`'s own loop listing, now see a loop declared on a
+  ROUTE's `otherwise` clause** — both only ever walked a `RouteNode`'s `when` options for `.loop`
+  before, silently missing a bad-but-conformant budget (or `counts: FAILURES`) declared on
+  `otherwise` instead (a real, legal shape: `otherwise` is itself a `RouteTarget` with its own
+  `loop` field). Found while building `examples/recursive-refinement/`, whose own completeness
+  gate loops back via `otherwise`.
 - **D38:** `invalidates` (spec §7.3) was accepted by the schema and model but never read anywhere
   the engine resolves state — a definition declaring it had the declaration silently ignored. Now
   refused at validation (**V18**, new) and engine runtime, rather than implemented (doing so

@@ -859,6 +859,8 @@ def _all_loops(node: model.Node) -> Iterator[tuple[model.LoopSpec, str]]:
         for option in node.when:
             if option.loop:
                 yield option.loop, f"route option {option.if_!r}"
+        if node.otherwise is not None and node.otherwise.loop:
+            yield node.otherwise.loop, "otherwise"
     elif (
         isinstance(node, model.StepNode)
         and node.on_control_fail

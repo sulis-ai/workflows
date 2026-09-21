@@ -135,3 +135,38 @@ endings:
     assert code == 0
     assert f"budget={fmt_defaults.LOOP_BUDGET}" in out
     assert fmt_defaults.LOOP_BUDGET == 10
+
+
+def test_explain_lists_a_loop_declared_on_a_routes_otherwise(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`_iter_loops` only ever checked a RouteNode's `when` options for
+    `.loop`, never `otherwise` — a loop declared there (a real, legal
+    shape: `otherwise` is itself a RouteTarget with its own `loop` field)
+    was invisible to `explain`'s own loop listing."""
+
+    doc = tmp_path / "p.yaml"
+    doc.write_text(
+        """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  verdict: { type: "enum[SURVIVED, DROPPED]", reducer: REPLACE }
+start: route
+nodes:
+  route:
+    type: ROUTE
+    when:
+      - { if: 'state.verdict == "SURVIVED"', end: DONE }
+    otherwise: { next: route, loop: { budget: 5 } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    )
+    code = main(["explain", str(doc)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "budget=5" in out
