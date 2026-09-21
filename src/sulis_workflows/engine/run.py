@@ -1086,6 +1086,22 @@ async def _advance_step(
             depth,
         )
 
+    if tool.mechanism.kind in ("EXTERNAL", "TOOL"):
+        # D34: spec §4.3/§12.1 — CODE, EXTERNAL and deterministic PROCESS
+        # are all run BY THE ENGINE, never handed off; without this check,
+        # the generic `!= "CODE"` branch just below would treat an
+        # EXTERNAL or TOOL-composite mechanism exactly like a SKILL
+        # hand-off, which is wrong for both (EXTERNAL should never need a
+        # hand-off at all; TOOL-composite has no `ref` to hand off, and
+        # its own `composes` children would simply never be dispatched).
+        # V17 already refuses this at validation time; this is the
+        # runtime half, in case validation is bypassed.
+        raise EngineRefusal(
+            f"step {node_id!r}: tool {tool.header.id!r} declares "
+            f"mechanism.kind: {tool.mechanism.kind} — not yet executable "
+            "by this engine (spec §4.3/§12.1, D34)"
+        )
+
     if tool.mechanism.kind != "CODE":
         # §10.1/D12: permission is checked before ANY dispatch, hand-off
         # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`

@@ -1,0 +1,191 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M31RY08HHZ3XN38ZM0BPPZJE",
+  "started_at": "2026-09-21T10:50:00Z",
+  "completed_at": "2026-09-21T11:30:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (iii) EXTERNAL/TOOL-composite mechanisms mishandled",
+  "branch": "fix/refuse-external-and-tool-composite-mechanisms",
+  "summary_for_principal": "This closes another checklist item from a past session (an earlier investigation's own detail was lost when this conversation's history was compressed, so I re-verified the claim from scratch rather than trust the label alone).\n\nThe document format supports two ways for a step to do its work that this system has never actually been able to run: one where an outside service does the work through a plug-in, and one where a step is really several smaller steps chained together. Declaring either one didn't cause an error — the system silently treated it as if a human or another AI assistant needed to do the work by hand, handing off instructions that, in one case, didn't even exist. No crash, just quietly wrong.\n\nFixed by refusing both cleanly, with a clear explanation, instead of the silent wrong behavior. Building either one for real needs decisions only outlined in the spec, not fully pinned down — I've written up exactly what's still undecided rather than guessing.\n\nFull test suite: 376 passed, 5 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Two items remain from the original list, plus two larger leftover pieces of an earlier item.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V17 rule refusing EXTERNAL/TOOL(composite) mechanisms at validation time."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression tests for both mechanism kinds' engine-runtime refusal, confirmed reaching an unactionable TOOL_STEP hand-off before the fix."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V17 fixtures (both refused mechanism kinds, plus a CODE-mechanism control confirming V17 stays silent for the normal case)."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D34 added to §18 (MADR form), including two proposed spec clarifications for a future pass."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D34."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (iii): 'EXTERNAL/TOOL-composite mechanisms mishandled.' The specific evidence behind this label was lost to context compaction earlier in this session; only the phrase itself survived.",
+    "read_as": "Re-derive what the phrase refers to from the codebase's own vocabulary rather than assume its exact meaning, verify the mishandling claim independently with fresh file:line evidence, then decide whether the fix is 'implement properly' or 'refuse cleanly' following this session's own established D26 precedent for exactly this kind of choice.",
+    "filled_in": [
+      {
+        "gap": "The compacted context handed off only the label 'EXTERNAL/TOOL-composite mechanisms mishandled', with no supporting evidence, file:line references, or confirmation the earlier investigation's framing was even correct.",
+        "assumed": "Ran a fresh, independent research pass rather than trust the label — it found the phrase maps exactly onto this codebase's own vocabulary (mechanism.kind: EXTERNAL, and kind: TOOL's 'composite' shape, both named verbatim in the spec and in existing code comments), and confirmed the mishandling with direct file:line tracing through _advance_step rather than assuming the label's accuracy.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' — a lost investigation's label is not itself evidence; independent re-verification is required before acting on it, the same discipline applied to every other WP-03a item this session (several of which turned out to need correction or refinement once re-checked directly).",
+        "reversal_cost": "None — this is a fact-finding step, not a design choice.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Implementing either mechanism kind for real requires operational details the spec states only in general terms: EXTERNAL's 'per adapter' verification story, and TOOL-composite's 'shared values' between children.",
+        "assumed": "Refuse cleanly rather than implement, following the same reasoning D26 (kind: INPUT) already established this session for an analogous 'spec names it, engine can't run it, and implementing would require inventing unstated details' situation.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change in your PR and flag it in the run record.'",
+        "reversal_cost": "Low — both refusals are simple early returns; a future pass implementing either kind for real (once the spec questions are answered) removes them without touching anything else.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D34 — mechanism.kind: EXTERNAL and TOOL (composite) are refused, at both validation (V17) and engine runtime, rather than silently dispatched as if they were a SKILL hand-off.",
+      "problem": "Spec §12.1 states EXTERNAL and deterministic PROCESS are run BY THE ENGINE, the same side of the dispatch split as CODE — never handed off. _advance_step has no branch for either EXTERNAL or TOOL (composite): both fall through the generic mechanism.kind != \"CODE\" branch and are handed off exactly like a SKILL Tool. Wrong for both, differently: EXTERNAL should never need a hand-off at all; TOOL-composite has no ref (only composes), so the hand-off's own instructions_ref is silently None and composes's children are never dispatched by anyone.",
+      "options_rejected": [
+        "Implement real EXTERNAL dispatch through a new domain port: rejected for this pass — §4.3's 'per adapter' wording names no operational contract, so implementing now means inventing the shape rather than reading it off the spec.",
+        "Implement real TOOL-composite dispatch by walking composes: rejected for this pass — §4.3's 'shared values' phrase, and whether a non-deterministic child's hand-off should surface transparently or stay opaque, are both spec-silent."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — V17 and the _advance_step check are both simple early returns/refusals with no schema or durable-record shape change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a StepNode whose Tool declared mechanism.kind: EXTERNAL reached a TOOL_STEP hand-off with instructions_ref set to the adapter id, which no engine code ever calls.",
+          "source": "tests/engine/test_run.py::test_external_mechanism_step_is_refused_cleanly_rather_than_misrouted_as_a_skill, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a StepNode whose Tool declared mechanism.kind: TOOL (composite) reached a TOOL_STEP hand-off with instructions_ref silently None, since TOOL mechanisms have no ref field at all.",
+          "source": "tests/engine/test_run.py::test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "engine/composes is never read anywhere in engine/ — a composite Tool's own declared children are never dispatched by any code path.",
+          "source": "grep -rn 'composes' src/sulis_workflows/engine/, this session — zero hits."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "attempt_step's own NOT_DISPATCHABLE guard for non-CODE mechanisms is unreachable in the production next()/report() path, since _advance_step's hand-off branch (or, after this fix, the new refusal) always intercepts first.",
+          "source": "src/sulis_workflows/engine/run.py and engine/steps.py, read directly this session; attempt_step is called from exactly one call site, gated on kind == CODE."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, both scenarios reach a clean FAILED ending naming the mechanism kind, at both validation (V17) and engine runtime.",
+          "source": "Same four tests (two engine, two validator), all passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 376 tests (371 pre-existing + 5 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants real EXTERNAL or TOOL-composite execution — needs the two proposed spec clarifications (D34's own MADR entry) answered first, not guessed at in code."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "376 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "item-vi-remaining-inert-fields-4",
+      "location": "engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "This PR closes item (iii), a separate top-level checklist item; item (vi)'s remaining sub-findings are each their own larger, standalone design effort."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items-2",
+      "location": "engine/run.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (iv) inline process: validation and (v) V10's caller-routing gap are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When context compaction hands off only a label with no supporting evidence, treat the label as a hypothesis to re-verify from the codebase's own vocabulary, not as a finding already established — the label's own accuracy (even its literal wording, 'TOOL-composite' vs. the actual spec term 'TOOL (composite mechanism)') can only be confirmed by going back to primary sources.",
+      "incident": "Item (iii)'s full investigation detail was lost to compaction earlier in this session, leaving only the phrase 'EXTERNAL/TOOL-composite mechanisms mishandled.' Re-deriving it from the spec and codebase (rather than assuming the phrase's exact scope) confirmed it referred precisely to mechanism.kind EXTERNAL and TOOL, both real spec-defined kinds, with a specific, traceable mishandling mechanism — but this had to be re-established from scratch, not inherited.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D34's own MADR entry documents the independently re-derived evidence, not a restated label.",
+      "proposed_check": "When resuming work from a compacted summary that names a finding but not its evidence, re-run the verification before writing any fix — a label surviving compaction is not itself proof the label was correct.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A Tool declaring mechanism.kind: EXTERNAL or TOOL (composite) is now refused cleanly, at both validation and engine runtime, instead of silently misdispatched as an unactionable hand-off."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) and WP-03a's own items (iv) and (v) are unverified.",
+        "untouched_id": "wp-03a-remaining-verification-items-2",
+        "trigger": "The next WP-03a session picks these up.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "None of these are unsafe left as-is — each is a documented, not hidden, gap between what the format accepts and what the engine currently does."
+      },
+      {
+        "item": "Real EXTERNAL and TOOL-composite dispatch, if ever wanted, needs the two spec clarifications D34 names answered first.",
+        "trigger": "The principal decides they want either capability.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Both mechanism kinds are refused with a clear, actionable message rather than silently misbehaving."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Two WP-03a items and two item-(vi) sub-findings remain.",
+        "action": "Continue through items (iv) inline process: validation and (v) V10's caller-routing gap, then item (vi)'s invalidates and ClaimsPort.renew sub-findings.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items-2",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with items (iv) and (v) next, saving item (vi)'s invalidates and ClaimsPort.renew for last.",
+      "reason": "Those two were already flagged by an earlier investigation and are likely more contained than invalidates' real replay-correctness risk or ClaimsPort.renew's new-API-surface decision — finishing the top-level checklist first keeps momentum before tackling the two largest remaining pieces of work.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
