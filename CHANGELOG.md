@@ -6,6 +6,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D36:** `V10`'s `result.endings`-coverage check only ever ran for a `ref`'d Process call —
+  `_resolve(registry, "PROCESS", None)` silently no-ops for an inline `process:` call's `None`
+  ref, so an inline body missing one of its own declared endings from `result.endings` passed with
+  zero findings. Now checked for both. Spec §9.1's separate "the calling step MUST route every
+  value of `ending`" requirement is verified genuinely unimplemented and left that way — closing it
+  would mean guessing which `Tool.output` field carries the ending value, which nothing in the spec
+  states explicitly; see D36's own proposed spec clarifications.
 - **D35:** an inline `PROCESS` mechanism's own body (`mechanism.process`, spec §9.1, D18) was never
   checked by any validator rule — a bad-but-conformant inline body (unreachable node, undeclared
   state channel, non-exhaustive route, undeclared `tool:` reference, ...) passed with zero findings

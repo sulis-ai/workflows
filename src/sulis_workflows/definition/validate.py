@@ -1047,9 +1047,30 @@ def v10_calls(process: model.Process, registry: Registry) -> list[Finding]:
             continue
 
         if tool.mechanism.result is not None:
-            child, err = _resolve(registry, "PROCESS", tool.mechanism.ref)
-            if child is not None:
-                child_endings = set(child.endings) | set(_ENGINE_ENDINGS)
+            # D36: §9.1's "`result.endings` MUST map every ending the child
+            # can reach" names no distinction between a `ref`'d Process and
+            # an inline `process:` body — both are "the child" that "can
+            # reach" endings. Before this fix, `child_endings` was only
+            # ever derived from a `ref`'d Process (`_resolve` returns
+            # `(None, None)` for a `None` ref with no error at all,
+            # silently skipping this whole check for every inline call).
+            if tool.mechanism.ref:
+                child, err = _resolve(registry, "PROCESS", tool.mechanism.ref)
+                child_endings = (
+                    set(child.endings) | set(_ENGINE_ENDINGS)
+                    if child is not None
+                    else None
+                )
+                call_label = repr(tool.mechanism.ref)
+            elif tool.mechanism.process is not None:
+                child_endings = set(tool.mechanism.process.endings) | set(
+                    _ENGINE_ENDINGS
+                )
+                call_label = f"{tool.header.id!r}'s own inline process body"
+            else:
+                child_endings = None
+                call_label = None
+            if child_endings is not None:
                 mapped = set(tool.mechanism.result.endings)
                 missing = child_endings - mapped
                 if missing:
@@ -1057,7 +1078,7 @@ def v10_calls(process: model.Process, registry: Registry) -> list[Finding]:
                         Finding(
                             rule="V10",
                             node=node_id,
-                            message=f"call to {tool.mechanism.ref!r} does not map child ending(s): "
+                            message=f"call to {call_label} does not map child ending(s): "
                             f"{sorted(missing)}",
                         )
                     )

@@ -1,0 +1,175 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M326DAKH42M2RHWAM8X4SP79",
+  "started_at": "2026-09-21T14:35:00Z",
+  "completed_at": "2026-09-21T15:15:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (v) V10 caller-routes-every-ending gap (last of the original 8 items)",
+  "branch": "fix/v10-inline-process-endings-coverage",
+  "summary_for_principal": "This closes the last of the original eight checklist items (as with the last two, the original investigation's detail was lost to context compression, so I re-verified from scratch).\n\nThe spec makes two promises about calling one process from within another: the caller must account for every possible outcome, and must actually route every one of them somewhere. Only the first half was checked, and only for one of two ways to make such a call — a self-contained embedded process (fixed last time) was skipped entirely. Fixed that.\n\nThe second promise — outcomes actually get routed, not just accounted for — is genuinely unimplemented anywhere, and I've deliberately not built it. Doing so would require guessing which field of a tool's output carries the outcome, something the spec never states. I've written up what the spec would need to say before this could be built honestly.\n\nFull test suite: 382 passed, 2 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. The original checklist is fully closed. Two larger, unrelated pieces of an earlier item remain.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression tests for the inline-call endings-coverage fix, confirmed passing with zero findings before the fix."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D36 added to §18 (MADR form), documenting both the fixed half and two proposed spec clarifications for the deliberately unfixed half."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D36."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (v), the last of the original 8 items: 'V10 caller-routes-every-ending gap.' As with items (iii) and (iv), the specific evidence behind this label was lost to context compaction earlier in this session; only the phrase itself survived.",
+    "read_as": "Re-derive what the phrase refers to from spec §9.1's own two-sentence requirement and v10_calls's actual implementation, rather than assume its exact meaning; verify independently with fresh file:line evidence; then triage the two distinct requirements the phrase turned out to name and decide each one's fix separately rather than treating 'V10 gap' as one undifferentiated thing.",
+    "filled_in": [
+      {
+        "gap": "As with items (iii) and (iv), only the label survived compaction, with no supporting evidence for what specifically was broken.",
+        "assumed": "Ran a fresh, independent research pass rather than trust the label. It surfaced that the phrase actually names two distinct, separately-refused spec requirements (result.endings coverage, and exhaustive downstream routing of the ending value) bundled under one label — and that the first one itself split further into a ref'd-call case (already checked) and an inline-call case (not checked at all, the actual gap this item's name points at).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' — the same discipline applied to every WP-03a item this session, load-bearing here since the label alone would have been ambiguous about which of the two spec requirements (or both) it meant.",
+        "reversal_cost": "None — fact-finding, not a design choice.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "The second requirement (the calling step must exhaustively route every ending value) has no structural link in the schema between a call's result.endings mapping and any specific Tool.output field — both spec worked examples name a plausible field purely by naming coincidence, not by any declared relationship.",
+        "assumed": "Do not implement a heuristic (e.g. 'the enum-typed output field whose members are a superset of result.endings's values') to infer this link — write it up as a proposed spec clarification instead, and leave the requirement unimplemented rather than guess.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change in your PR and flag it in the run record' — a heuristic here would be exactly the kind of invented, unstated rule 'fail closed'/'survive the bad-but-conformant attack' refuse.",
+        "reversal_cost": "None avoided — nothing was built to revert; the deferral itself costs nothing since the gap is not new, only now precisely documented.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D36 — V10's result.endings-coverage check now covers an inline process call's own declared endings, not only a ref'd Process's; the separate 'calling step routes every value' requirement is verified genuinely unimplemented and documented as a proposed spec gap rather than guessed at.",
+      "problem": "v10_calls implemented only the result.endings-coverage requirement, and only for a ref'd Process — _resolve(registry, \"PROCESS\", None) silently no-ops (returns (None, None) with no error) for an inline call's None ref, so the entire check skipped every inline process call. The spec's separate second requirement (exhaustive downstream routing of the ending value) was traced and found unimplemented anywhere at all.",
+      "options_rejected": [
+        "Extend v6_routes (or add a new check) to require every process-calling step's own ending value be exhaustively routed downstream: rejected for this pass — before any such check could run, it would need to identify which Tool.output field receives the ending value at all, and CallResult.endings has no structural link to any specific output field; inferring one by heuristic is exactly the invented, unstated rule CLAUDE.md's principles refuse."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low for the fixed half (a local branch inside an existing loop, no schema or durable-record shape change); the unfixed half is new code entirely once the spec clarifications are answered, unblocked by anything this pass did or didn't build.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, an inline process call whose result.endings mapping was missing one of the inline body's own declared endings validated with zero findings.",
+          "source": "tests/definition/test_validate.py::test_v10_refused_inline_call_missing_forbidden_ending, run against the unfixed validator, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same scenario produces a V10 finding, matching the existing ref'd-call behaviour exactly.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A process-calling step that discards a fully-result.endings-mapped call's own ending value (out: {}, unconditional end:) validates with zero findings today — the 'calling step routes every value' requirement is genuinely unchecked, not merely incompletely checked.",
+          "source": "Ad hoc probe against validate(), this session — confirmed via the background research pass, not committed as a fixture since there is nothing to assert a fix against yet."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "v6_routes's own general enum-exhaustiveness check only incidentally covers a calling step's ending routing when an author happens to map the ending to a correctly-typed channel AND writes a downstream ROUTE reading exactly that channel — none of which anything requires.",
+          "source": "Background research pass tracing v6_routes/_route_is_exhaustive directly against a constructed example, this session; corroborated by a real corpus precedent (tests/definition/fixtures/accepted/process-appendix-a.yaml's interrogate/after-interrogate pair) that happens to follow this pattern correctly but isn't required to."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 382 tests (380 pre-existing + 2 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants the 'calling step routes every value' requirement enforced — needs the two proposed spec clarifications (D36's own MADR entry: which output field carries the ending value; whether deferring routing upward via re-export is a legal escape) answered first, not guessed at here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "382 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "v10-caller-routes-every-ending-value",
+      "location": "definition/validate.py (v6_routes, v10_calls — neither enforces exhaustive downstream routing of a process call's own ending value)",
+      "divergence": "Spec §9.1's second requirement ('the calling step MUST route every value of ending') is not enforced anywhere.",
+      "governed_exception": true,
+      "why_not_now": "Implementing it requires first settling which Tool.output field carries the ending value (CallResult.endings has no structural link to one), a spec-silent point CLAUDE.md's own principles refuse to guess at in code; two proposed spec clarifications are named in D36's own MADR entry for a future pass to resolve first."
+    },
+    {
+      "id": "item-vi-remaining-inert-fields-6",
+      "location": "engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "This PR closes item (v), the last of the original 8-item checklist; item (vi)'s remaining sub-findings are each their own larger, standalone design effort, already parked from earlier passes this session."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a checklist item's name conjunctively describes what sounds like one gap ('V10 caller-routes-every-ending gap'), check whether it actually names two or more separately-specified requirements bundled together — the spec text itself, read carefully, is a better guide to the item's true scope than the compressed label alone.",
+      "incident": "Item (v)'s label reads as one gap, but spec §9.1 states two genuinely separate, independently-refused requirements (endings coverage, and exhaustive routing of the ending value) — and the first of those two further split into an already-checked case (ref'd calls) and an unchecked one (inline calls, closed by this PR). Treating the label as naming one undifferentiated fix would have risked either under-scoping (missing the inline-call gap) or over-scoping (attempting to implement the genuinely unspecifiable routing-exhaustiveness half).",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D36's own MADR entry documents both halves and why only one was fixed.",
+      "proposed_check": "When a checklist item's own name conjoins two ideas ('X and Y', 'X routes Y'), read the cited spec section carefully enough to determine whether it actually names separate, independently-checkable requirements before deciding the fix's scope.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "An inline process call's own result.endings coverage is now checked, matching a ref'd call's behaviour exactly.",
+      "The original WP-03a 8-item checklist is now fully closed: items (i)-(v) fixed or documented-and-deferred, (vi) partially closed across four sub-findings this session with two larger ones remaining, (vii) and Appendix A both fixed."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Spec §9.1's 'calling step routes every value of ending' requirement remains unimplemented, needing two spec clarifications answered first (D36's own MADR entry).",
+        "untouched_id": "v10-caller-routes-every-ending-value",
+        "trigger": "The principal wants this requirement enforced.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "A process-calling step that discards or incompletely routes a call's own ending value is not refused by anything today — not a new regression from this pass, the same pre-existing gap, now precisely documented instead of left as an unverified report."
+      },
+      {
+        "item": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) are unverified.",
+        "untouched_id": "item-vi-remaining-inert-fields-6",
+        "trigger": "The next WP-03a session picks these up.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Neither is unsafe left as-is — each is a documented, not hidden, gap between what the format accepts and what the engine currently does."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "The original 8-item checklist is closed; two item-(vi) sub-findings remain as the only open WP-03a work.",
+        "action": "Continue through item (vi)'s invalidates (Appendix A's own worked example already uses it, real replay-correctness risk) and ClaimsPort.renew (needs a new heartbeat-style public API surface) sub-findings, each its own PR.",
+        "source_kind": "PARKED",
+        "source_id": "item-vi-remaining-inert-fields-6",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with ClaimsPort.renew next, saving invalidates for last.",
+      "reason": "ClaimsPort.renew's own fix needs a new public API surface decision (a heartbeat-style engine call) that can be scoped and proposed without touching the replay-correctness-sensitive parts of the engine; invalidates directly overlaps the same state-application machinery that produced D20-D23's four separate replay bugs earlier this session, so it deserves the most care and is best done once everything else is settled.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
