@@ -1,0 +1,23 @@
+# This translation's own addition (not in the source document, which never
+# specifies a wire shape for a WBS child): the minimal shape a decomposed
+# child needs to be recursively re-classified — an id for traceability and
+# a brief carrying the same free-text ask `node_brief` (this process's own
+# top-level input) already takes.
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: refinement-node
+version: 1.0.0
+title: Refinement node
+summary: >-
+  A unit of further work produced by decomposition (a WBS child) — small
+  enough to be fed straight back into recursive-refinement's own node_brief
+  input for re-classification, not yet known to be atomic.
+grounded_in: This translation's own convention — no external standard applies.
+checker: profile-conformance@1
+schema:
+  type: object
+  required: [id, brief]
+  additionalProperties: false
+  properties:
+    id: { type: string }
+    brief: { type: string, minLength: 1 }

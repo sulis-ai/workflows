@@ -1,0 +1,16 @@
+# Small glue Tool: same reason as extract-recommendation-brief.tool.yaml,
+# for a FOR_EACH item binding over profile:refinement-node@1 (a WBS child)
+# rather than profile:recommendation@1.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: extract-child-brief
+version: 1.0.0
+title: Read a WBS child's brief as a plain string
+inputs:
+  child: { type: "profile:refinement-node@1" }
+output:
+  node_brief: { type: string }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: CODE, ref: "recursive_refinement.tools:extract_child_brief" }
+permission: workflows.recursive-refinement.extract-child-brief
+effect: QUERY

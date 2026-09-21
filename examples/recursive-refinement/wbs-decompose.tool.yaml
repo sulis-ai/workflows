@@ -1,0 +1,27 @@
+# The source document's `wbs-decompose` step (maturity: prose) — real
+# judgement, breaking a COMPLICATED node into a deliverable-oriented tree
+# under the 100% rule (PMI/PMBOK WBS). SKILL, matching the source's own
+# maturity tag and this corpus's own convention for judgement work.
+#
+# Scope note: the source's own wbs-decompose also reads an upstream
+# solution_spec/contract_set (dispositions, approved contract-set entries)
+# when this node was reached via sulis-ai/platform's solution-delivery
+# process. That integration is deliberately not modelled here — its real
+# shape is owned by a different, ungoverned-from-here repository this
+# session cannot read, and guessing at it would be inventing a schema
+# rather than reading one off a source of truth. Only the "bare node_brief,
+# no upstream Solution" case — the source's own words, "the pre-existing,
+# still-legitimate case" — is translated.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: wbs-decompose
+version: 1.0.0
+title: Decompose a node into a Work Breakdown Structure
+inputs:
+  node_brief: { type: string }
+output:
+  wbs_children: { type: "list<profile:refinement-node@1>" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: SKILL, ref: skills/wbs-decompose }
+permission: workflows.recursive-refinement.wbs-decompose
+effect: QUERY

@@ -1,0 +1,18 @@
+# Small glue Tool: a FOR_EACH item binding (spec §7.5, `as: recommendation`)
+# is a whole profile:recommendation@1 object, but recurse-into-node@1.0.0
+# takes a bare node_brief string — this format's `in:`/`out:` mappings read
+# a whole channel, not a projection into one of its fields, so the
+# projection needs its own small step rather than a dotted path.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: extract-recommendation-brief
+version: 1.0.0
+title: Read a recommendation's action as a plain brief string
+inputs:
+  recommendation: { type: "profile:recommendation@1" }
+output:
+  node_brief: { type: string }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: CODE, ref: "recursive_refinement.tools:extract_recommendation_brief" }
+permission: workflows.recursive-refinement.extract-recommendation-brief
+effect: QUERY

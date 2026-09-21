@@ -1,0 +1,37 @@
+# The source document's `dispatch-grounded-inquiry` step, literally: "This is
+# composition: the controller does not inline the inquiry, it runs the
+# governed methodology and consumes its verdict." Dispatches the REAL,
+# already-registered grounded-inquiry@1.0.0 process (spec Appendix A /
+# tests/definition/fixtures/appendix_a_corpus/) rather than restating it —
+# the same §9.1 pattern the spec's own worked example already shows for
+# this exact process. `result.endings` maps every ending grounded-inquiry
+# can reach (its own four, from its `endings:` block) plus the engine's
+# four synthesised endings (ESCALATED/FAILED/FORBIDDEN/CANCELLED, spec
+# §9 — reachable on any call regardless of what the child itself declares).
+api_version: sulis.workflows/v1
+kind: TOOL
+id: run-grounded-inquiry
+version: 1.0.0
+title: Dispatch grounded-inquiry on the node's brief
+inputs:
+  brief: { type: "profile:brief@1" }
+output:
+  recommendations: { type: "list<profile:recommendation@1>" }
+  ending: { type: "enum[COMPLETE, INSUFFICIENT, DROPPED, DENIED, ESCALATED, FAILED, FORBIDDEN, CANCELLED]" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism:
+  kind: PROCESS
+  ref: grounded-inquiry@1.0.0
+  inputs: { brief: brief }
+  result:
+    outputs: { recommendations: state.recommendations }
+    endings:
+      COMPLETE: COMPLETE
+      INSUFFICIENT: INSUFFICIENT
+      DROPPED: DROPPED
+      DENIED: DENIED
+      ESCALATED: ESCALATED
+      FAILED: FAILED
+      FORBIDDEN: FORBIDDEN
+      CANCELLED: CANCELLED
+effect: QUERY

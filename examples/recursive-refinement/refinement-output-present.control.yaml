@@ -1,0 +1,12 @@
+# A minimal, shared CONVENTIONS control for this corpus's plain (non-profile-typed)
+# outputs — the same role tests/definition/fixtures/appendix_a_corpus/output-present.control.yaml
+# plays there, namespaced separately so this corpus loads standalone.
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: refinement-output-present
+version: 1.0.0
+type: CONVENTIONS
+title: The output is present
+applies_to: output
+checker: refinement-output-present@1
+grounded_in: This format's own convention — no external standard applies.
