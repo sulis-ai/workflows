@@ -17,6 +17,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
   away before `sign-off` is ever reached. Corrected to `state.confidence == "PARTIAL"`, a value
   `sign-off` is actually reached with; the person-required decider path (previously untested end
   to end, since it was unreachable) now has a regression test.
+- **`GATE kind: INPUT` refused cleanly instead of crashing at runtime (D26):** `kind: INPUT` gates
+  (spec §7.6) validated but then failed at runtime with a confusing
+  `"no route declared for verdict 'PERMIT'"`, since the engine never implemented them. Now
+  refused outright, with a clear reason, at validation time (**V9**) and — in case validation is
+  bypassed — at engine runtime too, the same defence-in-depth `PARALLEL`/`JOIN`/`FOR_EACH`
+  already have. See D26 (`docs/spec/process-definition.md` §18) for the open spec questions real
+  `INPUT` support would need answered first.
 
 ### Docs
 - Corrected stale claims: `engine/run.py`'s module docstring said state writes support only the
