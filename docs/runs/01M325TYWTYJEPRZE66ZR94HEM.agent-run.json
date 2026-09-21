@@ -1,0 +1,197 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M325TYWTYJEPRZE66ZR94HEM",
+  "started_at": "2026-09-21T11:35:00Z",
+  "completed_at": "2026-09-21T12:20:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (iv) inline process bodies not validated",
+  "branch": "fix/validate-inline-process-bodies",
+  "summary_for_principal": "This closes another checklist item from a past session (as with the last item, the original investigation's detail was lost to context compression, so I re-verified from scratch).\n\nA tool can embed its own small self-contained process instead of calling a separately defined one. That embedded process was never checked for correctness at all — a broken one (a starting point that doesn't exist, a route to nowhere, a reference to an unregistered tool) passed every check and only failed the first time someone actually ran it, with a confusing internal error instead of a clear one up front.\n\nFixed by running the same correctness checks on an embedded process that already apply to a standalone one. While testing, I found a real example of this exact problem already sitting in the specification's own reference example — a value read and written that was never declared. Fixed that too, in both the spec text and the matching test file.\n\nFull test suite: 380 passed, 4 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. One item remains from the original list, plus two larger leftover pieces of an earlier item.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression tests: an accepted well-formed inline body, a refused undeclared-ending case, a refused undeclared-tool-reference case, and a fixture-level regression confirming the real corpus example is now clean."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/accepted/tool-process-inline.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Fixed a real, previously-undetected gap this fix's own new checks surfaced: state.current/state.survived were read and written by the inline body's own nodes but never declared in its state: block."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D35 added to §18 (MADR form); §9.1's own worked example snippet corrected to match the fixture fix."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D35."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (iv): 'inline process: bodies not validated.' As with item (iii), the specific evidence behind this label was lost to context compaction earlier in this session; only the phrase itself survived.",
+    "read_as": "Re-derive what the phrase refers to from the codebase's own vocabulary (the 'inline PROCESS' concept, D18, InlineProcess in model.py) rather than assume its exact meaning, verify the claim independently with fresh file:line evidence, then decide the fix's scope and shape.",
+    "filled_in": [
+      {
+        "gap": "As with item (iii), only the label survived compaction, with no supporting evidence.",
+        "assumed": "Ran a fresh, independent research pass rather than trust the label, confirming with direct file:line tracing that no V-rule anywhere recurses into mechanism.process, and constructing a concrete bad-but-conformant example (an inline start: naming no node) that passes validation with zero findings and only crashes at runtime.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' — the same discipline applied to item (iii) and every other WP-03a item this session.",
+        "reversal_cost": "None — fact-finding, not a design choice.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "InlineProcess shares most fields with Process, but not header/inputs/host_inputs/triggers — V10's own self-reachability check is keyed off a registered Process's header.id in a registry-wide call graph, which has no meaning for an anonymous body nothing else can name.",
+        "assumed": "Reuse every rule that is genuinely duck-type compatible (V2, V4-V9, V11-V14, V16) against a synthetic Process wrapper (inputs/host_inputs/triggers all empty, matching the spec's own 'no id/version/permission of its own'); deliberately exclude V10's self-reachability half rather than force a meaningless check through a placeholder id.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'if the spec is silent, don't invent a rule in code' — 'self-reachable' for something nothing can name to call is not a question the spec answers, and forcing an answer would be guessing.",
+        "reversal_cost": "Low — the excluded V10 half can be added later once someone decides what it should mean for an inline body, without touching anything this pass built.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "While testing the fix against this repository's own real spec-mirrored fixture, the new checks found a genuine undeclared-state-channel bug in that fixture (and the spec text it mirrors) that had nothing to do with 'is validation wired up' and everything to do with 'is the worked example itself correct.'",
+        "assumed": "Fixed it directly, in both the fixture and the spec's own snippet, rather than leave a now-detectably-broken worked example in the shipped spec — matching the established precedent (D25) of correcting a worked example to be internally consistent once a gap in it is found.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'ground honestly' and 'survive the bad-but-conformant attack' — leaving a known-broken worked example unfixed once my own change could detect it would be less honest than before the fix, not more.",
+        "reversal_cost": "Low — a two-line state: block addition with no behavioural change to anything that already worked.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D35 — an inline PROCESS mechanism's own body is now checked by the same rules a top-level Process document is (V2, V4-V9, V11-V14, V16), reusing those rule functions directly against a synthetic Process wrapper.",
+      "problem": "InlineProcess shares start/nodes/state/endings with Process, but validate_tool never recursed into mechanism.process at all — confirmed by grep (mechanism.process appears nowhere in validate.py before this fix) and by construction (a start: naming no node in its own nodes passes with zero findings, surfacing only as an uncaught EngineRefusal at runtime).",
+      "options_rejected": [
+        "Write bespoke recursive-walking logic scoped to InlineProcess's own reduced shape: rejected — InlineProcess is already duck-type compatible with every rule function this pass reuses, so bespoke logic would only duplicate what already exists correctly.",
+        "Reuse V10's self-reachability/depth check too, giving the synthetic wrapper a placeholder header.id: rejected — V10's check is keyed off a registered Process's header.id inside a registry-wide call graph, and an anonymous inline body has no id anything else could ever name to call it; forcing it through would either silently no-op or need a new, spec-silent definition of self-reachability for an anonymous body."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — _validate_inline_process is additive (a new function plus one call site); the fixture/spec correction is a two-line addition with no behavioural change to anything that already worked.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, an inline body with a StepNode's own end: naming an ending the body never declares (V14's job for a top-level Process) passed validation with zero findings.",
+          "source": "tests/definition/test_validate.py::test_inline_process_body_refused_for_an_undeclared_ending, run against the unfixed validator, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, an inline body's StepNode referencing an unregistered tool: id passed V2 with no finding naming it, only an unrelated pre-existing finding from the outer Tool's own controls.",
+          "source": "tests/definition/test_validate.py::test_inline_process_body_refused_for_an_unresolvable_tool_reference, run against the unfixed validator, this session — the first assertion attempt (checking for bare 'V2' presence) coincidentally passed due to an unrelated finding, caught and tightened to check the specific message before trusting it."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "This repository's own real fixture (tests/definition/fixtures/accepted/tool-process-inline.yaml, mirroring spec §9.1's worked example) carried a genuine undeclared-state-channel bug (state.survived read in a ROUTE condition, never declared) that the new checks correctly surfaced.",
+          "source": "Manual validate() run against the real fixture with attack-claim@1 registered, this session — a V5 finding naming state.survived as undeclared, confirmed gone after adding the missing state: block to both the fixture and the spec's own snippet."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, a well-formed inline body passes with zero inline-body-scoped findings, and the real corpus fixture is clean.",
+          "source": "tests/definition/test_validate.py::test_inline_process_body_accepted_when_internally_well_formed and ::test_spec_worked_examples_own_inline_process_fixture_is_internally_clean, both passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 380 tests (376 pre-existing + 4 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants V10-equivalent self-reachability/depth checking for inline bodies — needs a spec decision on what 'self-reachable' means for something nothing can name to call, not guessed at here. Item (v)'s own separate finding (result.endings coverage for process calls) is a related but distinct concern, not folded into this one."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "380 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "inline-process-v10-self-reachability",
+      "location": "definition/validate.py (_validate_inline_process deliberately excludes v10_calls)",
+      "divergence": "An inline body's own self-reachability/depth-exhaustion correctness (V10's other half) is not checked.",
+      "governed_exception": true,
+      "why_not_now": "V10's check is keyed off a registered Process's own header.id inside a registry-wide call graph; an anonymous inline body has no id anything else could ever name to call it, so 'self-reachable' does not transfer without a new, spec-silent definition someone needs to decide first."
+    },
+    {
+      "id": "item-vi-remaining-inert-fields-5",
+      "location": "engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "This PR closes item (iv), a separate top-level checklist item; item (vi)'s remaining sub-findings are each their own larger, standalone design effort."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items-3",
+      "location": "definition/validate.py",
+      "divergence": "WP-03a's own remaining item (v) V10's caller-routing gap is not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a new validation check is written to close a gap, run it against the real, shipped corpus (not just synthetic test fixtures) before calling the fix done — a synthetic fixture only proves the check CAN catch a bad shape; the real corpus proves whether the gap already had a live casualty.",
+      "incident": "Running the new inline-process checks against this repository's own spec-mirrored worked-example fixture (not just my own synthetic test cases) surfaced a genuine, previously-undetected bug (state.current/state.survived undeclared) that had been sitting in the shipped spec text and its mirrored fixture the whole time this validation gap existed.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D35's own MADR entry documents both the gap and the real instance it found.",
+      "proposed_check": "After writing a new validation rule, run it against the project's own real, shipped definitions (not only synthetic test fixtures) before considering the work complete — a rule that only ever sees fixtures written to exercise it hasn't been tested against reality.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "An inline PROCESS mechanism's own body is now checked by V2, V4-V9, V11-V14, and V16, the same as a top-level Process document — a bad-but-conformant inline body is refused at validation time instead of silently passing and crashing at runtime.",
+      "This repository's own spec-mirrored worked-example fixture (and the spec text it mirrors) is now internally consistent — a real, previously-undetected gap this fix's own checks found."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Inline-body self-reachability/depth checking (V10's other half) remains unimplemented, needing a spec decision on what 'self-reachable' means for an anonymous body.",
+        "untouched_id": "inline-process-v10-self-reachability",
+        "trigger": "The principal wants this checked, or item (v)'s own work touches the same territory closely enough to fold it in.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "An inline body that calls itself with no on_depth_exhausted is not refused at validation time; it would still hit the engine's own depth-limit runtime behaviour (§9.2), just not flagged earlier."
+      },
+      {
+        "item": "Item (vi)'s two remaining sub-findings (invalidates, ClaimsPort.renew) and WP-03a's own item (v) are unverified.",
+        "untouched_id": "wp-03a-remaining-verification-items-3",
+        "trigger": "The next WP-03a session picks these up.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "None of these are unsafe left as-is — each is a documented, not hidden, gap between what the format accepts and what the engine or validator currently does."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "One WP-03a item and two item-(vi) sub-findings remain.",
+        "action": "Continue through item (v) V10's caller-routing gap, then item (vi)'s invalidates and ClaimsPort.renew sub-findings.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items-3",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with item (v) next, saving item (vi)'s invalidates and ClaimsPort.renew for last.",
+      "reason": "Item (v) closes out the original 8-item checklist, and its own 'result.endings coverage for process calls' territory may share context with this pass's own V10-exclusion decision, worth doing while that reasoning is fresh; invalidates' real replay-correctness risk and ClaimsPort.renew's new-API-surface decision are each larger, standalone efforts best done last.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

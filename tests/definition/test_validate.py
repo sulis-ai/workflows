@@ -4,9 +4,13 @@ marked where they apply."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sulis_workflows.definition.load import load_definition
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.definition.validate import Finding, validate
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _load(text: str):
@@ -1142,3 +1146,94 @@ effect: QUERY
 """
     findings = validate(doc, registry=_base_registry())
     assert "V17" in _rules(findings)
+
+
+# ------------------------------------------------------------------------------ D35 --
+# An inline PROCESS body (spec §9.1, D18) is a Process-shaped sequence of its
+# own (start/nodes/state/endings) — these confirm it is now checked by the
+# same rules a top-level Process document is, not skipped entirely.
+
+_INLINE_TOOL_TEMPLATE = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: inline-tool
+version: 1.0.0
+title: Inline tool
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: PROCESS
+  process:
+    start: step-a
+    nodes:
+      step-a: { type: STEP, tool: echo@1, in: { value: state.value }, out: { value: state.value }, end: __STEP_END__ }
+    state:
+      value: { type: string, reducer: REPLACE, default: "" }
+    endings:
+      DONE: { outcome: SUCCESS, says: "Done." }
+  result: { outputs: { value: state.value }, endings: { DONE: DONE } }
+effect: QUERY
+"""
+
+
+def test_inline_process_body_accepted_when_internally_well_formed() -> None:
+    doc = _INLINE_TOOL_TEMPLATE.replace("__STEP_END__", "DONE")
+    findings = validate(doc, registry=_base_registry())
+    assert not [f for f in findings if "inline process body" in f.message]
+
+
+def test_inline_process_body_refused_for_an_undeclared_ending() -> None:
+    """D35: before this fix, nothing recursed into `mechanism.process` at
+    all — a StepNode's own `end:` naming an ending the inline body never
+    declares (V14's job for a top-level Process) passed validation with
+    zero findings and only surfaced as an uncaught `EngineRefusal` the
+    first time a run actually reached it."""
+    doc = _INLINE_TOOL_TEMPLATE.replace("__STEP_END__", "NOT_DECLARED")
+    findings = validate(doc, registry=_base_registry())
+    assert "V14" in _rules(findings)
+    assert any(
+        "inline-tool" in f.message and "inline process body" in f.message
+        for f in findings
+    )
+
+
+def test_inline_process_body_refused_for_an_unresolvable_tool_reference() -> None:
+    """D35: the V2 half of the same gap — `_v2_mechanism_references`'s own
+    docstring already flagged that an inline body's internal `tool:`
+    references were never resolved before this fix. Checks for the
+    specific 'no-such-tool' finding, not just any V2 finding — this
+    fixture's own outer `controls: [{ profile: finding@1 }]` already
+    produces an unrelated V2 finding (the 'finding' profile is not
+    registered by `_base_registry()`) regardless of this fix."""
+    doc = _INLINE_TOOL_TEMPLATE.replace("tool: echo@1", "tool: no-such-tool@1").replace(
+        "__STEP_END__", "DONE"
+    )
+    findings = validate(doc, registry=_base_registry())
+    assert any(f.rule == "V2" and "no-such-tool" in f.message for f in findings)
+
+
+def test_spec_worked_examples_own_inline_process_fixture_is_internally_clean() -> None:
+    """D35: `tests/definition/fixtures/accepted/tool-process-inline.yaml`
+    mirrors §9.1's own worked example — before this fix, its inline
+    body's `state.current`/`state.survived` were read/written without
+    ever being declared in its own `state:` block, an undeclared-channel
+    gap V5 already refuses for a top-level Process, just never checked
+    here. Confirmed and fixed alongside this fix (both the fixture and
+    the spec's own snippet now declare `state:`)."""
+    doc = (_FIXTURES / "accepted" / "tool-process-inline.yaml").read_text()
+    attack_claim_tool = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: attack-claim
+version: 1.0.0
+title: Attack claim
+inputs: { candidate: { type: "profile:finding@1" } }
+output: { survived: { type: boolean } }
+controls: [ { conventions: faithful-generation@1 } ]
+mechanism: { kind: CODE, ref: "pkg.mod:fn" }
+effect: QUERY
+"""
+    registry = Registry([load_definition(attack_claim_tool, fmt="yaml")])
+    findings = validate(doc, registry=registry)
+    assert not [f for f in findings if "inline process body" in f.message]

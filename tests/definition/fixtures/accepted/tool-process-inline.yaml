@@ -27,6 +27,9 @@ mechanism:
         when:
           - { if: 'state.survived == true', next: attack }
         otherwise: { end: DONE }
+    state:
+      current:   { type: "profile:finding@1", reducer: REPLACE }
+      survived:  { type: boolean, reducer: REPLACE }
     endings:
       DONE: { outcome: SUCCESS, says: "Every candidate has been attacked." }
   result:
