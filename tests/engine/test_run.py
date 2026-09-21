@@ -1570,6 +1570,58 @@ def test_mutation_step_second_caller_told_step_running():
     assert answer.kind is AnswerKind.STEP_RUNNING
 
 
+def test_hand_off_mutation_step_acquires_a_claim_so_a_second_caller_is_told_step_running():
+    """D37: §12.3's claim/lease guard ("before a MUTATION or SIDE_EFFECT
+    step runs, the engine writes an in-progress claim") is the
+    dispatch-time at-most-once protection this format has — and a
+    `TOOL_STEP` hand-off IS this step's own dispatch, the same reasoning
+    §10.1/D12's permission check already applies to hand-offs. Before this
+    fix, `ctx.claims.acquire` was only ever called on the inline `CODE`
+    dispatch path below — a hand-off `SKILL` Tool (the case a real-world
+    side effect performed by an external agent most needs at-most-once
+    protection for) acquired no claim at all, so a second caller racing in
+    during the hand-off got a fresh `TOOL_STEP` instead of `STEP_RUNNING`.
+    """
+    mutating_tool = Tool(
+        header=_header("send", "TOOL"),
+        output={"sent": OutputSpec(type="boolean")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/send"),
+        effect="SIDE_EFFECT",
+        permission="workflows.send.dispatch",
+    )
+    process = _process(
+        start="send-step",
+        nodes={
+            "send-step": StepNode(
+                id="send-step", tool="send@1", in_={}, out={}, end="COMPLETE"
+            ),
+        },
+    )
+    claims = StubClaimsAdapter()
+    records = StubRecordsAdapter()
+    registry = Registry([mutating_tool])
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=records,
+        claims=claims,
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+    first = _run(
+        next_(process, "run-hand-off-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+
+    second = _run(
+        next_(process, "run-hand-off-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert second.kind is AnswerKind.STEP_RUNNING
+
+
 def test_route_loop_budget_is_enforced_across_revisits():
 
     process = Process(

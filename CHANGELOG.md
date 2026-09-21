@@ -6,6 +6,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D37:** `ctx.claims.acquire` (§12.3's at-most-once claim/lease guard) was only ever called before
+  an inline `CODE` dispatch — a hand-off `SKILL`-mechanism `MUTATION`/`SIDE_EFFECT` Tool acquired no
+  claim at all, so a second caller racing in during the hand-off got a fresh `TOOL_STEP` instead of
+  `STEP_RUNNING`. Now shared by both dispatch paths via a new `_claim_if_effectful` helper.
+  `ClaimsPort.renew` remains genuinely never called anywhere — implementing it needs a new public
+  API surface (a heartbeat-style call) this pass does not invent; see D37's own proposed spec
+  clarification.
 - **D36:** `V10`'s `result.endings`-coverage check only ever ran for a `ref`'d Process call —
   `_resolve(registry, "PROCESS", None)` silently no-ops for an inline `process:` call's `None`
   ref, so an inline body missing one of its own declared endings from `result.endings` passed with
