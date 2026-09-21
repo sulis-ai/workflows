@@ -37,7 +37,7 @@
         "coordinate": "docs/spec/process-definition.md",
         "kind": "PROCESS",
         "role": "ACTED_ON",
-        "reason": "Added D24 to the §18 decision log (MADR form) with the three proposed spec clarifications real INPUT support would need, and a note on V9's rule-table row."
+        "reason": "Added D26 to the §18 decision log (MADR form) with the three proposed spec clarifications real INPUT support would need, and a note on V9's rule-table row."
       },
       {
         "coordinate": "README.md",
@@ -71,7 +71,7 @@
   "conformance_claim": "PARTIAL",
   "decisions": [
     {
-      "headline": "kind: INPUT gates (spec §7.6) are refused, at both validation (V9) and engine runtime, rather than implemented in this pass — D24.",
+      "headline": "kind: INPUT gates (spec §7.6) are refused, at both validation (V9) and engine runtime, rather than implemented in this pass — D26.",
       "problem": "An INPUT gate passes validation and then fails at runtime with a confusing message ('no route declared for verdict PERMIT') naming a verdict the gate's own author never wrote into `on` anywhere, because _advance_gate has never read node.kind (or answer_type/answer_into/ANSWERED) at all — every gate is resolved as if it were APPROVAL.",
       "options_rejected": [
         "Implement INPUT gates per spec §7.6: rejected for this pass — §7.6's own text is one sentence and does not say which decider kinds may answer an INPUT gate (PolicyPort's evaluate_policy has no field for a typed answer), what output shape an agent decider's Tool must return (decision@1 has nowhere to carry one), or how a person submits an answer at all (decide()'s public signature only accepts an ADR-028 verdict, and §12.1 names no fourth call). Guessing at any of these would invent unauthorised schema/API surface rather than follow the spec."
@@ -101,7 +101,7 @@
           "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
         }
       ],
-      "revisit_if": "The principal commissions real INPUT gate support — the three proposed spec clarifications in D24 (docs/spec/process-definition.md §18) are the starting point."
+      "revisit_if": "The principal commissions real INPUT gate support — the three proposed spec clarifications in D26 (docs/spec/process-definition.md §18) are the starting point."
     }
   ],
   "flags": [],
@@ -123,6 +123,12 @@
       "method": "python -m ruff check / python -m ruff format --check / python -m mypy, run with the exact path lists .github/workflows/ci.yml's own steps use.",
       "location": "src/sulis_workflows/definition/, src/sulis_workflows/engine/, tests/definition/, tests/engine/, the four named domain/ports/*.py files and their test files.",
       "result": "0 findings from ruff check, 0 reformatting needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    },
+    {
+      "subject": "Post-hoc update: this branch was later rebased against main after several other PRs merged concurrently, including a separate, unrelated note_into fix that had also claimed 'D24'.",
+      "method": "git merge origin/main; renumbered this PR's own decision entry (and its V9 rule-table citation and two inline code comments) from D24 to D26 to avoid colliding with the now-merged note_into decision, which kept D24. Re-ran the full suite and the CI-scoped lint/format/mypy commands after the merge.",
+      "location": "repository root, this branch's merge commit",
+      "result": "357 passed, 0 failed (346 from this PR's own original commit + 11 from the concurrently-merged work). ruff check, ruff format --check and mypy remain clean on every CI-scoped path. No further code changes were needed beyond the renumbering — this fix's own two refusal points did not conflict with the concurrent work."
     }
   ],
   "untouched": [
@@ -139,8 +145,8 @@
       "maxim": "When a work package offers 'implement it, or refuse it if implementing is too large' as an explicit choice, trace what a real implementation would actually need BEFORE picking — the tracing itself is what tells you whether the size problem is effort (a reason to just build it) or unresolved design (a reason to refuse and name the gaps), and the two calls need different justifications.",
       "incident": "Tracing a real INPUT-gate implementation surfaced three genuinely unspecified design questions in the space of a few minutes, each blocking on a spec clarification or a port/API change rather than on engineering effort — confirming refuse-and-name-the-gaps was the right call here, not a shortcut. Writing that reasoning down (rather than just asserting 'too large') is what makes the choice auditable and gives the principal something concrete to commission later.",
       "applies_to": "AGENT_INSTRUCTIONS",
-      "destination": "docs/spec/process-definition.md's own D24 entry carries this reasoning directly, as the artefact this lesson changed.",
-      "proposed_check": "Before choosing 'refuse, too large to implement' on any future gap, write out the concrete blocking questions a real implementation would hit, the same way D24 does — if none surface, effort alone is not sufficient grounds to refuse rather than build.",
+      "destination": "docs/spec/process-definition.md's own D26 entry carries this reasoning directly, as the artefact this lesson changed.",
+      "proposed_check": "Before choosing 'refuse, too large to implement' on any future gap, write out the concrete blocking questions a real implementation would hit, the same way D26 does — if none surface, effort alone is not sufficient grounds to refuse rather than build.",
       "confidence": "HIGH"
     }
   ],
@@ -153,7 +159,7 @@
       {
         "item": "Real INPUT gate support remains unbuilt; the work package's own eight verification items are also untouched.",
         "untouched_id": "wp-03a-remaining-verification-items",
-        "trigger": "The principal says which to pick up next: the verification items, or commissioning real INPUT gate support (starting from D24's three proposed spec clarifications).",
+        "trigger": "The principal says which to pick up next: the verification items, or commissioning real INPUT gate support (starting from D26's three proposed spec clarifications).",
         "if_nothing_happens": "HOLDS_STEADY",
         "detail": "Nothing currently depends on either; both are safe to leave until asked for."
       }
@@ -170,7 +176,7 @@
       {
         "n": 2,
         "label": "Real support for INPUT gates is not built yet.",
-        "action": "Resolve D24's three proposed spec clarifications (which decider kinds may answer, the agent decider's output shape, the person's own submission call), then implement.",
+        "action": "Resolve D26's three proposed spec clarifications (which decider kinds may answer, the agent decider's output shape, the person's own submission call), then implement.",
         "source_kind": "RECOMMENDATION",
         "effort": "LARGE"
       }
