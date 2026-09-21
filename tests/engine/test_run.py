@@ -44,7 +44,11 @@ from sulis_workflows.domain.ports.policy import (
     StubPolicyAdapter,
     Verdict,
 )
-from sulis_workflows.domain.ports.records import StubRecordsAdapter
+from sulis_workflows.domain.ports.records import (
+    AttemptKey,
+    AttemptRecord,
+    StubRecordsAdapter,
+)
 from sulis_workflows.engine.run import (
     AnswerKind,
     EngineContext,
@@ -246,6 +250,79 @@ def test_code_step_attempt_record_carries_its_real_resolved_inputs():
     )
     assert len(attempts) == 1
     assert attempts[0].inputs == {"question": "why did it fail"}
+
+
+class _RaceOnceRecordsAdapter:
+    """Wraps a `StubRecordsAdapter`, injecting a competing write for one
+    chosen node the first time its attempts are read as empty.
+
+    This is the race described in §12.2's write-once guard: two `next()`
+    calls both replaying from the same durable position see zero existing
+    attempts for a node, both compute the identical next `AttemptKey`, and
+    one loses the race to record it. Here the "someone else" caller's write
+    lands in the window between this call's `get_attempts` read and its own
+    `record_attempt` write, so the real write-once guard in
+    `StubRecordsAdapter.record_attempt` raises `DuplicateAttempt` on this
+    call's own attempt — exactly the collision `_record_attempt` must
+    swallow rather than let crash out of `next()`.
+    """
+
+    def __init__(self, inner: StubRecordsAdapter, *, node: str) -> None:
+        self._inner = inner
+        self._raced_node = node
+        self._raced = False
+
+    @property
+    def identity(self):
+        return self._inner.identity
+
+    async def record_attempt(self, record, *, platform_id, run_id):
+        await self._inner.record_attempt(record, platform_id=platform_id, run_id=run_id)
+
+    async def get_attempts(self, run, scope, node, *, platform_id, run_id):
+        attempts = await self._inner.get_attempts(
+            run, scope, node, platform_id=platform_id, run_id=run_id
+        )
+        if not self._raced and node == self._raced_node and not attempts:
+            self._raced = True
+            phantom = AttemptRecord(
+                key=AttemptKey(run=run, scope=scope, node=node, attempt=1),
+                inputs={},
+                output=None,
+                control_results=[],
+                verdict=None,
+                performed_by="someone-else",
+                started_at="2024-01-01T00:00:00Z",
+                ended_at="2024-01-01T00:00:00Z",
+            )
+            self._inner._store[phantom.key] = phantom
+        return attempts
+
+
+def test_second_racing_caller_recording_the_same_attempt_is_not_a_crash():
+    """§12.2: `record_attempt` MUST raise `DuplicateAttempt` on a second
+    write to the same `AttemptKey`. Before this fix, nothing in run.py
+    caught it, so two `next()` calls racing from the same durable replay
+    position — both seeing zero existing attempts, both computing the same
+    next `AttemptKey`, one losing the race to record it — crashed with an
+    unhandled `DuplicateAttempt` instead of completing normally like any
+    other resumed call reading work someone else already durably recorded.
+    """
+    inner = StubRecordsAdapter()
+    racing_records = _RaceOnceRecordsAdapter(inner, node="classify")
+    process = _process()
+    answer = _run(
+        next_(
+            process,
+            "run-dup-1",
+            "root",
+            _fresh_ctx(records=racing_records),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "COMPLETE"
 
 
 def test_permission_denied_ends_forbidden():

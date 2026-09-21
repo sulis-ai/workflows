@@ -78,7 +78,12 @@ from sulis_workflows.definition.registry import Registry
 from sulis_workflows.domain.ports.claims import ClaimsPort, ClaimStatus
 from sulis_workflows.domain.ports.code_tool import CodeToolPort
 from sulis_workflows.domain.ports.policy import PolicyPort, Verdict
-from sulis_workflows.domain.ports.records import AttemptKey, AttemptRecord, RecordsPort
+from sulis_workflows.domain.ports.records import (
+    AttemptKey,
+    AttemptRecord,
+    DuplicateAttempt,
+    RecordsPort,
+)
 from sulis_workflows.engine.gates import (
     DeciderOutcome,
     GateResolution,
@@ -128,6 +133,31 @@ class EngineContext:
     identity: str
     platform_id: str
     lease_seconds: float = 300.0
+
+
+async def _record_attempt(
+    ctx: EngineContext, record: AttemptRecord, *, run_id: str
+) -> None:
+    """Write this attempt, or confirm someone else already did.
+
+    `RecordsPort.record_attempt` raises `DuplicateAttempt` on a second
+    write to the same `AttemptKey` (§12.2's write-once guard). Attempt
+    numbers are derived deterministically from replay position (how many
+    attempts this node's current visit has already consumed), so two
+    calls racing to record the SAME key can only be resolving the SAME
+    logical attempt — the same "second process calling next() against the
+    same RecordsPort backend reaches the same answer" property §12.1
+    already requires of the read side. Swallowing the collision here is
+    that property's write-side counterpart: the durable row this call
+    wanted to create already exists either way, and every caller already
+    has its own local `record` to keep using — none of them read
+    `record_attempt`'s return value (`None` either way)."""
+    try:
+        await ctx.records.record_attempt(
+            record, platform_id=ctx.platform_id, run_id=run_id
+        )
+    except DuplicateAttempt:
+        pass
 
 
 class AnswerKind(str, Enum):
@@ -255,9 +285,7 @@ async def report(
             started_at=_now(),
             ended_at=_now(),
         )
-        await ctx.records.record_attempt(
-            record, platform_id=ctx.platform_id, run_id=run_id
-        )
+        await _record_attempt(ctx, record, run_id=run_id)
     else:
         from sulis_workflows.engine.controls import check_controls
 
@@ -292,9 +320,7 @@ async def report(
             started_at=_now(),
             ended_at=_now(),
         )
-        await ctx.records.record_attempt(
-            record, platform_id=ctx.platform_id, run_id=run_id
-        )
+        await _record_attempt(ctx, record, run_id=run_id)
 
     top_scope = scope.split("/")[0]
     result = await _drive_scope(
@@ -527,7 +553,7 @@ async def skip(
         started_at=_now(),
         ended_at=_now(),
     )
-    await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
+    await _record_attempt(ctx, record, run_id=run_id)
     top_scope = scope.split("/")[0]
     result = await _drive_scope(
         process,
@@ -1245,7 +1271,7 @@ async def _record_step_result(
         started_at=_now(),
         ended_at=_now(),
     )
-    await ctx.records.record_attempt(record, platform_id=ctx.platform_id, run_id=run_id)
+    await _record_attempt(ctx, record, run_id=run_id)
 
     if result.outcome is StepOutcome.SUCCESS:
         return _Advance(
@@ -1661,9 +1687,7 @@ async def _advance_route(
             started_at=_now(),
             ended_at=_now(),
         )
-        await ctx.records.record_attempt(
-            record, platform_id=ctx.platform_id, run_id=run_id
-        )
+        await _record_attempt(ctx, record, run_id=run_id)
         target = decision.target
     else:
         # D20-shaped gap, found pressure-testing the real grounded-inquiry
@@ -1880,9 +1904,7 @@ async def _advance_gate(
             started_at=_now(),
             ended_at=_now(),
         )
-        await ctx.records.record_attempt(
-            record, platform_id=ctx.platform_id, run_id=run_id
-        )
+        await _record_attempt(ctx, record, run_id=run_id)
         return await _advance_gate(
             process,
             scope_def,
@@ -1971,9 +1993,7 @@ async def _advance_gate(
                 started_at=_now(),
                 ended_at=_now(),
             )
-            await ctx.records.record_attempt(
-                record, platform_id=ctx.platform_id, run_id=run_id
-            )
+            await _record_attempt(ctx, record, run_id=run_id)
             return await _advance_gate(
                 process,
                 scope_def,
@@ -2046,9 +2066,7 @@ async def _advance_gate(
                 baseline + decider_index + 1,
                 pending_decision[1],
             )
-            await ctx.records.record_attempt(
-                record, platform_id=ctx.platform_id, run_id=run_id
-            )
+            await _record_attempt(ctx, record, run_id=run_id)
             return await _advance_gate(
                 process,
                 scope_def,
@@ -2102,9 +2120,7 @@ async def _advance_gate(
         record = _person_decision_record(
             run_id, scope, node_id, baseline + len(attempts) + 1, pending_decision[1]
         )
-        await ctx.records.record_attempt(
-            record, platform_id=ctx.platform_id, run_id=run_id
-        )
+        await _record_attempt(ctx, record, run_id=run_id)
         return await _advance_gate(
             process,
             scope_def,

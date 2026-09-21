@@ -1,0 +1,155 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M31FQ6MPKWSF4S0XN1PPYAH9",
+  "started_at": "2026-09-21T08:00:00Z",
+  "completed_at": "2026-09-21T08:35:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), the DuplicateAttempt half (uncaught write-once-guard exception)",
+  "branch": "fix/duplicate-attempt-idempotent",
+  "summary_for_principal": "This closes half of another checklist item from a past session (the other half — some declared settings the engine doesn't yet act on — is still open and will be its own follow-up).\n\nThe system keeps a permanent, write-once record of every step a process takes, specifically so two overlapping attempts to do the same work can never corrupt each other. But if two such attempts genuinely did overlap — the same step, retried or resumed at almost the same moment — the loser used to crash outright with an unhandled internal error, instead of simply recognising someone else already finished that exact piece of work and moving on normally.\n\nFixed: all 9 places in the code that write these records now handle that collision the same, safe way — treat it as confirmation the work is already done, not a failure. Proven with a test that reproduces the exact race and crash before the fix, and completes cleanly after.\n\nFull test suite: 365 passed, 1 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Three checklist items remain, plus this item's other half — continuing next unless you'd rather reprioritize.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test simulating the race (a RecordsPort wrapper that injects a competing write the moment this call's own get_attempts read returns empty), confirmed raising DuplicateAttempt uncaught before the fix and reaching a clean ENDED/COMPLETE answer after."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D30 added to §18 (MADR form)."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D30."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi): RecordsPort.record_attempt MUST raise DuplicateAttempt on a second write to the same AttemptKey (spec §12.2), but nothing in engine/run.py catches it anywhere. Fix what is real, tests first, one PR per verified item or small batch of related ones.",
+    "read_as": "Confirm the claim by reading every record_attempt call site, then apply the narrowest fix that makes a genuine collision safe without inventing retry or reconciliation logic the spec doesn't ask for.",
+    "filled_in": [
+      {
+        "gap": "The spec's write-once guard (§12.2) says DuplicateAttempt MUST be raised on a second write, but does not say what a caller inside this engine should do when it receives one from its own write.",
+        "assumed": "Swallow it, on the grounds that attempt numbers are derived deterministically from replay position (never an in-memory counter), so two calls that land on the identical AttemptKey can only be two views of the same logical attempt — the write-side mirror of the read-side property §12.1 already states outright (\"the second process calling next() against the same RecordsPort backend reaches the same answer\").",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "Spec §12.1's own stated replay-determinism property, applied to the one case (a genuine write race) that property implies but §12.2 doesn't spell out explicitly.",
+        "reversal_cost": "Low — a single helper function and 9 mechanical call-site substitutions; reverting undoes the same substitution in reverse.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D30 — every engine/run.py call site that writes an AttemptRecord now goes through one shared _record_attempt helper that swallows DuplicateAttempt, instead of calling RecordsPort.record_attempt directly and letting the write-once guard's own exception propagate uncaught.",
+      "problem": "All 9 of engine/run.py's record_attempt call sites let DuplicateAttempt propagate uncaught, so a genuine write race (two next()/report()/decide() calls replaying from the same durable position, both computing the identical next AttemptKey for a node neither has recorded yet) crashed the losing call instead of completing normally.",
+      "options_rejected": [
+        "Catch DuplicateAttempt at each of the 9 call sites individually: rejected — all 9 are textually identical, so 9 copies of the same try/except is needless duplication for a fix this uniform.",
+        "Retry the whole node's dispatch on collision: rejected — nothing needs retrying; the durable row the losing call wanted to create already exists under the same key, written by the call that won the race, and every caller already has its own local record object (matching, by construction, the winner's) to keep using regardless of which write the store actually kept."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — one shared helper, 9 mechanical call-site substitutions, no schema or durable-record shape change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "All 9 of engine/run.py's record_attempt call sites (excluding the helper's own single call) were textually near-identical direct calls to ctx.records.record_attempt(...), none catching DuplicateAttempt, none reading the call's None return value.",
+          "source": "src/sulis_workflows/engine/run.py, grep for 'record_attempt(' before the fix — this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a RecordsPort wrapper that injects a competing write for a node's first attempt at the exact moment this call's own get_attempts read returns empty causes next() to raise DuplicateAttempt uncaught.",
+          "source": "tests/engine/test_run.py::test_second_racing_caller_recording_the_same_attempt_is_not_a_crash, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same scenario reaches a clean ENDED/COMPLETE answer.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 365 tests (364 pre-existing + 1 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "A future RecordsPort adapter needs to distinguish a genuine double-write bug from a resumed replay for observability (e.g. metrics on collision frequency) — DuplicateAttempt still carries the offending key, so a caller wanting that distinction can read it before this helper discards it."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "365 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "item-vi-inert-accepted-fields",
+      "location": "definition/model.py (loop.counts, invalidates, retry.backoff_seconds, note_into — note_into now partially addressed by D24/D27), domain/ports/claims.py (ClaimsPort.renew)",
+      "divergence": "Item (vi)'s other half — fields the schema and model accept but the engine does not yet act on — is not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item or small batch of closely related ones; the DuplicateAttempt fix is a distinct, narrow safety fix, while the inert-fields half needs its own separate verification pass (which fields are genuinely still inert after D24/D27's note_into work, and what each one's fix or documented-refusal should be)."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (iii, iv, v) and the rest of (vi) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "A write-once guard's own exception is part of the port's contract, not an incidental implementation detail — every caller that writes through that port needs an explicit, considered answer for what a collision means to it, not silence that lets the exception surface as an unhandled crash.",
+      "incident": "record_attempt's DuplicateAttempt was specified and implemented correctly in domain/ports/records.py from the start, but engine/run.py — the port's only real caller — never had an opinion on what receiving it should mean, across 9 separate call sites, for the entire time this engine has existed.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "docs/spec/process-definition.md's own D30 entry documents the actual mechanism used.",
+      "proposed_check": "When implementing or reviewing a caller of a port method whose contract includes a documented exception, confirm every call site has an explicit, deliberate handling decision for it, not just a happy-path call.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "Every AttemptRecord write in engine/run.py now goes through the shared _record_attempt helper, which completes normally on a genuine write race instead of crashing the losing call."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Item (vi)'s inert-accepted-fields half (loop.counts, invalidates, retry.backoff_seconds, ClaimsPort.renew, and re-checking note_into's inert status now that D24/D27 partially address it) is unverified.",
+        "untouched_id": "item-vi-inert-accepted-fields",
+        "trigger": "The next WP-03a session picks this up as its own verification pass.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "These fields validate and load but some are not yet read anywhere at runtime — a process author could reasonably believe declaring them changes engine behaviour when it currently does not."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Three WP-03a verification items remain, plus item (vi)'s inert-fields half.",
+        "action": "Continue through items (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap, and item (vi)'s inert-accepted-fields half.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with items (iii), (iv) and (v) next, then item (vi)'s inert-fields half.",
+      "reason": "Those three were already confirmed true by an earlier investigation pass with specific file:line evidence; each will likely need its own spec clarification or validator/engine feature, similar in shape to D26/D27, so starting them keeps the remaining work moving in parallel with no dependency on the inert-fields half.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
