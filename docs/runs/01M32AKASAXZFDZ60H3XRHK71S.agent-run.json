@@ -1,0 +1,184 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M32AKASAXZFDZ60H3XRHK71S",
+  "started_at": "2026-09-21T15:20:00Z",
+  "completed_at": "2026-09-21T15:50:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), invalidates sub-finding (last item)",
+  "branch": "fix/refuse-invalidates-not-yet-implemented",
+  "summary_for_principal": "This closes the last open sub-part of the current checklist item, and with it, the entire original 8-item checklist.\n\nOne more setting the system accepts but never acts on: a loop can declare that taking it should make some earlier work stop counting, so later steps don't read superseded results. Nothing in the system ever reads that declaration — it's silently ignored.\n\nBefore fixing this, I re-checked a claim carried over from earlier work: that the reference example already relies on this setting, ruling out a simple refusal. That claim was false — repeated, unchecked, across several earlier write-ups. The real example doesn't use it; only this system's own instructions document did, in one illustrative snippet, now corrected.\n\nRefused it cleanly, matching how similar gaps this session were handled: authors are told plainly it isn't supported, rather than having their instruction silently dropped. Also found and fixed a real, separate bug in how a loop decision is replayed on a later call.\n\nFull test suite: 389 passed, 6 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. This closes the original 8-item checklist in full.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V18 rule refusing invalidates at validation time, mirroring the same three declaration sites V8's _all_loops already walks for .loop, but unconditional on .loop being set."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression tests: ROUTE and GATE refusal (validator-bypass case), and a test proving the refusal fires on a second next() call against the same run, not only the first — isolating the replay-branch prerequisite fix."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New V18 accepted/refused fixtures for a ROUTE option and a GATE verdict declaring invalidates."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D38 added to §18 (MADR form); §7.2's own illustrative snippet corrected to no longer declare invalidates (it never appeared in the real, tested Appendix A fixture); §7.3's own invalidates bullet and the §14 rule table both note the refusal; V17's own missing table row added as a small, adjacent, pre-existing documentation gap."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D38."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi)'s last remaining sub-finding: invalidates is accepted by the schema/model but reportedly never read by the engine; a prior pass's framing held that Appendix A's own worked example already relies on it, so implementation (not refusal) was assumed necessary.",
+    "read_as": "Re-verify the carried-forward premise from scratch, the same discipline this session applied to every other item once a prior pass's framing turned out incomplete or imprecise (D32, D35, D36, D37 all found the original framing was missing something on direct inspection). A careful, explicitly-unhurried background research pass, prompted to confirm the Appendix A claim directly by grep and reading the fixture, found the claim false: Appendix A's own fixture (tests/definition/fixtures/accepted/process-appendix-a.yaml) has zero occurrences of invalidates; no test or fixture anywhere in the repository exercises it. The only place it appears is this spec document's own illustrative §7.2 markdown snippet, not the real, loaded-and-tested corpus. I independently re-ran the same verification greps myself before accepting the correction, per 'measure, don't author'.",
+    "filled_in": [
+      {
+        "gap": "The original item (vi) framing, and at least nine prior docs/runs/*.agent-run.json records, asserted as established fact that Appendix A's own worked example already uses invalidates, which would have ruled out refusing it (an already-relied-upon field cannot simply be refused without breaking the corpus this format's own §1 says 'supported' means running exactly as written).",
+        "assumed": "The claim was unverified and false. Re-checked directly against the real fixture and every test file before deciding anything, rather than repeating it a tenth time.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' — 'claim conformance only where a test proves it', extended here to any factual claim about the corpus, not only a conformance claim specifically.",
+        "reversal_cost": "None — this is a correction of a documentation claim, not a code change; the correction itself (removing the field from this spec document's own illustrative snippet) is trivially reversible.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "With the premise corrected, invalidates has zero real-corpus dependents, so implementing it for real (Path B, new state-tracking machinery) versus refusing it cleanly (Path A, matching D26/D27/D34 precedent) both close the item, but the spec names no operational mechanism for 'a superseded output' (does a later read see an error, an absent value, a sentinel?), and the area directly overlaps the replay-position hazard class (D19-D23, D27) that produced four separate real bugs earlier this session.",
+        "assumed": "Refuse cleanly (Path A) rather than implement — nothing in the tested corpus depends on it working, so refusing costs nothing real, while implementing would mean inventing spec-silent behaviour in exactly the territory most likely to introduce a fifth or sixth bug in that same class.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change' — the same discipline D26/D34/D36/D37 already established this session for comparable 'spec names it, engine can't act on it yet' situations.",
+        "reversal_cost": "Low — V18 and both EngineRefusal checks are simple additive refusals; a future pass implementing invalidates for real (once the spec clarification below is answered) removes them without touching anything else this decision built.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "While tracing exactly where invalidates would need to be read (to refuse it in the right places), found that _advance_route's own replay branch (taken when a route decision is already durably recorded from a past call, rather than evaluated fresh) reconstructed the resolved RouteTarget from next/end/loop only, silently dropping invalidates — a real, separate, pre-existing bug independent of the refusal decision.",
+        "assumed": "Fixed as a prerequisite, not left alongside the refusal — an inconsistent refusal (firing only on the call that first resolves a decision, silently not firing on a later replay of that same decision) would be a worse outcome than either implementing or cleanly refusing, and is the exact 'correct once, silently lost on replay' shape D19/D27 already fixed elsewhere in this same file.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'survive the bad-but-conformant attack' and 'fail closed' — a refusal that only sometimes fires is not a refusal a definition author or an engine operator can rely on.",
+        "reversal_cost": "None avoided — a one-field addition with no behavioural change to next/end/loop, needed regardless of whether the refusal itself stays or a future implementation replaces it.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D38 — invalidates (§7.3) is refused, at both validation (V18) and engine runtime, rather than silently no-op'd; a genuine, previously-unverified claim propagated across earlier run records is corrected; a related replay-correctness bug in _advance_route found while checking it is fixed as a prerequisite.",
+      "problem": "invalidates is accepted by the schema and model (RouteTarget.invalidates/RouteOption.invalidates) but never read anywhere the engine resolves state. A carried-forward, unverified claim that Appendix A's own worked example already relies on it had blocked refusing it as an option across at least nine prior run records; direct verification found the claim false. Separately, _advance_route's own replay branch silently dropped invalidates when reconstructing an already-recorded route decision.",
+      "options_rejected": [
+        "Implement invalidates for real, marking a named node's recorded outputs as superseded: rejected for this pass — the spec names no mechanism for 'a superseded output' (error? absent? a sentinel?), and doing this correctly means new state-tracking machinery in exactly the replay-position territory that produced D19-D23/D27 and the _advance_route bug found while investigating this item; a hasty implementation risks adding a sixth bug to that class rather than closing one.",
+        "Leave it silently unread, as found: rejected — a definition author who declares invalidates is expressing an intent the engine would otherwise ignore without ever telling them, exactly the silent-gap shape CLAUDE.md's 'fail closed' principle refuses."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — V18 and both EngineRefusal checks are simple additive refusals; the _advance_route replay-branch fix is a one-field addition with no behavioural change to next/end/loop, which a future real implementation of invalidates would need regardless.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Appendix A's own fixture (tests/definition/fixtures/accepted/process-appendix-a.yaml) does not declare invalidates anywhere; no test or fixture file in the repository does either.",
+          "source": "grep -n 'invalidates' tests/definition/fixtures/accepted/process-appendix-a.yaml (no matches); grep -rln 'invalidates' tests/ (no files), run independently by me this session after a background research agent first reported the same result."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "invalidates appears nowhere in engine/run.py before this fix (never read at loop-take time or anywhere else).",
+          "source": "grep -rn 'invalidates' engine/ before this pass — zero matches."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a RouteNode option or GateNode verdict declaring invalidates was silently accepted and the run continued normally (SUCCESS/DROPPED/COMPLETE), not refused.",
+          "source": "tests/engine/test_run.py::test_route_invalidates_is_refused_cleanly_rather_than_silently_ignored and ::test_gate_invalidates_is_refused_cleanly_rather_than_silently_ignored, run against the unfixed engine this session — both reached a normal ending instead of FAILED."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the _advance_route replay-branch fix specifically (with the refusal checks otherwise in place), a second next() call against the same run silently reached DROPPED instead of refusing a second time — isolated by reverting only the one-field addition and re-running the test suite.",
+          "source": "tests/engine/test_run.py::test_route_replay_branch_carries_invalidates_so_the_refusal_is_not_silently_lost_on_a_later_call, run with only the invalidates=... field removed from the replay branch's RouteTarget reconstruction — failed with DROPPED, while the two single-call refusal tests still passed."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After both fixes, all three new engine tests and both new validator tests pass; the refusal fires consistently on both a fresh evaluation and a replay of the same decision.",
+          "source": "Same tests, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 389 tests (383 pre-existing + 6 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants invalidates implemented for real — needs the proposed spec clarification (D38's own MADR entry: what 'stop counting' means operationally for a later read of steps.<id>.output) answered first, not guessed at here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "389 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 18 source files\")."
+    },
+    {
+      "subject": "Whether Appendix A's own worked example declares invalidates.",
+      "method": "grep -n 'invalidates' against the real fixture and every test file, run twice independently (once by a background research agent, once by me directly).",
+      "location": "tests/definition/fixtures/accepted/process-appendix-a.yaml; tests/",
+      "result": "Zero matches in both. The claim that it does was false."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "invalidates-not-implemented",
+      "location": "engine/run.py (invalidates read only to refuse it, never to act on it); definition/validate.py (V18 refuses it, does not implement its semantics)",
+      "divergence": "A definition declaring invalidates cannot be used with this engine — it is refused at validation time, or by the engine itself if validation is bypassed.",
+      "governed_exception": true,
+      "why_not_now": "Implementing it for real needs the spec to state what 'stop counting' means operationally (an error, an absent value, or a specific sentinel on a later read of an invalidated node's output) before any implementation would be reading the spec rather than guessing at it; D38's own MADR entry proposes this as a spec clarification for a future pass."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "A factual claim about the codebase carried forward from an earlier session or an earlier run record is not evidence — re-verify it directly against the actual files before letting it constrain a decision, especially when the item has already been flagged as touching a hazard class (here, replay-position bugs) that rewards extra care.",
+      "incident": "The claim 'Appendix A already uses invalidates' had propagated, unchecked, across at least nine prior docs/runs/*.agent-run.json records and was carried into this pass as an established constraint ruling out refusal. A direct grep against the real fixture and every test file found zero occurrences — the claim was false from the start.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D38's own MADR entry documents the correction; this run record's own flags entry names it explicitly for the principal's awareness.",
+      "proposed_check": "Before treating any prior-session or prior-record claim about corpus contents ('the real fixture uses X', 'no test exercises Y') as a constraint on a current decision, re-run the grep or read that would verify it directly, rather than citing the earlier record as the source of truth.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "invalidates is now refused cleanly at both validation and engine runtime, consistently whether a definition's decision is resolved fresh or replayed from a durable record.",
+      "This closes item (vi) in full, and with it, the entire original 8-item WP-03a verification checklist (loop_budget default disagreement; AttemptRecord.inputs; EXTERNAL/TOOL-composite mechanisms; inline process: bodies; V10 caller-routes-every-ending; DuplicateAttempt, retry.backoff_seconds, note_into decider scope, loop.counts, ClaimsPort.acquire-for-hand-off, and now invalidates; stale docs; Appendix A person_required_when)."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "invalidates remains unimplemented, needing the spec to state what 'stop counting' means operationally before a real implementation can be attempted.",
+        "untouched_id": "invalidates-not-implemented",
+        "trigger": "The principal wants invalidates implemented for real.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "A refused field is a clear, immediate failure at validation or run time, not a silent, hard-to-notice gap — a definition author declaring it finds out immediately, not after a superseded value quietly leaks into a later step."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "No further action is required to close WP-03a's original scope — all eight items are now verified, fixed, or honestly documented as spec-silent gaps with proposed clarifications. Future work (implementing invalidates, EXTERNAL/TOOL-composite dispatch, ClaimsPort.renew, INPUT gates, V10's caller-routes-every-ending requirement) each need a spec-level decision first, all named in their own MADR entries' proposed clarifications.",
+      "reason": "This was the last open item from the original verification scope; nothing found during it points to further urgent work.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

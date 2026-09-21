@@ -1237,6 +1237,40 @@ effect: QUERY
     assert "V17" in _rules(findings)
 
 
+# ------------------------------------------------------------------------------ V18 --
+
+
+def test_v18_accepted_route_option_with_no_invalidates() -> None:
+    doc = _route_process(
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, loop: { budget: 3 } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V18" not in _rules(findings)
+
+
+def test_v18_refused_route_option_declaring_invalidates() -> None:
+    """D38: `invalidates` (spec §7.3) is accepted by the schema but never
+    read anywhere the engine resolves state — refused rather than silently
+    ignored, the same as V17's D34 precedent."""
+    doc = _route_process(
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, "
+        "loop: { budget: 3 }, invalidates: [route] }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V18" in _rules(findings)
+
+
+def test_v18_refused_gate_verdict_declaring_invalidates() -> None:
+    doc = _gate_process(
+        '    { type: GATE, asks: "Proceed?", '
+        "on: { PERMIT: { end: COMPLETE, invalidates: [gate] }, DENY: { end: DENIED } } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V18" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ D35 --
 # An inline PROCESS body (spec §9.1, D18) is a Process-shaped sequence of its
 # own (start/nodes/state/endings) — these confirm it is now checked by the
