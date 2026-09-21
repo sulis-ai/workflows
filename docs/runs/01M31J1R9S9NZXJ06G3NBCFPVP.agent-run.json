@@ -1,0 +1,162 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M31J1R9S9NZXJ06G3NBCFPVP",
+  "started_at": "2026-09-21T08:45:00Z",
+  "completed_at": "2026-09-21T09:15:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), the retry.backoff_seconds sub-finding of the inert-accepted-fields half",
+  "branch": "fix/retry-backoff-seconds",
+  "summary_for_principal": "This closes one of five sub-parts of another checklist item (declared settings the system accepts but doesn't act on). A background research pass this session re-verified all five by reading the actual code, not by trusting an earlier report — two turned out riskier or more open-ended than first thought and are being handled separately; this is the one that was a clean, mechanical fix.\n\nWhen a step's automated tool call fails in a way that's expected to be temporary, the system retries it. The document format lets a process author declare how long to wait before retrying, doubling each time — but that setting was silently ignored: every retry fired back-to-back with no pause at all, no matter what was declared.\n\nFixed: retries now actually wait, doubling each time, exactly as documented. Proven with a test that confirms the exact wait times.\n\nFull test suite: 366 passed, 1 new (a pre-existing retry test also updated so it doesn't now take a real 2-second pause every run).\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Four sub-parts of this checklist item remain, plus three unrelated items — continuing next unless you'd rather reprioritize.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test asserting exact backoff timings via a patched asyncio.sleep; confirmed the patch target didn't even exist before the fix. A pre-existing retry test updated to stub asyncio.sleep too, so it stays fast."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D31 added to §18 (MADR form)."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D31."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi)'s 'inert accepted fields' half: fields the schema/model accept but the engine doesn't act on at runtime. A background research pass identified retry.backoff_seconds as one of five such fields, confirmed genuinely inert by direct code reading (grep across src/ finds it only in the schema, model, and unused default constant).",
+    "read_as": "Of the five findings, fix the ones that are mechanical and low-risk now; defer the ones needing a real design decision (an open spec question, or a change with the same replay-correctness hazard class this session already hit four times) to their own separate passes rather than rushing all five into one PR.",
+    "filled_in": [
+      {
+        "gap": "The spec says backoff_seconds is 'the starting delay before exponential backoff' but does not state the exact multiplier or whether there's a maximum delay cap.",
+        "assumed": "Delay before the Nth retry = backoff_seconds * 2^(N-1) — the plainest reading of 'starting delay' (the first retry waits exactly backoff_seconds) 'before exponential backoff' (doubling from there). No cap applied, since the spec states none and inventing one would be guessing a rule the format doesn't ask for.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'survive the bad-but-conformant attack' cuts both ways here — inventing an uncited cap would itself be an uncited rule; the literal spec wording supports this formula without needing one.",
+        "reversal_cost": "Low — a one-line formula; changing the multiplier or adding a cap later touches only this one computation.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Whether to sleep inline inside the same next()/report() call, or return a 'retry after N seconds' signal for a later call to resume, isn't stated by the spec's own four-call contract (§12.1).",
+        "assumed": "Sleep inline — the engine is already fully async end to end, so this only delays the one coroutine handling this call, not the event loop or any other concurrent run; a caller-facing contract change (a new answer kind or field) is a materially bigger surface change than this pass's own narrow scope.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now; defer the expensive guess' and 'keep PRs to one reviewable concern' — the inline sleep is the narrowest change that makes the spec's stated behaviour true, without redesigning the call contract on a guess about what future callers might need.",
+        "reversal_cost": "Low — two-way door; removing the sleep call returns to immediate redispatch, and a future 'retry later' contract change could still be layered on top without touching this formula.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D31 — a TRANSIENT retry now waits retry.backoff_seconds (or the format default), doubling on each successive retry, before redispatching; before this fix backoff_seconds was accepted, parsed, and otherwise completely unused.",
+      "problem": "RetrySpec.backoff_seconds was accepted by the schema, parsed into the model, and carried by every StepNode/Tool, but nothing in engine/run.py ever read it — both retry re-dispatch sites (_advance_step's fall-through, _record_step_result's recursive call) redispatched immediately with no delay, regardless of what backoff_seconds said or defaulted to.",
+      "options_rejected": [
+        "Return a 'retry after N seconds' signal to the caller and let a new next()/report() call redispatch later: rejected for this pass — widens NextAnswer's own shape for every existing caller to handle, a bigger surface change than this pass's narrow scope, and nothing in §12.1's four calls anticipates a 'come back later for this same in-flight attempt' response today."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — a local variable, a one-line formula, and one await asyncio.sleep(...) call; no schema or durable-record shape change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, engine/run.py had no `import asyncio` at all and no reference to backoff_seconds anywhere outside the schema/model/defaults — confirmed by grep across src/ and by the new test's monkeypatch target not existing pre-fix.",
+          "source": "grep -rn backoff_seconds src/; tests/engine/test_run.py::test_transient_retry_waits_with_exponential_backoff, run against the unfixed engine, this session (failed with ModuleNotFoundError for the monkeypatch target, the strongest possible confirmation no mechanism existed)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, two consecutive TRANSIENT failures then a success, with backoff_seconds=1.0, produce recorded sleep calls of exactly [1.0, 2.0] before the second and third dispatch attempts.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "retry.max (the sibling field governing how many retries are allowed) was already correctly enforced at both sites before this fix and is unaffected by it.",
+          "source": "src/sulis_workflows/engine/run.py, lines computing max_retries at both retry sites — read and confirmed unchanged by this diff."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 366 tests (365 pre-existing + 1 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path; full suite runs in ~7.3s (no real sleeps leaked into the test run).",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "A future pass wants a non-blocking 'retry later' contract instead of an inline sleep (e.g. because a host's next()/report() call has its own tight timeout budget) — the rejected option above is the starting point."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "366 passed, 0 failed, ~7.3s wall time. ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "item-vi-remaining-inert-fields",
+      "location": "definition/model.py (LoopSpec.counts), engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Four more sub-findings from the same background research pass are not touched in this PR: loop.counts (needs a spec clarification on what counts as 'because a check failed' for ROUTE loops), invalidates (Appendix A's own worked example already uses it, so it can't be refused — needs real, careful design work given its overlap with the same replay-correctness hazard class D20-D23 already hit four times this session), note_into's remaining gap for policy/agent-decided verdicts (spec is ambiguous whether it should apply beyond person deciders), and ClaimsPort.renew (needs a new heartbeat-style public API surface, a bigger format-level decision than wiring existing pieces together).",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item or small batch of closely related ones, and 'keep PRs to one reviewable concern' — the five sub-findings differ enough in risk and scope (mechanical fix vs. open spec question vs. new public API) that bundling them would violate both rules; retry.backoff_seconds was the only one with no open design question and no replay-correctness hazard."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (iii, iv, v) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When one checklist item bundles several 'inert field' sub-findings, verify and triage all of them together before writing any code — some may be mechanical fixes, others may hide open spec questions or design-level hazards, and knowing which is which up front prevents starting an implementation that turns out to need a design decision halfway through.",
+      "incident": "A single background research pass covering five candidate inert fields found: one mechanical fix (this PR), one that can't be refused because the spec's own worked example already uses it and needs real design work (invalidates), one with a genuine spec ambiguity (note_into's decider-kind scope), one needing a new public API surface (ClaimsPort.renew), and one needing a spec clarification before implementation (loop.counts). Triaging all five up front, before writing any code, made it possible to ship the one clean case immediately rather than getting partway into a harder one first.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "This run record's own triage; the remaining four sub-findings are each parked with their own specific blocker named, ready for their own dedicated passes.",
+      "proposed_check": "Before starting code on a batch of related findings, sort them by whether they need a design decision or spec clarification versus being a straightforward wiring fix, and do the straightforward ones first as their own separate PRs.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "Every TRANSIENT retry now waits the declared or defaulted backoff_seconds, doubling on each successive retry, before redispatching."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Four more item-(vi) sub-findings remain: loop.counts, invalidates, note_into's remaining policy/agent-decider gap, and ClaimsPort.renew.",
+        "untouched_id": "item-vi-remaining-inert-fields",
+        "trigger": "The next WP-03a session picks these up one at a time, in roughly increasing order of risk: loop.counts (needs a scoped spec question answered), note_into (needs a spec decision on decider-kind scope), invalidates (real implementation work, same hazard class as D20-D23), ClaimsPort.renew (needs new public API surface — largest scope change of the four).",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "None of these four are unsafe left as-is — a declared field that the engine ignores does not corrupt state or crash; it just means the process author's expectation and the engine's actual behaviour diverge, which is a documented, not hidden, gap once this pass's research is folded into the spec."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Four item-(vi) sub-findings and three other WP-03a items remain.",
+        "action": "Continue through loop.counts, invalidates, note_into's remaining gap, ClaimsPort.renew, then items (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap.",
+        "source_kind": "PARKED",
+        "source_id": "item-vi-remaining-inert-fields",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with note_into's remaining gap or loop.counts next (each needs a scoped spec decision, not a large implementation), saving invalidates and ClaimsPort.renew for last (the largest, highest-risk of the four).",
+      "reason": "Ordering by risk and scope, as this pass's own lesson names: resolve the two spec-ambiguity cases first since they're relatively contained once a decision is made, before attempting invalidates (real replay-correctness risk) or ClaimsPort.renew (a new public API surface).",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

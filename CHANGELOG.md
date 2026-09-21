@@ -6,6 +6,12 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D31:** `retry.backoff_seconds` (spec §7.1/§15, "the starting delay before exponential
+  backoff") was accepted, parsed, and otherwise completely unused — a `TRANSIENT` retry
+  redispatched immediately, back-to-back, regardless of any declared or defaulted backoff.
+  `_advance_step` now waits `backoff_seconds * 2^(retry_number-1)` before each retry dispatch;
+  `retry.max` (already correctly enforced) is unaffected. No ceiling is applied — the spec states
+  none.
 - **D30:** a second caller racing to record the same attempt (two `next()`/`report()`/`decide()`
   calls replaying from the same durable position, both computing the identical next
   `AttemptKey` for a node neither has recorded yet) crashed with an uncaught `DuplicateAttempt`
