@@ -10,11 +10,19 @@ work package's explicit boundary; this one crosses it.
 Reconciling the new v1 format against the two DAG-compiler paths already in `compiler/`
 (`dag_parser.py`→`outcome_compiler.py` and `graph_dsl.py`→`graph_compiler.py`) found the two
 disagree with each other on node-type vocabulary and dict shape, and only the `step` node type of
-either is exercise-tested. Bending either to fit the spec costs more than it saves. Three of their
-mechanics ARE reusable and are reused here rather than rebuilt: LangGraph's `interrupt()` /
+either is exercise-tested. Bending either to fit the spec costs more than it saves.
+
+**Update (superseding this section's original plan, WP-03a item vii/D25):** the plan below was to
+reuse three of LangGraph's mechanics rather than rebuild them — `interrupt()` /
 `Command(resume=...)` (gate pause/resume), `Send()` (fan-out — not in this work package's scope,
 kept for WP-03), and `RetryPolicy` paired with the existing `TransientPortError` /
-`PermanentPortError` split (§12.4). `compiler/` itself is not modified (CLAUDE.md).
+`PermanentPortError` split (§12.4). None of the three were actually used once step 5 (`engine/run.py`)
+was built: the stateless-contract requirement ("nothing held in memory between calls", §12.1) was
+met instead by replaying durable `RecordsPort` attempt records on every call — a design that has no
+compiled graph and no checkpointer to resume, so there was nothing left for LangGraph's pause/resume
+primitives to do. `engine/` imports no `langgraph` anywhere (`engine/run.py`'s own module docstring
+is normative on how state and resume actually work). `compiler/` itself is not modified (CLAUDE.md)
+and still uses LangGraph on its own, separate, deprecated path.
 
 ## Outcome
 
@@ -54,13 +62,13 @@ templates (§13) remain out of scope, genuinely deferred to WP-03.
 6. **`engine/gates.py`** — `GATE` execution: deciders asked in order (`policy`/`agent`/`person`),
    `PERMIT`/`DENY`/`INDETERMINATE` vocabulary, the `decision@1` evidence checker and
    no-deciding-on-your-own-work check (both already written in WP-01's `checkers.py`, unwired
-   until now), provenance recorded per decider asked. Built on `interrupt()` /
-   `Command(resume=...)`.
+   until now), provenance recorded per decider asked. Gate pause/resume is durable-attempt-record
+   replay, not LangGraph's `interrupt()`/`Command(resume=...)` (see "Why this shape" update above).
 7. **`engine/run.py`** — `next(run, scope)` / `report(...)` / `decide(...)` (§12.1): resolves
-   `process@version`, recompiles the LangGraph graph (cheap, deterministic — the same shape
-   `OutcomeGraphCompiler.compile()` already proves), resumes via a durable checkpointer keyed on
-   `run`. Nothing held in memory between calls — the property a fresh-process resume test in A5
-   proves rather than asserts.
+   `process@version` and reconstructs the run's current position by replaying every node's durable
+   attempt records forward (`_drive_scope`) — no compiled graph, no checkpointer. Nothing held in
+   memory between calls — the property a fresh-process resume test in A5 proves rather than
+   asserts.
 8. **Loop budgets** (§7.3): a durable counter per loop (default name `<from>-><to>`), rebuilt from
    records — not an in-process variable — with `on_exhausted` routing.
 
