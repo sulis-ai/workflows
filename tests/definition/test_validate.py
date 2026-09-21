@@ -418,6 +418,30 @@ def test_v8_refused_zero_loop_budget() -> None:
     assert "V8" in _rules(findings)
 
 
+def test_v8_accepted_route_loop_counts_passes() -> None:
+    doc = _route_process(
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, "
+        "loop: { budget: 3, counts: PASSES } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V8" not in _rules(findings)
+
+
+def test_v8_refused_route_loop_counts_failures() -> None:
+    """D33: a ROUTE's own `when` branch is an arbitrary state expression —
+    unlike a GATE's own DENY verdict, there is no engine-visible signal for
+    "this branch was taken because a check failed", so `counts: FAILURES`
+    is refused rather than guessed at."""
+    doc = _route_process(
+        "      - { if: 'state.verdict == \"SURVIVED\"', end: SURVIVED_END }\n"
+        "      - { if: 'state.verdict == \"DROPPED\"', next: route, "
+        "loop: { budget: 3, counts: FAILURES } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V8" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ V9 --
 
 _GATE_PROCESS = """
