@@ -594,6 +594,62 @@ def test_decide_completes_a_person_gate_and_the_run_reaches_complete():
     assert second.ending == "COMPLETE"
 
 
+def test_note_into_an_append_channel_is_refused_cleanly_rather_than_crashing():
+    """D27: `_state_with_note` recomputes and re-applies the gate's note on
+    every replay pass that reaches a DECIDED resolution — safe only for
+    REPLACE (idempotent under repeated identical writes), not APPEND (would
+    silently accumulate the same note again on every replay). V9 already
+    refuses this at validation time; this is the validator-bypass case,
+    proving the OLD behaviour (an uncaught ReducerMismatch) is gone and
+    the run ends cleanly instead."""
+    from sulis_workflows.definition.model import StateChannel
+
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(Decider(kind="person", permission="approve.thing"),),
+                note_into="state.notes",
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        },
+        state={"notes": StateChannel(type="list<string>", reducer="APPEND")},
+    )
+    records = StubRecordsAdapter()
+    ctx = _fresh_ctx(records=records)
+    first = _run(
+        next_(process, "run-9", "root", ctx, inputs={"question": "why"}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.AWAITING_DECISION
+
+    second = _run(
+        decide(
+            process,
+            "run-9",
+            "root",
+            "sign-off",
+            _fresh_ctx(records=records),
+            inputs={"question": "why"},
+            host_inputs={},
+            verdict=Verdict.PERMIT,
+            note="looks fine",
+            subject="user-42",
+        )
+    )
+    assert second.kind is AnswerKind.ENDED
+    assert second.ending == "FAILED"
+    assert second.outcome == "FAILURE"
+    assert "notes" in second.says
+    assert "APPEND" in second.says
+
+
 def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_it():
     agentic_tool = Tool(
         header=_header("classify", "TOOL"),

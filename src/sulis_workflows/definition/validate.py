@@ -894,6 +894,27 @@ def _v9_one_gate(
             message=f"gate {node_id!r} sets person_required_when but has no person decider",
         )
 
+    if node.note_into and node.note_into.startswith("state."):
+        # D27: the engine recomputes and re-applies this gate's note on
+        # every replay pass that reaches a DECIDED resolution — safe only
+        # for REPLACE (idempotent under repeated identical writes).
+        # APPEND/MERGE/UPSERT_BY_ID would accumulate the same note again
+        # each time the run is replayed forward, a silent corruption; §7.6
+        # states no "once per send-back" semantics for a non-REPLACE
+        # target, so this refuses rather than guessing at one.
+        channel_name = node.note_into[len("state.") :]
+        channel = process.state.get(channel_name)
+        if channel is not None and channel.reducer != "REPLACE":
+            yield Finding(
+                rule="V9",
+                node=node_id,
+                message=(
+                    f"gate {node_id!r}'s note_into targets {node.note_into!r}, a "
+                    f"{channel.reducer} channel — only a REPLACE channel is "
+                    "supported (D27)"
+                ),
+            )
+
     for decider in node.deciders:
         if decider.kind != "agent":
             continue

@@ -22,7 +22,7 @@ state:
   conclusion:      { type: "profile:conclusion@1", reducer: REPLACE }
   recommendations: { type: "list<profile:recommendation@1>", reducer: REPLACE }
   fidelity:        { type: "enum[ENTAILED, DROPPED, REVISED]", reducer: REPLACE }
-  notes:           { type: "list<string>", reducer: APPEND, default: [] }
+  note:            { type: string, reducer: REPLACE, default: "" }
 start: frame
 endings:
   COMPLETE:     { outcome: SUCCESS, says: "Done: the recommendations are signed off." }
@@ -92,7 +92,7 @@ nodes:
       - agent: review-recommendations@1
       - person: { permission: agents.recommendation.approve }
     person_required_when: 'state.confidence == "PARTIAL"'
-    note_into: state.notes
+    note_into: state.note
     on:
       PERMIT: { end: COMPLETE }
       DENY:   { next: gather }
