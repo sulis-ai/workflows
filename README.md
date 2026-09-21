@@ -86,9 +86,9 @@ explicit on both server and client runners.
   headline addition) can load, validate and *run* a declarative process definition end to end —
   `STEP`/`ROUTE`/`GATE` nodes, permission-checked dispatch, durable records, loop budgets, and a
   step calling another whole process (named or inline). Still pre-1.0: `PARALLEL`/`JOIN`/
-  `FOR_EACH`, triggers and templates aren't executable yet, and no real AI model is wired in — a
-  step needing one just pauses and waits. See `docs/spec/process-definition.md` and
-  `docs/work-packages/`.
+  `FOR_EACH`, triggers and templates aren't executable yet, `GATE kind: INPUT` is spec-legal but
+  refused rather than run (D24), and no real AI model is wired in — a step needing one just pauses
+  and waits. See `docs/spec/process-definition.md` and `docs/work-packages/`.
 
 Next: the platform consumes this package (server runner); the brain-runtime consumes it
 (client runner); handler-node dispatch becomes a port; `compile()`-time adapters extend to

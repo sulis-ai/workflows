@@ -1740,6 +1740,58 @@ def test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own
     assert answer.outcome == "SUCCESS"
 
 
+def test_input_gate_is_refused_cleanly_rather_than_misrouted():
+    """WP-03a Fault 2: `kind: INPUT` gates are refused at validation time
+    (V9), but the validator is advisory — nothing stops a Process built
+    directly (as every test here does) or loaded without going through
+    `sulis-workflows validate` from reaching the engine with one. Before
+    this fix, `_advance_gate` never read `node.kind` at all: a `policy`
+    decider's PERMIT/DENY answer was evaluated as if this were an
+    APPROVAL gate, found no matching route in `on` (an INPUT gate only
+    ever declares `ANSWERED`), and raised the genuinely confusing "no
+    route declared for verdict 'PERMIT'" — naming a verdict the gate's
+    own author never wrote anywhere. The engine now recognises `kind:
+    INPUT` itself and refuses with a clear, correctly-worded reason
+    instead, the same defence-in-depth PARALLEL/JOIN/FOR_EACH already
+    have against a validator bypass."""
+
+    process = Process(
+        header=_header("input-gate-process", "PROCESS"),
+        start="ask",
+        permission="workflows.input-gate.start",
+        nodes={
+            "ask": GateNode(
+                id="ask",
+                kind="INPUT",
+                asks="What is the target date?",
+                reviewing=(),
+                deciders=(Decider(kind="policy", ref="always-permit@1"),),
+                answer_type="string",
+                answer_into="state.target_date",
+                on={"ANSWERED": RouteTarget(end="COMPLETE")},
+            ),
+        },
+        endings={"COMPLETE": Ending(outcome="SUCCESS", says="Done.")},
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-input-gate-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "INPUT" in answer.says
+    assert "no route declared for verdict" not in answer.says
+
+
 def test_control_fail_repair_gives_one_more_attempt_before_then():
     from sulis_workflows.definition.model import ControlFail, ControlRef, Profile
 
