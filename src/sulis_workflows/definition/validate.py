@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sulis_workflows.definition import model
@@ -215,11 +215,81 @@ def validate_tool(tool: model.Tool, registry: Registry) -> list[Finding]:
             if err:
                 findings.append(err)
     findings.extend(_v2_mechanism_references(tool.mechanism, registry))
+    findings.extend(_validate_inline_process(tool, registry))
     type_strings = [i.type for i in tool.inputs.values()] + [
         o.type for o in tool.output.values()
     ]
     findings.extend(_v2_profile_type_refs(type_strings, registry))
     return findings
+
+
+def _validate_inline_process(tool: model.Tool, registry: Registry) -> list[Finding]:
+    """spec §9.1/D18: an inline `PROCESS` mechanism's anonymous body has no
+    `id`/`version`/`permission` of its own, but it is still a
+    Process-shaped sequence of nodes/routing/state/endings — the same
+    bad-but-conformant shapes V4-V16 already refuse in a top-level Process
+    document (an unreachable node, a route to an undeclared ending, a
+    non-exhaustive ROUTE, an UPSERT_BY_ID channel with no key, ...) were
+    never checked here at all; nothing recursed into `mechanism.process`
+    (confirmed: no reference to it anywhere in this module before D35).
+
+    Reuses the SAME rule functions a top-level Process is checked by,
+    wrapping the inline body in a synthetic `Process` (`inputs`/
+    `host_inputs`/`triggers` all empty — an inline body has none of its
+    own, spec §9.1, so `inputs.*`/`host.*` paths inside it correctly
+    resolve as undeclared, the same as any other undeclared channel).
+    Findings carry their own original rule id (a V14 violation inside an
+    inline body is still a V14 violation) with a message prefix naming
+    which Tool's inline body it came from, since `Finding.node` alone
+    (an inline node's own id) would otherwise read as if it belonged to
+    some top-level Process.
+
+    D35: **`V10`'s self-reachability/depth check is deliberately NOT
+    reused here** — it is keyed off a registered Process's own
+    `header.id` inside a registry-wide call graph (`_build_call_graph`),
+    and an anonymous inline body has no id anything else could ever name
+    to call it: "self-reachable" does not transfer to something nothing
+    can reach by name. `result.endings` coverage for a *nested* `PROCESS`
+    call inside an inline body's own `StepNode`s is WP-03a item (v)'s own
+    separate finding, not this one — that nested call's own Tool is a
+    SEPARATELY REGISTERED definition, validated (inline body included)
+    when its own document is validated, so no recursion is needed here
+    either way."""
+
+    inline = tool.mechanism.process
+    if inline is None:
+        return []
+    synthetic = model.Process(
+        header=model.Header(
+            api_version=tool.header.api_version,
+            kind="PROCESS",
+            id=f"{tool.header.id}::inline",
+            version=tool.header.version,
+            title=f"{tool.header.title} (inline)",
+        ),
+        start=inline.start,
+        nodes=inline.nodes,
+        endings=inline.endings,
+        state=inline.state,
+    )
+    ctx = TypeContext(synthetic, registry)
+    findings: list[Finding] = []
+    findings.extend(_v2_process_references(synthetic, registry))
+    findings.extend(v4_mappings(synthetic, registry, ctx))
+    findings.extend(v5_expressions(synthetic, ctx))
+    findings.extend(v6_routes(synthetic, ctx))
+    findings.extend(v7_reachability(synthetic))
+    findings.extend(v8_loops(synthetic))
+    findings.extend(v9_gates(synthetic, registry))
+    findings.extend(v11_parallel(synthetic))
+    findings.extend(v12_for_each(synthetic, ctx))
+    findings.extend(v13_side_effects(synthetic))
+    findings.extend(v14_endings(synthetic))
+    findings.extend(v16_state_channels(synthetic))
+    return [
+        replace(f, message=f"tool {tool.header.id!r} inline process body: {f.message}")
+        for f in findings
+    ]
 
 
 def _v2_mechanism_references(
@@ -229,9 +299,11 @@ def _v2_mechanism_references(
     mechanism kind makes them one (spec §4.3); CODE/SKILL's own `ref`
     names a module or skill path, not a registered definition, so only a
     referenced (not inline, D18) PROCESS's `ref`, TOOL(composite)'s
-    `composes[].tool`, and SKILL's `allowed_tools[]` are checked here.
-    An inline PROCESS's own internal `tool:` references are not yet
-    resolved by this function (untouched — no fixture exercises one)."""
+    `composes[].tool`, and SKILL's `allowed_tools[]` are checked here. An
+    inline PROCESS's own internal `tool:`/decider references are checked
+    by `_validate_inline_process` instead (D35), which reuses the same
+    node-walking `_v2_process_references` a top-level Process is checked
+    by."""
 
     findings: list[Finding] = []
     if mechanism.kind == "PROCESS" and mechanism.ref:

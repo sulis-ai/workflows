@@ -6,6 +6,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D35:** an inline `PROCESS` mechanism's own body (`mechanism.process`, spec §9.1, D18) was never
+  checked by any validator rule — a bad-but-conformant inline body (unreachable node, undeclared
+  state channel, non-exhaustive route, undeclared `tool:` reference, ...) passed with zero findings
+  and only surfaced as an uncaught `EngineRefusal` the first time a run reached it. Now checked by
+  the same rules (V2, V4-V9, V11-V14, V16) a top-level Process document is, reused directly against
+  a synthetic wrapper. Found and fixed a real instance in this repo's own spec-mirrored worked
+  example: `state.current`/`state.survived` were read/written but never declared.
 - **D34:** a `mechanism.kind: EXTERNAL` or `TOOL` (composite) Tool was silently dispatched as if it
   were a `SKILL` — handed off to the caller's agent session as an ordinary `TOOL_STEP` (for
   `TOOL`, one with no instructions at all, since this kind has no `ref`) — though spec §12.1
