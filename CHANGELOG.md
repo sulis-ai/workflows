@@ -5,6 +5,15 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+### Fixed
+- **D27:** a gate's `note_into` (D24, v0.12.2) crashed with an uncaught `ReducerMismatch` when its
+  target channel's reducer was `APPEND` — exactly the shape both the spec's §7.6 example and
+  Appendix A's own worked example used. The engine recomputes and re-applies a gate's note on
+  every replay pass, which is safe only for an idempotent reducer (`REPLACE`); `APPEND` would have
+  silently accumulated the same note again on every replay even once the crash was fixed. Now
+  refused at both validation (**V9**) and engine runtime, the same defence-in-depth `kind: INPUT`
+  (D26) already has. Both spec worked examples corrected to a `REPLACE` `note` channel.
+
 ## [0.12.2] — 2026-09-20
 
 ### Fixed — four faults found by building a consumer on v0.12.1, each with its own regression test

@@ -562,6 +562,54 @@ endings:
     assert "V9" in _rules(findings)
 
 
+def test_v9_accepted_note_into_a_replace_channel() -> None:
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  note: { type: string, reducer: REPLACE, default: "" }
+start: gate
+nodes:
+  gate:
+    { type: GATE, asks: "Proceed?", note_into: state.note,
+      on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }
+  DENIED: { outcome: STOPPED, says: "Refused." }
+"""
+    findings = validate(doc, registry=Registry())
+    assert "V9" not in _rules(findings)
+
+
+def test_v9_refused_note_into_an_append_channel() -> None:
+    """D27: `_state_with_note` recomputes and re-applies the gate's note on
+    every replay pass — safe for REPLACE (idempotent), not for APPEND, which
+    would accumulate the same note again each time the run is replayed."""
+
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  notes: { type: "list<string>", reducer: APPEND, default: [] }
+start: gate
+nodes:
+  gate:
+    { type: GATE, asks: "Proceed?", note_into: state.notes,
+      on: { PERMIT: { end: COMPLETE }, DENY: { end: DENIED } } }
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }
+  DENIED: { outcome: STOPPED, says: "Refused." }
+"""
+    findings = validate(doc, registry=Registry())
+    assert "V9" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ V10 --
 
 _CHILD_PROCESS = """

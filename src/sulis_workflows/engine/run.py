@@ -2146,6 +2146,19 @@ def _state_with_note(
     The latest note wins: a gate asked twice carries the decider's most recent
     words, not the first ones, or a second send-back would re-run the step with
     the previous round's instruction.
+
+    D27: this recomputes and re-applies the SAME note on every call that
+    replays through a DECIDED gate — safe only because `REPLACE` (last
+    write wins) is idempotent under repeated application with the same
+    value. `APPEND` is not: writing `[note]` on every replay would grow
+    the target list once per replay pass rather than once per send-back, a
+    silent corruption worse than the crash it would otherwise raise
+    (`ReducerMismatch`, since a bare string isn't the list `APPEND`
+    requires either). Both spec worked examples (§7.6, Appendix A) target
+    an `APPEND` channel with `note_into`, so this refuses rather than
+    guessing at APPEND's own "once per send-back" semantics, which §7.6
+    does not state — V9 refuses the same gap at validation time; this is
+    the runtime half, in case validation is bypassed.
     """
     if not node.note_into:
         return None
@@ -2159,6 +2172,18 @@ def _state_with_note(
     )
     if not note:
         return None
+    channel_name = (
+        node.note_into[len("state.") :] if node.note_into.startswith("state.") else None
+    )
+    channel = scope_def.state.get(channel_name) if channel_name is not None else None
+    reducer = channel.reducer if channel is not None else "REPLACE"
+    if reducer != "REPLACE":
+        raise EngineRefusal(
+            f"gate {node.id!r}: note_into targets {node.note_into!r}, a "
+            f"{reducer} channel — only a REPLACE channel is supported (D27); "
+            "APPEND/MERGE/UPSERT_BY_ID would accumulate the same note again "
+            "on every replay rather than writing it once per send-back"
+        )
     return apply_output(
         scope_def.state, run_state["state"], {"note": node.note_into}, {"note": note}
     )

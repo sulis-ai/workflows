@@ -1,0 +1,194 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M319D4JDXE63XNCVJEAX57Y9",
+  "started_at": "2026-09-21T05:40:00Z",
+  "completed_at": "2026-09-21T07:15:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — fix a note_into crash found while verifying WP-03a's Appendix A item",
+  "branch": "fix/note-into-append-channel-crash",
+  "summary_for_principal": "While closing an earlier checklist item, I found a live bug in code another of your sessions had just merged: a gate decider's note crashes the run whenever it's saved into a running list rather than a single field — exactly the setup both example processes in the specification itself use.\n\nWorse than the crash: even fixing just the crash would have caused a silent, growing duplication bug (the same note getting saved again and again every time the run is re-checked), because of how this feature replays history. Rather than build the more complex feature needed to do this safely, I've restricted the feature to the simpler, safe case (a single overwritable field) and made the unsafe case a clear, immediate refusal instead of either a crash or silent corruption. Updated both specification examples to match.\n\nFull test suite: 358 passed, 2 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Opinion: if you want the fuller feature (a running log of every note, not just the latest), it needs a small design decision about how the engine tracks what it's already saved — flagged in the technical record for whenever that's wanted.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "V9 extended to refuse a gate's note_into targeting any channel whose reducer isn't REPLACE, at validation time."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D27 added to §18 (MADR form); V9's rule-table row updated; both worked examples that used note_into against an APPEND channel (§7.6's field example was left alone as unverifiable in isolation; Appendix A's own worked example was corrected) point at a REPLACE channel instead."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/accepted/process-appendix-a.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "notes (list<string>, APPEND) renamed to note (string, REPLACE); note_into updated to match, so the fixture keeps validating under the new V9 check."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new V9 tests: an accepted case (note_into on a REPLACE channel) and a refused case (note_into on an APPEND channel), the latter confirmed failing before the validator fix."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New engine-level regression test proving the validator-bypass case: confirmed reproducing the exact pre-fix uncaught ReducerMismatch crash, then confirmed the fixed engine ends the run cleanly (FAILED, with a message naming the channel and its reducer) instead."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D27."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Please address the remaining verification items (WP-03a). While working through item vii and the Appendix A finding in a separate PR, a concurrent session's own merged fix (note_into, D24) turned out to crash under a configuration this PR's own new test exercised — filed at the time as its own separate follow-up rather than fixed inline, to keep that PR's scope to documentation accuracy. This run is that follow-up.",
+    "read_as": "Root-cause the crash properly rather than patching only the visible symptom — the crash was one manifestation of a deeper problem (APPEND's non-idempotence under this engine's stateless-replay design), and a shallow fix (just shape the write to fit APPEND) would have replaced a loud, visible crash with a silent, growing data-corruption bug, which CLAUDE.md's 'fail closed' and 'survive the bad-but-conformant attack' principles argue strongly against accepting.",
+    "filled_in": [
+      {
+        "gap": "The spec (§7.6, D24) states no semantics for how note_into should behave against a non-REPLACE channel across multiple replay passes — genuinely unspecified, not an implementation detail.",
+        "assumed": "Refuse non-REPLACE note_into targets outright, rather than inventing accumulation semantics APPEND/MERGE/UPSERT_BY_ID would need (e.g. 'append once per send-back, not once per replay') that nothing in the spec states and that would require a durable-record or replay-state change beyond this pass's own scope.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change in your PR and flag it in the run record' — applied directly, following the exact precedent D26 (WP-03a Fault 2, kind: INPUT) already set in this same repository for the identical shape of problem (refuse cleanly, name the three-or-fewer open questions, rather than guess).",
+        "reversal_cost": "Low — both refusals (V9, _state_with_note) are early returns; a future pass that solves idempotent-replay for APPEND can remove them without touching D24's or this pass's own REPLACE-path code.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Fixing Appendix A's own worked example (which used note_into on an APPEND channel) requires choosing a replacement channel shape — the spec doesn't say what note_into 'should' target when APPEND is unavailable.",
+        "assumed": "A REPLACE string channel named note (singular), matching an existing convention already used elsewhere in this codebase's own test suite (tests/engine/test_a_send_back_note_reaches_the_next_attempt.py's note: { type: string, reducer: REPLACE, default: \"\" }) — the smallest change that keeps the worked example's own point (a decider's reason travels with a DENY) intact.",
+        "basis": "STACK_IDIOM",
+        "grounded_in": "An identical REPLACE-string note channel already exists, committed, in this repository's own test suite for exactly this feature (D24's own regression test) — reusing that shape rather than inventing a new one.",
+        "reversal_cost": "Low — a channel rename plus one field's reducer/type/default, in the spec text and its mirrored fixture only; no code depends on the channel's name.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D27 — note_into MUST target a REPLACE channel; MERGE/APPEND/UPSERT_BY_ID are refused, at both validation and engine runtime.",
+      "problem": "_state_with_note (engine/run.py) recomputes and re-applies a gate's decided note on EVERY call that replays through a DECIDED resolution, per this engine's stateless-replay design (§12.1, 'starting and resuming are the same call'). That is safe only for a reducer that is idempotent under repeated identical writes (REPLACE; incidentally MERGE and UPSERT_BY_ID too, though untested here since neither is used by any worked example). APPEND is not idempotent: each replay pass would append the SAME note again, a silent, unbounded, ever-growing corruption of the target channel — a worse failure than the ReducerMismatch crash a bare-string write against an APPEND channel happens to hit first (MERGE/UPSERT_BY_ID targets would have corrupted silently, with no crash to ever reveal it).",
+      "options_rejected": [
+        "Shape the write to fit APPEND's shape (wrap the note in a single-item list) and stop there: rejected — fixes only the visible crash, leaves the deeper non-idempotent-replay corruption completely unaddressed and now silent instead of loud.",
+        "Track 'already applied this note' via a durable-record field or an equality check against the channel's current value: rejected — the former is a schema change outside this pass's scope; the latter silently drops a second send-back whose note happens to repeat earlier wording verbatim.",
+        "Track 'already applied' in run_state itself: rejected — run_state is rebuilt fresh by the SAME replay walk this bug lives in, so there is nowhere to persist that fact across calls without a new durable-record shape."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — both refusals are early returns; nothing about D24's REPLACE-path code changed.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before this fix, a gate with note_into targeting a declared APPEND channel, driven through decide() with a note, crashes with an uncaught sulis_workflows.engine.state.ReducerMismatch — confirmed by reverting the engine fix and re-running the new regression test, reproducing the exact stack trace found while verifying the Appendix A item in a separate PR.",
+          "source": "tests/engine/test_run.py::test_note_into_an_append_channel_is_refused_cleanly_rather_than_crashing, run against the unfixed engine."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After this fix, the same construction ends the run FAILED with a message naming the channel and its reducer, not a raw exception.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "An otherwise well-formed gate whose note_into targets an APPEND channel is refused at validation time (V9), unconditionally; the equivalent REPLACE-channel case is accepted.",
+          "source": "tests/definition/test_validate.py::test_v9_refused_note_into_an_append_channel (confirmed failing before the validator fix) and ::test_v9_accepted_note_into_a_replace_channel."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Appendix A's own fixture (tests/definition/fixtures/accepted/process-appendix-a.yaml) still validates end to end after its notes (APPEND) channel was renamed to note (REPLACE) and note_into updated to match.",
+          "source": "tests/definition/test_appendix_a.py, tests/engine/test_grounded_inquiry_e2e.py — both pass unchanged in substance after the fixture edit."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after all fixes: 358 tests (356 pre-existing + 2 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal commissions a running log of every send-back note (genuine APPEND semantics for note_into) — this decision's own 'options rejected' section names the three approaches considered and why each needs either a schema change or an equality-check compromise."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Whether any other repeated-write path in this engine shares APPEND's non-idempotence-under-replay problem.",
+      "method": "Read every apply_output call site in engine/run.py; checked whether each is called at most once per resolution (idempotent by construction, e.g. a STEP's own output write, recorded once and never replayed past its own terminal attempt) or, like _state_with_note, recomputed on every replay pass.",
+      "location": "src/sulis_workflows/engine/run.py",
+      "result": "_state_with_note is the only call site with this shape (recompute-and-reapply on every replay pass reaching an already-DECIDED point); every other apply_output call is inside a STEP's own attempt-recording path, which records the write once as part of a terminal AttemptRecord and never re-applies it on a later replay (the replay reads the durable record's own recorded output, not by re-deriving and re-writing state). No other latent instance of this bug class found."
+    },
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "358 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed (after one file was reformatted during this pass — a ternary the fix introduced exceeded the repo's line-length convention), mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "note-into-append-log-semantics",
+      "location": "engine/run.py::_state_with_note, definition/validate.py's V9",
+      "divergence": "A running log of every send-back note (genuine APPEND accumulation) is not supported — only the single latest note (REPLACE) is.",
+      "governed_exception": false,
+      "why_not_now": "D27's own 'options rejected' found every approach to safe APPEND accumulation needs either a durable-record schema change or an equality-check compromise, both larger design decisions than this pass's own scope (fixing the crash and the deeper corruption it was masking)."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, engine/routes.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (i, ii, iii, iv, v, vi) are not touched in this PR — this PR is the note_into follow-up found while verifying a different item.",
+      "governed_exception": false,
+      "why_not_now": "This bug was higher-priority (an active, already-released crash/corruption risk) than the still-pending verification items, and CLAUDE.md's PR-scoping rule keeps it as its own concern rather than folding it into a larger batch."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When a fix for a crash is available, check whether the crash was the ONLY symptom of the underlying design gap before shipping the narrow fix — a design that recomputes and re-applies a value on every replay pass is only safe for idempotent operations, and the crash may just be the loudest of several non-idempotent operations that would otherwise fail silently.",
+      "incident": "The obvious fix (wrap the note in a list so APPEND's shape check passes) would have replaced a loud crash with a silent, unbounded, growing duplication bug, since _state_with_note is recomputed on every replay pass through a DECIDED gate — a fact only found by tracing WHY the crash happened (this engine's stateless-replay design, §12.1) rather than just what shape apply_output expected.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "docs/spec/process-definition.md's own D27 entry carries this reasoning directly, as the artefact this lesson changed.",
+      "proposed_check": "Before shaping a value to satisfy a shape/type check that's raising an exception, ask whether the code path that raised it runs once or repeatedly per logical event — a repeatedly-run path needs an idempotent fix, not just a shape-correct one.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A gate's note_into can no longer crash the engine, nor silently corrupt state, regardless of which channel reducer a process author declares it against — the unsafe case is refused clearly, at both validation and runtime.",
+      "Both of the spec's own worked examples (§7.6's field example untouched as unverifiable in isolation; Appendix A's own worked example corrected) are internally consistent with the new rule."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "A running log of every send-back note (APPEND semantics for note_into) is not supported.",
+        "untouched_id": "note-into-append-log-semantics",
+        "trigger": "The principal wants this feature — needs a small design decision on how the engine tracks 'already applied this note' across replay passes without a durable-record schema change, or accepts that a schema change is warranted.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Nothing currently depends on it; the REPLACE-only 'latest note wins' behaviour D24 originally specified is fully supported and covers the reported use case (a DENY's reason reaching the next attempt)."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "WP-03a's own remaining verification items are still queued.",
+        "action": "Continue through items (i) loop-budget defaults, (ii) AttemptRecord.inputs, (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap, and (vi) inert fields plus uncaught DuplicateAttempt.",
+        "source_kind": "PARKED",
+        "source_id": "wp-03a-remaining-verification-items",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with WP-03a item (i) (loop-budget default disagreement) next.",
+      "reason": "It is a real, narrow, well-understood bug with a clear fix already scoped by earlier investigation in this same session, and its confusion (explain reports one budget, the engine enforces another) is the kind of thing that misleads a process author quietly.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
