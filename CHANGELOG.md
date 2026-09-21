@@ -6,6 +6,11 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D32:** `note_into` (D24) only ever captured a `person` decider's own `note` — a `policy`- or
+  `agent`-decided verdict left its declared target channel untouched, silently dropping the
+  decider's own reasoning exactly like D24's original bug, just for two of the three decider
+  kinds. `_state_with_note` now also accepts a decider's `rationale`; a policy decider's own
+  `rationale` (computed but never persisted) is now recorded in its attempt record at all.
 - **D31:** `retry.backoff_seconds` (spec §7.1/§15, "the starting delay before exponential
   backoff") was accepted, parsed, and otherwise completely unused — a `TRANSIENT` retry
   redispatched immediately, back-to-back, regardless of any declared or defaulted backoff.
