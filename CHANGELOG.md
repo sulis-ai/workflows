@@ -6,6 +6,11 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D28:** a process's own `defaults.loop_budget` was silently ignored at runtime for any loop
+  that omitted its own `budget:` — both `_advance_route` and `_advance_gate` hardcoded
+  `process_default_budget=None` when calling `check_loop_budget`, so such a loop always used the
+  format default (10) instead, while `explain` (`cli.py`) correctly reported the process's own
+  default. Both call sites now read `process.defaults.loop_budget`.
 - **D25:** the spec's own Appendix A worked example (and its mirrored fixture) declared
   `sign-off.person_required_when: state.confidence == "INSUFFICIENT"` — a condition that could
   never actually evaluate true in a real run, since `honest-stop` already diverts `INSUFFICIENT`
