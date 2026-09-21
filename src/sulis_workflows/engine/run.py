@@ -655,6 +655,7 @@ async def _drive_scope(
                 )
             elif isinstance(node, RouteNode):
                 advance = await _advance_route(
+                    process,
                     node,
                     node_id,
                     visit_attempts,
@@ -1626,6 +1627,7 @@ async def _advance_process_call(
 
 
 async def _advance_route(
+    process: Process,
     node: RouteNode,
     node_id: str,
     attempts: list[AttemptRecord],
@@ -1691,7 +1693,11 @@ async def _advance_route(
         # `baseline` alone — not `baseline` plus any part of the unconsumed
         # slice — is the count taken strictly BEFORE this occurrence.
         budget_decision = check_loop_budget(
-            target.loop, taken_count=baseline, process_default_budget=None
+            target.loop,
+            taken_count=baseline,
+            process_default_budget=(
+                process.defaults.loop_budget if process.defaults is not None else None
+            ),
         )
         if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
             return _Advance(
@@ -1795,7 +1801,13 @@ async def _advance_gate(
             )
         if target.loop is not None:
             budget_decision = check_loop_budget(
-                target.loop, taken_count=prior_loop_takes, process_default_budget=None
+                target.loop,
+                taken_count=prior_loop_takes,
+                process_default_budget=(
+                    process.defaults.loop_budget
+                    if process.defaults is not None
+                    else None
+                ),
             )
             if budget_decision.outcome is LoopBudgetOutcome.EXHAUSTED:
                 return _Advance(
