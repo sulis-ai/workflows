@@ -1,0 +1,175 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M329AWCZJ6ZC3350RTRP3E5D",
+  "started_at": "2026-09-21T15:20:00Z",
+  "completed_at": "2026-09-21T16:05:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), ClaimsPort.renew sub-finding",
+  "branch": "fix/claim-acquired-for-hand-off-mutation-steps",
+  "summary_for_principal": "This closes another sub-part of the same checklist item as several earlier PRs (settings the system accepts but doesn't fully act on).\n\nRe-checking the specific claim (a reuse-safety mechanism sits unused) turned up something more serious underneath: the mechanism it depends on was never switched on for the important case. When a step performs a real side effect and hands off to an external worker, the system should record 'someone is already doing this' so a racing second attempt waits rather than duplicating the side effect. That recording never happened for hand-off work — only for work the system does immediately in-process, which barely needs it.\n\nFixed the more important half: a hand-off now gets the same protection immediate work always had. Renewing that protection if the external work runs long still needs a new capability this system can't ask for yet, and building it would mean guessing at something the spec doesn't describe. I've written that up rather than guess.\n\nFull test suite: 383 passed, 1 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. One sub-part of this item remains, the last piece of WP-03a's original work.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test proving a hand-off Tool now acquires a claim (a second next() call on the same run/scope returns STEP_RUNNING instead of a fresh TOOL_STEP), confirmed failing before the fix."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D37 added to §18 (MADR form), documenting both the fixed half and a proposed spec clarification for the remaining renewal gap."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D37."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi)'s ClaimsPort.renew sub-finding: an earlier background research pass (this session) confirmed renew is a real, working adapter method (tested in isolation) but never called anywhere in engine/run.py.",
+    "read_as": "Re-verify the claim from scratch (this codebase's own established discipline this session) before deciding a fix, since a prior pass's framing had already turned out incomplete or imprecise for several other items this session (D32's decider-scope gap, D35/D36's inline-process gaps). Tracing the claims-acquire call site directly, rather than trusting the earlier summary's framing, surfaced that the actual bug is one layer deeper and more consequential than 'renew is unused': acquire itself is never called for the hand-off dispatch path at all.",
+    "filled_in": [
+      {
+        "gap": "The original item was framed narrowly as 'ClaimsPort.renew is never called' — true, but investigating it directly surfaced that ctx.claims.acquire itself was only ever called on the inline CODE dispatch path, never on the TOOL_STEP hand-off path, which is the case at-most-once protection matters most for (a real-world side effect performed by an external agent, more likely to be slow-but-not-dead than an inline CODE call).",
+        "assumed": "Fix the deeper, more consequential bug (acquire missing for hand-offs) as this PR's real scope, rather than narrowly treating only renew's unused-ness as the finding — 'fix what is real' once found, the same standard every other WP-03a finding this session has been held to.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' and 'fix what is real' — the deeper bug is the one actually causing risk; the originally-reported symptom (renew unused) was itself partly a consequence of it (renew being unused was doubly moot when acquire never even ran for the case renewal would matter for).",
+        "reversal_cost": "Low — a shared helper factored from existing code, added unchanged in behaviour at one new call site.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Implementing renew for real needs a caller-facing mechanism to signal 'still working, extend my lease' mid-flight, but §12.1's own four calls (next/report/decide/skip) have no such call — report() fires once, at completion, when renewal would already be moot.",
+        "assumed": "Do not implement renew in this pass — document the gap and propose two spec-level resolutions (a new heartbeat call, or a host-setting guidance that lease_seconds should be generous enough that renewal is unneeded) rather than guess at inventing new public API surface.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code: write the gap as a proposed spec change in your PR and flag it in the run record' — the same discipline D26/D34/D36 already established this session for comparable 'spec names it, engine can't act on it yet' situations.",
+        "reversal_cost": "None avoided — nothing was built to revert; documenting costs nothing and the gap itself is pre-existing, not newly introduced.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D37 — §12.3's claim/lease guard is now acquired before a TOOL_STEP hand-off, not only before an inline CODE dispatch; ClaimsPort.renew remains genuinely never called anywhere, left as an honestly-documented, un-actionable gap needing a new public API surface, not guessed at.",
+      "problem": "ctx.claims.acquire was only ever called on the inline CODE-mechanism dispatch path in _advance_step, after the mechanism.kind != 'CODE' early-return for a hand-off. A SKILL-mechanism MUTATION/SIDE_EFFECT Tool acquired no claim at all, so a second caller racing in during such a hand-off received a fresh TOOL_STEP instead of STEP_RUNNING, defeating the at-most-once guard for precisely the dispatch shape it exists for.",
+      "options_rejected": [
+        "Leave the hand-off path unprotected and treat only renew's own unused-ness as this item's finding: rejected — the deeper bug is the more consequential one and makes renew's own absence doubly moot for the hand-off case specifically.",
+        "Also implement renew in the same PR, wiring it into some existing call: rejected — no call in this format's own public vocabulary represents 'I am still legitimately working on this claim, extend my lease'; report() fires exactly once, at completion, when renewal would already be moot. Implementing renew needs a genuinely new public entry point, a bigger spec-silent architectural decision this pass does not invent."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — _claim_if_effectful is a shared helper factored out of code that already existed at one call site and added, unchanged in behaviour, at the other; reverting removes one call site.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a SKILL-mechanism SIDE_EFFECT Tool's first next() call returned TOOL_STEP, and a second next() call on the same run/scope also returned a fresh TOOL_STEP rather than STEP_RUNNING — no claim was ever acquired for the hand-off.",
+          "source": "tests/engine/test_run.py::test_hand_off_mutation_step_acquires_a_claim_so_a_second_caller_is_told_step_running, run against the unfixed engine, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "No existing test exercised claims behaviour for a non-CODE mechanism kind — the only committed STEP_RUNNING regression (test_mutation_step_second_caller_told_step_running) used mechanism kind CODE throughout.",
+          "source": "grep -n 'mechanism=Mechanism' tests/engine/test_run.py around the existing test, read directly, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "report() never touches claims at all (no acquire, renew, or release call anywhere), consistent across both the pre-existing CODE path and the newly-added hand-off path — claims are designed to expire naturally via lease_seconds, never explicitly released.",
+          "source": "grep -n 'claims\\|ClaimsPort\\|ClaimStatus' src/sulis_workflows/engine/run.py, this session — confirmed exactly one acquire call site before the fix, two identical ones after, and zero renew/release calls anywhere."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same scenario correctly returns STEP_RUNNING on the second call, with the first call's own TOOL_STEP answer unchanged.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 383 tests (382 pre-existing + 1 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations copied from .github/workflows/ci.yml's own steps, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants ClaimsPort.renew implemented for real — needs the proposed spec clarification (D37's own MADR entry: a new heartbeat-style public call, or host-setting guidance on lease_seconds being generous enough) answered first, not guessed at here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "383 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "claims-port-renew-never-called",
+      "location": "engine/run.py (no call to ctx.claims.renew anywhere), domain/ports/claims.py (ClaimsPort.renew itself is correctly implemented and tested in isolation)",
+      "divergence": "A hand-off MUTATION/SIDE_EFFECT Tool whose real-world completion takes longer than lease_seconds can now have its claim taken over by a second caller mid-flight (logged as 'may already have run', §12.3's own accepted risk for an expired claim) since nothing renews it.",
+      "governed_exception": true,
+      "why_not_now": "Implementing renew needs a new public API surface (a heartbeat-style call) that this format's own §12.1 vocabulary does not currently have room for; a proposed spec clarification is named in D37's own MADR entry for a future pass to resolve first, per CLAUDE.md's 'do not invent a rule in code' directive."
+    },
+    {
+      "id": "item-vi-invalidates",
+      "location": "engine/run.py (invalidates never read at loop-take time)",
+      "divergence": "Item (vi)'s last remaining sub-finding, invalidates, is not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "This PR closes the ClaimsPort.renew sub-finding as its own reviewable concern; invalidates is a larger, standalone design effort overlapping the same replay-correctness machinery that produced D20-D23's four separate bugs earlier this session, deserving its own dedicated pass."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When re-verifying an earlier report's finding, trace the actual call graph one level deeper than the report's own framing before deciding a fix's scope — the reported symptom (a method never called) can be a downstream consequence of a more fundamental, more consequential gap (the method's own prerequisite never happening either) that the original framing didn't distinguish.",
+      "incident": "The original item (vi) sub-finding named only 'ClaimsPort.renew never called' — true, but tracing ctx.claims.acquire's own call sites directly found it was itself only ever invoked for one of two dispatch paths, making the hand-off case (the more consequential one for real-world side effects) entirely unprotected, not merely un-renewable.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "D37's own MADR entry documents the deeper bug found and why it, not the originally-reported symptom alone, became this PR's actual scope.",
+      "proposed_check": "When a reported finding names 'X is never called', check not only whether X is called, but whether X's own prerequisite (the thing that would make calling X meaningful) is itself correctly wired everywhere it should be.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A hand-off (SKILL-mechanism) MUTATION/SIDE_EFFECT Tool now acquires a claim before dispatch, the same as a CODE-mechanism one always did — a second caller racing in during the hand-off is now correctly told STEP_RUNNING."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "ClaimsPort.renew remains unimplemented, needing a new public API surface (a heartbeat-style call) or host-setting guidance that D37's own MADR entry proposes as spec clarifications.",
+        "untouched_id": "claims-port-renew-never-called",
+        "trigger": "The principal wants real lease renewal for long-running hand-offs.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "The risk is bounded by lease_seconds (a host setting, D3), not unbounded — a hand-off slower than the lease can be taken over mid-flight, logged as 'may already have run', the exact accepted risk §12.3 already names for an expired claim."
+      },
+      {
+        "item": "Item (vi)'s last sub-finding, invalidates, is unverified.",
+        "untouched_id": "item-vi-invalidates",
+        "trigger": "The next WP-03a session picks this up.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "A declared invalidates field the engine ignores does not corrupt state or crash on its own — it just means superseded work stays visible to later steps when the author expected it to be cleared, a documented, not hidden, gap."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "One item-(vi) sub-finding remains, the last piece of WP-03a's original scope.",
+        "action": "Continue with item (vi)'s invalidates sub-finding — Appendix A's own worked example already uses it, so real design work is needed rather than a refusal.",
+        "source_kind": "PARKED",
+        "source_id": "item-vi-invalidates",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Take on invalidates next, with extra care given its overlap with the replay-correctness machinery D20-D23 already found four separate bugs in earlier this session.",
+      "reason": "It is the only remaining unverified item from the original WP-03a scope; its own risk profile (real replay-correctness hazard, not a simple wiring gap) warrants starting it with a fresh, careful research pass before any code, the same discipline every genuinely hard finding this session has gotten.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

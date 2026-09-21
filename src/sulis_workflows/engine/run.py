@@ -965,6 +965,43 @@ def _resolve_route_target(target: RouteTarget) -> str:
 # ------------------------------------------------------------------------------ STEP --
 
 
+async def _claim_if_effectful(
+    ctx: EngineContext,
+    tool: Tool,
+    key: AttemptKey,
+    *,
+    run_id: str,
+    scope: str,
+    node_id: str,
+) -> _Advance | None:
+    """D37: §12.3's claim/lease guard, shared by both a Tool's dispatch
+    paths (inline `CODE` and a `TOOL_STEP` hand-off) since a hand-off IS
+    this step's own dispatch, the same reasoning §10.1/D12's permission
+    check already applies. A no-op for a `QUERY`-effect Tool (no claim
+    needed). Returns a `STEP_RUNNING` `_Advance` if someone else already
+    holds this claim, else `None` to let the caller proceed with its own
+    dispatch."""
+    if tool.effect not in ("MUTATION", "SIDE_EFFECT"):
+        return None
+    claim = await ctx.claims.acquire(
+        key,
+        lease_seconds=ctx.lease_seconds,
+        claimed_by=ctx.identity,
+        platform_id=ctx.platform_id,
+        run_id=run_id,
+    )
+    if claim.status is ClaimStatus.STEP_RUNNING:
+        return _Advance(
+            answer=NextAnswer(
+                kind=AnswerKind.STEP_RUNNING,
+                says="This step is already running.",
+                node_id=node_id,
+                scope=scope,
+            )
+        )
+    return None
+
+
 async def _advance_step(
     process: Process,
     scope_def: _ScopeDef,
@@ -1102,6 +1139,10 @@ async def _advance_step(
             "by this engine (spec §4.3/§12.1, D34)"
         )
 
+    key = AttemptKey(
+        run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
+    )
+
     if tool.mechanism.kind != "CODE":
         # §10.1/D12: permission is checked before ANY dispatch, hand-off
         # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`
@@ -1150,6 +1191,24 @@ async def _advance_step(
                 performed_by=f"AGENT:{tool.mechanism.ref}::{ctx.identity}",
             )
 
+        # D37: §12.3's claim/lease guard ("before a MUTATION or SIDE_EFFECT
+        # step runs, the engine writes an in-progress claim") is the
+        # dispatch-time at-most-once protection this format has — and a
+        # `TOOL_STEP` hand-off IS this step's own dispatch, exactly the
+        # principle §10.1/D12's permission check (just above) already
+        # applies here. Before this fix, `ctx.claims.acquire` was only
+        # ever called on the CODE-only path below, so a hand-off
+        # MUTATION/SIDE_EFFECT Tool — the case a real-world side effect
+        # performed by an external agent most needs at-most-once
+        # protection for — had none at all: a second caller racing in
+        # during the hand-off got a fresh `TOOL_STEP` instead of being
+        # told `STEP_RUNNING`.
+        claim_advance = await _claim_if_effectful(
+            ctx, tool, key, run_id=run_id, scope=scope, node_id=node_id
+        )
+        if claim_advance is not None:
+            return claim_advance
+
         resolved_inputs, _missing = _resolve_inputs_preview(node, tool, run_state)
         return _Advance(
             answer=NextAnswer(
@@ -1169,26 +1228,11 @@ async def _advance_step(
             )
         )
 
-    key = AttemptKey(
-        run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
+    claim_advance = await _claim_if_effectful(
+        ctx, tool, key, run_id=run_id, scope=scope, node_id=node_id
     )
-    if tool.effect in ("MUTATION", "SIDE_EFFECT"):
-        claim = await ctx.claims.acquire(
-            key,
-            lease_seconds=ctx.lease_seconds,
-            claimed_by=ctx.identity,
-            platform_id=ctx.platform_id,
-            run_id=run_id,
-        )
-        if claim.status is ClaimStatus.STEP_RUNNING:
-            return _Advance(
-                answer=NextAnswer(
-                    kind=AnswerKind.STEP_RUNNING,
-                    says="This step is already running.",
-                    node_id=node_id,
-                    scope=scope,
-                )
-            )
+    if claim_advance is not None:
+        return claim_advance
 
     if retry_backoff_seconds is not None:
         await asyncio.sleep(retry_backoff_seconds)
