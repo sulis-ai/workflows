@@ -6,6 +6,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D30:** a second caller racing to record the same attempt (two `next()`/`report()`/`decide()`
+  calls replaying from the same durable position, both computing the identical next
+  `AttemptKey` for a node neither has recorded yet) crashed with an uncaught `DuplicateAttempt`
+  instead of completing normally — nothing in `engine/run.py` caught the write-once guard's own
+  exception (spec §12.2) at any of its 9 `record_attempt` call sites. All 9 now go through one
+  shared `_record_attempt` helper that swallows `DuplicateAttempt`, the write-side counterpart of
+  the same "same backend, same answer" replay property §12.1 already requires of reads.
 - **D29:** an attempt record's `inputs` (spec §12.2, "inputs used") was always written `{}`, for
   every node type. Fixed where it was cheap and exact: `_record_step_result` (the shared recorder
   for every `CODE`-mechanism dispatch and every STEP-node failure recorded before a hand-off) now
