@@ -286,6 +286,7 @@ def _validate_inline_process(tool: model.Tool, registry: Registry) -> list[Findi
     findings.extend(v13_side_effects(synthetic))
     findings.extend(v14_endings(synthetic))
     findings.extend(v16_state_channels(synthetic))
+    findings.extend(v18_invalidates(synthetic))
     return [
         replace(f, message=f"tool {tool.header.id!r} inline process body: {f.message}")
         for f in findings
@@ -420,6 +421,7 @@ def validate_process(process: model.Process, registry: Registry) -> list[Finding
     findings.extend(v13_side_effects(process))
     findings.extend(v14_endings(process))
     findings.extend(v16_state_channels(process))
+    findings.extend(v18_invalidates(process))
     return findings
 
 
@@ -1340,3 +1342,57 @@ def v17_mechanism_kinds(tool: model.Tool) -> list[Finding]:
             )
         ]
     return []
+
+
+# ------------------------------------------------------------------------ V18 --
+
+
+def _all_route_targets(
+    node: model.Node,
+) -> Iterator[tuple[model.RouteTarget | model.RouteOption, str]]:
+    """The same 3 declaration sites `_all_loops` walks for `.loop`, but
+    unconditional: `invalidates` (D38) can be declared on a `RouteTarget`
+    independently of `.loop`, so this does not gate on `.loop` being set."""
+    if isinstance(node, model.RouteNode):
+        for option in node.when:
+            yield option, f"route option {option.if_!r}"
+        if node.otherwise is not None:
+            yield node.otherwise, "otherwise"
+    elif (
+        isinstance(node, model.StepNode)
+        and node.on_control_fail
+        and node.on_control_fail.then
+    ):
+        yield node.on_control_fail.then, "on_control_fail.then"
+    elif isinstance(node, model.GateNode):
+        for verdict, rt in node.on.items():
+            yield rt, f"on.{verdict}"
+
+
+def v18_invalidates(process: model.Process) -> list[Finding]:
+    """`invalidates` (spec §7.2) is accepted by the schema and model but
+    never read anywhere the engine resolves state — no fixture, test, or
+    the spec's own Appendix A worked example declares it (checked directly
+    against the files, D38; an earlier, unverified claim to the contrary
+    had propagated across several prior run records without ever being
+    checked). Refused rather than silently ignored: a definition declaring
+    it is expressing an intent this engine cannot honour. `run.py`'s
+    `_advance_route`/`_advance_gate` refuse the same thing at runtime, in
+    case validation is bypassed; this is the validation-time half."""
+
+    findings: list[Finding] = []
+    for node_id, node in process.nodes.items():
+        for target, where in _all_route_targets(node):
+            if target.invalidates:
+                findings.append(
+                    Finding(
+                        rule="V18",
+                        node=node_id,
+                        message=(
+                            f"{where} declares invalidates: {list(target.invalidates)}, "
+                            "not implemented by this engine (D38)"
+                        ),
+                        fix="remove `invalidates`, or track the gap as a proposed spec change",
+                    )
+                )
+    return findings

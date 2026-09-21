@@ -6,6 +6,18 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Fixed
+- **D38:** `invalidates` (spec §7.3) was accepted by the schema and model but never read anywhere
+  the engine resolves state — a definition declaring it had the declaration silently ignored. Now
+  refused at validation (**V18**, new) and engine runtime, rather than implemented (doing so
+  correctly needs new state-tracking machinery in the same replay-position territory that produced
+  D19-D23/D27, and the spec names no mechanism for "a superseded output"; see D38's own proposed
+  spec clarification). Also corrects a claim that had propagated unverified across several prior
+  run records — Appendix A's own worked example does not declare `invalidates`; only this spec
+  document's own illustrative §7.2 snippet did, now removed to match. Fixes a real, related
+  replay-correctness bug found while investigating: `_advance_route`'s own replay branch dropped
+  `invalidates` when reconstructing an already-recorded route decision (correct on the call that
+  first records it, silently wrong on every later call that replays it) — the same "correct once,
+  silently lost on replay" shape as D19/D27.
 - **D37:** `ctx.claims.acquire` (§12.3's at-most-once claim/lease guard) was only ever called before
   an inline `CODE` dispatch — a hand-off `SKILL`-mechanism `MUTATION`/`SIDE_EFFECT` Tool acquired no
   claim at all, so a second caller racing in during the hand-off got a fresh `TOOL_STEP` instead of

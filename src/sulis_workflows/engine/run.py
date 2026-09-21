@@ -1784,12 +1784,41 @@ async def _advance_route(
                 next=node.when[matched_index].next,
                 end=node.when[matched_index].end,
                 loop=node.when[matched_index].loop,
+                # D38: this replay branch reconstructs `target` from the
+                # matched `when` option's own fields on every call after the
+                # one that first recorded this decision — `invalidates` was
+                # dropped here (still read correctly on the fresh-evaluation
+                # branch just above), the same "correct once, silently lost
+                # on replay" shape D19/D27 already found and fixed elsewhere
+                # in this file. Carried through now so a refusal (or, in
+                # future, a real implementation) sees it consistently
+                # regardless of which call first reaches this node.
+                invalidates=node.when[matched_index].invalidates,
             )
             if matched_index is not None
             else node.otherwise
         )
 
     assert target is not None
+    if target.invalidates:
+        # D38: `invalidates` is accepted by the schema and model (spec §7.2)
+        # but never read anywhere the engine resolves state — nothing marks
+        # a channel invalid, and nothing checks for one. Appendix A's own
+        # worked example does not declare it (checked directly against the
+        # fixture, contradicting an unverified claim that had propagated
+        # across earlier run records), and no fixture or test in this repo
+        # exercises it, so refusing costs the real corpus nothing. Refusing
+        # rather than silently no-op'ing it: a definition author who
+        # declares `invalidates` is expressing an intent ("this ends a
+        # prior channel's validity") that the engine would otherwise ignore
+        # without telling them — the same "refuse cleanly rather than guess
+        # or drop" precedent as D26/D27/D34. V18 refuses this at validation
+        # time; this is the runtime half, in case validation is bypassed.
+        raise EngineRefusal(
+            f"route {node_id!r}: `invalidates` is declared but not "
+            "implemented by this engine (D38) — remove it, or track the "
+            "gap as a proposed spec change"
+        )
     if target.loop is not None:
         if target.loop.counts == "FAILURES":
             # D33: unlike a GATE (DECIDED only ever carries PERMIT/DENY —
@@ -1935,6 +1964,17 @@ async def _advance_gate(
             raise EngineRefusal(
                 f"gate {node_id!r}: no route declared for verdict "
                 f"{gate_decision.verdict.value!r}"
+            )
+        if target.invalidates:
+            # D38: same refusal as `_advance_route`'s — see that comment.
+            # `node.on.get(...)` reads the static model directly every
+            # call, so (unlike the ROUTE replay branch) no prerequisite
+            # replay-drop fix was needed here for this check to be
+            # consistent across calls.
+            raise EngineRefusal(
+                f"gate {node_id!r}: `invalidates` is declared but not "
+                "implemented by this engine (D38) — remove it, or track "
+                "the gap as a proposed spec change"
             )
         if target.loop is not None:
             # D33: §7.3/§15's `counts: FAILURES` ("only when taken because

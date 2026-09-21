@@ -2109,6 +2109,134 @@ def test_route_loop_counts_failures_is_refused_cleanly_rather_than_misapplied():
     assert "after-classify" in answer.says
 
 
+def test_route_invalidates_is_refused_cleanly_rather_than_silently_ignored():
+    """D38: `invalidates` (spec §7.3) is accepted by the schema and model
+    but never read anywhere the engine resolves state — nothing marks a
+    channel invalid, and nothing checks for one. Refused rather than
+    silently doing nothing, the same "refuse rather than guess" precedent
+    D26/D27/D34 already set. This is the validator-bypass case; V18 is the
+    validation-time half."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "after-classify": RouteNode(
+                id="after-classify",
+                when=(
+                    RouteOption(
+                        if_='state.verdict == "A"',
+                        end="DROPPED",
+                        invalidates=("classify",),
+                    ),
+                    RouteOption(if_='state.verdict == "B"', end="DROPPED"),
+                ),
+            ),
+        }
+    )
+    answer = _run(
+        next_(
+            process,
+            "run-route-invalidates-1",
+            "root",
+            _fresh_ctx(),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "invalidates" in answer.says
+    assert "after-classify" in answer.says
+
+
+def test_route_replay_branch_carries_invalidates_so_the_refusal_is_not_silently_lost_on_a_later_call():
+    """D38's own prerequisite fix: `_advance_route`'s replay branch (taken
+    when a later call finds this node's decision already durably
+    recorded, rather than evaluating it fresh) reconstructed `target`
+    without `invalidates` before this fix — "correct once, silently
+    dropped on replay", the same shape D19/D27 already found and fixed
+    elsewhere in this file. Proven directly: the first `next_()` call
+    resolves `after-classify` fresh and refuses, but only after durably
+    recording the decision first (the existing refusal-after-recording
+    order every other `_advance_route`/`_advance_gate` refusal already
+    uses); a second `next_()` call against the SAME run replays that exact
+    decision from the durable record rather than re-evaluating it — before
+    the prerequisite fix, the replayed target silently dropped
+    `invalidates` and let the run continue past the refusal instead of
+    refusing a second time."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "after-classify": RouteNode(
+                id="after-classify",
+                when=(
+                    RouteOption(
+                        if_='state.verdict == "A"',
+                        end="DROPPED",
+                        invalidates=("classify",),
+                    ),
+                    RouteOption(if_='state.verdict == "B"', end="DROPPED"),
+                ),
+            ),
+        }
+    )
+    records = StubRecordsAdapter()
+    for _ in range(2):
+        answer = _run(
+            next_(
+                process,
+                "run-route-invalidates-replay-1",
+                "root",
+                _fresh_ctx(records=records),
+                inputs={"question": "why"},
+                host_inputs={},
+            )
+        )
+        assert answer.kind is AnswerKind.ENDED
+        assert answer.ending == "FAILED"
+        assert answer.outcome == "FAILURE"
+        assert "invalidates" in answer.says
+        assert "after-classify" in answer.says
+
+
+def test_gate_invalidates_is_refused_cleanly_rather_than_silently_ignored():
+    """D38: same refusal as the ROUTE case above — see that test's own
+    docstring. `_advance_gate`'s `on{}` path reads the static model
+    directly every call (no replay-branch bug there), so one call is
+    enough to prove the refusal."""
+    process = _process(
+        nodes={
+            **_process().nodes,
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(Decider(kind="policy", ref="sign-off-policy@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE", invalidates=("classify",)),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        }
+    )
+    answer = _run(
+        next_(
+            process,
+            "run-gate-invalidates-1",
+            "root",
+            _fresh_ctx(),
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert answer.outcome == "FAILURE"
+    assert "invalidates" in answer.says
+    assert "sign-off" in answer.says
+
+
 def test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per_resolution():
     """D22: the D20/D21 bug class, found a third time — this time in
     `_advance_gate`. `test_gate_deny_loop_budget_is_enforced_across_askings`
