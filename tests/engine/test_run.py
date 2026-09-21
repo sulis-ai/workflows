@@ -766,6 +766,93 @@ def test_note_into_an_append_channel_is_refused_cleanly_rather_than_crashing():
     assert "APPEND" in second.says
 
 
+def test_note_into_captures_a_policy_deciders_own_rationale_on_deny():
+    """D32: `note_into`'s write source is not person-specific — a `policy`
+    (or `agent`) decider's own `rationale` is the same kind of provenance
+    content as a `person`'s own `note` (§7.6's Provenance bullet: "the
+    rationale or note", named side by side). Before this fix, a
+    policy-decided DENY left `note_into`'s target channel untouched, since
+    only a person's own attempt record ever carried a `note` key — a
+    `policy`/`agent` decider's own reason for its verdict was silently
+    dropped exactly like D24's original bug, just for two of the three
+    decider kinds rather than all three."""
+    from sulis_workflows.definition.model import StateChannel
+
+    log_tool = Tool(
+        header=_header("log-note", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:log_note"),
+        effect="QUERY",
+        # A default (rather than `required`) means an unwritten `state.note`
+        # (still "", its declared default — §7.1: "the first present,
+        # non-empty value is used", so an empty string never resolves)
+        # dispatches with an empty note instead of refusing outright — the
+        # distinction this test is about is the note's *content*, not
+        # whether the step can dispatch at all.
+        inputs={"note": InputSpec(type="string", default="")},
+        permission="workflows.log-note.dispatch",
+    )
+    process = Process(
+        header=_header("note-capture-process", "PROCESS"),
+        start="sign-off",
+        permission="workflows.note-capture-process.start",
+        nodes={
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.verdict",),
+                deciders=(Decider(kind="policy", ref="sign-off-policy@1"),),
+                note_into="state.note",
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(next="log-note"),
+                },
+            ),
+            "log-note": StepNode(
+                id="log-note",
+                tool="log-note@1",
+                in_={"note": "state.note"},
+                out={},
+                end="LOGGED",
+            ),
+        },
+        endings={
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "LOGGED": Ending(outcome="SUCCESS", says="Logged."),
+        },
+        state={"note": StateChannel(type="string", reducer="REPLACE", default="")},
+    )
+    registry = Registry([log_tool])
+    policy = StubPolicyAdapter(policy_denies={"sign-off-policy@1"})
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=policy,
+        code_tool=StubCodeToolAdapter(responses={"mod:log_note": {}}),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(next_(process, "run-note-1", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "LOGGED"
+
+    attempts = _run(
+        records.get_attempts(
+            "run-note-1",
+            "root",
+            "log-note",
+            platform_id="tenant-1",
+            run_id="run-note-1",
+        )
+    )
+    assert len(attempts) == 1
+    assert attempts[0].inputs == {"note": "stub-denied:sign-off-policy@1"}
+
+
 def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_it():
     agentic_tool = Tool(
         header=_header("classify", "TOOL"),

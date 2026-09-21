@@ -1912,7 +1912,10 @@ async def _advance_gate(
         record = AttemptRecord(
             key=key,
             inputs={},
-            output={"evidence": list(outcome.evidence)},
+            output={
+                "evidence": list(outcome.evidence),
+                "rationale": outcome.rationale,
+            },
             control_results=[],
             verdict=outcome.verdict.value,
             performed_by=outcome.decided_by,
@@ -2216,6 +2219,14 @@ def _state_with_note(
     words, not the first ones, or a second send-back would re-run the step with
     the previous round's instruction.
 
+    D32: "the decider's reason" (D24's own problem statement) is not
+    person-specific — a `policy` or `agent` decider's own `rationale` is
+    the same kind of provenance content as a `person`'s own `note` (§7.6's
+    Provenance bullet: "the rationale or note" are named side by side).
+    Only a `person`'s record ever carries a `note` key; `policy`/`agent`
+    records carry `rationale` instead — so this checks both, per attempt,
+    preferring whichever this attempt actually has.
+
     D27: this recomputes and re-applies the SAME note on every call that
     replays through a DECIDED gate — safe only because `REPLACE` (last
     write wins) is idempotent under repeated application with the same
@@ -2233,9 +2244,10 @@ def _state_with_note(
         return None
     note = next(
         (
-            (record.output or {}).get("note")
+            (record.output or {}).get("note") or (record.output or {}).get("rationale")
             for record in reversed(attempts)
             if (record.output or {}).get("note")
+            or (record.output or {}).get("rationale")
         ),
         None,
     )

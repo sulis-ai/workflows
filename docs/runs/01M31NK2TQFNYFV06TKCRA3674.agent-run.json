@@ -1,0 +1,154 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M31NK2TQFNYFV06TKCRA3674",
+  "started_at": "2026-09-21T09:20:00Z",
+  "completed_at": "2026-09-21T09:55:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — WP-03a verification: item (vi), note_into's remaining policy/agent-decider gap",
+  "branch": "fix/note-into-agent-rationale",
+  "summary_for_principal": "This closes another of five sub-parts of the same checklist item as the last two PRs (declared settings the system accepts but doesn't fully act on).\n\nWhen a gate is decided and sends work back for another attempt, the system should carry the decider's own explanation forward as an instruction for the retry. An earlier fix made this work only when a person makes the decision — if an automated policy check or a reviewing agent decided instead (common; a person is only asked when they can't settle it), the explanation was silently dropped, the same bug as before, just for two of three decision paths. A smaller related gap: a policy check's own explanation wasn't even kept in the permanent record at all.\n\nFixed both: a policy or agent decider's own explanation now flows through the same way a person's does, and a policy check's explanation is now recorded. Proven with a test confirming the exact text lands where it should.\n\nFull test suite: 367 passed, 1 new.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Three sub-parts of this item remain (two larger, riskier), plus three unrelated items.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New regression test driving a policy-only gate DENY through to a downstream STEP that reads the note_into target, confirmed failing before the fix and passing after."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D32 added to §18 (MADR form)."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D32."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Verify item (vi)'s 'inert accepted fields' half: a background research pass found note_into (D24, D27) only fully works for a person decider — a policy- or agent-decided verdict leaves the declared target channel untouched, since only a person's own attempt record ever carries a `note` key.",
+    "read_as": "This is the one sub-finding from that research pass with the least ambiguity of the two remaining spec-adjacent ones (versus loop.counts' ROUTE-loop ambiguity): D24's own problem statement was already decider-agnostic ('the decider's reason', not 'the person's note'), and §7.6's Provenance bullet already names rationale and note side by side as the same kind of content — so extending note_into's source to include rationale is completing D24's own stated intent, not inventing new behaviour the spec never asked for.",
+    "filled_in": [
+      {
+        "gap": "The spec never explicitly states that note_into should capture a policy or agent decider's rationale, only that person deciders write notes and that provenance generally records 'the rationale or note.'",
+        "assumed": "Extend note_into's source to accept either a note or a rationale, whichever the deciding attempt's own record carries — grounded in D24's own decider-agnostic problem statement and §7.6's Provenance bullet naming both as the same kind of content, not a fresh invention.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "D24's own MADR entry ('the decider's reason' silently dropped — no decider-kind qualifier) and §7.6's Provenance bullet ('the rationale or note', named side by side) together support this reading more than the narrower 'person-only' alternative, which would need to explain away D24's own wording as imprecise.",
+        "reversal_cost": "Low — a one-line `or` clause and one additive dict key; removing either independently returns to the narrower, person-only behaviour without touching the other.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D32 — note_into also captures a policy or agent decider's own rationale, not only a person decider's own note; a policy decider's rationale is now recorded in its attempt record's output at all, which it previously was not.",
+      "problem": "D24's own problem statement described the note_into bug as 'the decider's reason silently dropped', decider-agnostic wording, but its implementation only ever populated a note key for a person decider's own record — a policy- or agent-decided verdict left note_into's target channel untouched. Separately, a policy decider's own DeciderOutcome.rationale was computed by evaluate_policy_decider but never written into its own AttemptRecord.output at all (only evidence was) — invisible even to the durable record, before note_into ever entered into it.",
+      "options_rejected": [
+        "Leave note_into documented as person-only, treating 'the rationale or note' as two separate concepts that were never meant to converge: rejected — D24's own problem statement is decider-agnostic, and nothing in §7.6 restricts note_into to a specific decider kind; narrowing it to person-only would be inventing a restriction the spec doesn't state."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — one additive dict key on the policy attempt record, one `or` clause in _state_with_note's generator expression; the two changes are independently reversible.",
+      "confidence": "MEDIUM",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, a policy-only gate's DENY resolution left a declared note_into target unwritten — a downstream STEP reading it received the channel's own default, not the policy decider's rationale.",
+          "source": "tests/engine/test_run.py::test_note_into_captures_a_policy_deciders_own_rationale_on_deny, run against the unfixed engine, this session (asserted {\"note\": \"\"} instead of the expected rationale)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "An agent decider's own attempt record already carried `rationale` in its output before this fix (engine/run.py, NEEDS_AGENT branch) — only the policy decider's record and _state_with_note's own search needed changing.",
+          "source": "src/sulis_workflows/engine/run.py, read directly before making any change, this session."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, the same scenario's downstream STEP records the policy decider's exact rationale string as its own resolved input.",
+          "source": "Same test, passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 367 tests (366 pre-existing + 1 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path. The two pre-existing e2e tests that exercise note_into via the real Appendix A fixture (now targeting a REPLACE channel per D27) were checked directly for any assertion on the note's own value — neither asserts it, so both remain unaffected by this change.",
+          "source": "python -m pytest -q; manual read of tests/engine/test_grounded_inquiry_e2e.py's two note_into-adjacent tests, this session."
+        }
+      ],
+      "revisit_if": "A future pass adds rationale capture to other decider-record sites currently missing it, or the principal wants note_into narrowed back to person-only for some reason not yet stated."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists .github/workflows/ci.yml's own steps use.",
+      "location": "repository root",
+      "result": "367 passed, 0 failed. ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 18 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "item-vi-remaining-inert-fields-2",
+      "location": "definition/model.py (LoopSpec.counts), engine/run.py (invalidates never read at loop-take time), domain/ports/claims.py (ClaimsPort.renew never called)",
+      "divergence": "Three more sub-findings from the same background research pass are not touched in this PR: loop.counts (needs a spec clarification on what counts as 'because a check failed' for ROUTE loops), invalidates (Appendix A's own worked example already uses it, so it can't be refused — needs real, careful design work given its overlap with the same replay-correctness hazard class D20-D23 already hit four times this session), and ClaimsPort.renew (needs a new heartbeat-style public API surface, a bigger format-level decision than wiring existing pieces together).",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item or small batch of closely related ones, and 'keep PRs to one reviewable concern' — these three differ enough in risk and scope from the note_into fix that bundling them in would violate both rules."
+    },
+    {
+      "id": "wp-03a-remaining-verification-items",
+      "location": "engine/run.py, cli.py, definition/validate.py",
+      "divergence": "WP-03a's own remaining items (iii, iv, v) are not touched in this PR.",
+      "governed_exception": false,
+      "why_not_now": "One PR per verified item, per the work package's own rules."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "When fixing a gap tied to a specific decider kind (here: a person decider's own note), check whether the same fix's own stated problem was actually broader than its own implementation — a fix's MADR problem statement is a good source of truth for what it was SUPPOSED to cover, separate from what it happened to cover.",
+      "incident": "D24's own problem statement ('the decider's reason silently dropped') was decider-agnostic, but its implementation only ever handled the person decider — re-reading the ORIGINAL problem statement, not just the implementation, is what surfaced that the fix was narrower than its own stated intent.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "This run record's own interpretation.filled_in entry documents the reasoning; D32's own MADR entry cites D24's wording directly.",
+      "proposed_check": "When verifying whether an earlier fix fully closed its own stated bug, compare the fix's own problem statement (not just its outcome) against what the implementation actually covers.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A policy- or agent-decided gate verdict now writes its own rationale into a declared note_into target, the same as a person's own note always has; a policy decider's own rationale is now recorded in its attempt record at all."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "Three more item-(vi) sub-findings remain: loop.counts, invalidates, and ClaimsPort.renew.",
+        "untouched_id": "item-vi-remaining-inert-fields-2",
+        "trigger": "The next WP-03a session picks these up one at a time: loop.counts next (needs a scoped spec question answered about ROUTE-loop semantics), then invalidates and ClaimsPort.renew (each the largest, highest-risk of the remaining sub-findings).",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "None of these three are unsafe left as-is — a declared field the engine ignores does not corrupt state or crash; it just means the process author's expectation and the engine's actual behaviour diverge, a documented, not hidden, gap."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Three item-(vi) sub-findings and three other WP-03a items remain.",
+        "action": "Continue through loop.counts, invalidates, ClaimsPort.renew, then items (iii) EXTERNAL/TOOL-composite mechanisms, (iv) inline process: validation, (v) V10's caller-routing gap.",
+        "source_kind": "PARKED",
+        "source_id": "item-vi-remaining-inert-fields-2",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Continue with loop.counts next, saving invalidates and ClaimsPort.renew for last.",
+      "reason": "Ordering by risk and scope, as the earlier run record's own lesson named: resolve the spec-ambiguity case (loop.counts) next since it's relatively contained once its ROUTE-loop question is answered, before attempting invalidates (real replay-correctness risk) or ClaimsPort.renew (a new public API surface).",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
