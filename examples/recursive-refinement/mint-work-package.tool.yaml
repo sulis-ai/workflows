@@ -1,0 +1,16 @@
+# The source document's `mint-work-package` step (maturity: prose) — turns
+# a CLEAR node into one conformant work package, the leaf/terminal of the
+# tree. SKILL, matching the source's own maturity tag.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: mint-work-package
+version: 1.0.0
+title: Mint a clear node as one conformant work package
+inputs:
+  node_brief: { type: string }
+output:
+  work_package: { type: "profile:work-package@1" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: SKILL, ref: skills/mint-work-package }
+permission: workflows.recursive-refinement.mint
+effect: QUERY

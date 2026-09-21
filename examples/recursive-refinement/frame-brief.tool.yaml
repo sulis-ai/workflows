@@ -1,0 +1,19 @@
+# Small glue Tool: recursive-refinement's own input is a bare node_brief
+# string (the pre-existing, still-legitimate case the source document names
+# — "a bare node with no upstream Solution"); grounded-inquiry (the real
+# process this corpus dispatches to, appendix_a_corpus) requires a
+# structured profile:brief@1 ({question: string}). This adapts one to the
+# other rather than inventing a second brief shape.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: frame-brief
+version: 1.0.0
+title: Frame a bare brief string as profile:brief@1
+inputs:
+  node_brief: { type: string }
+output:
+  brief: { type: "profile:brief@1" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: CODE, ref: "recursive_refinement.tools:frame_brief" }
+permission: workflows.recursive-refinement.frame-brief
+effect: QUERY

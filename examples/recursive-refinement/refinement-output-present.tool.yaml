@@ -1,0 +1,24 @@
+# This corpus's own checker for refinement-output-present@1 — a plausible
+# module:function path, never imported by the validator (mechanism.ref
+# resolution is the engine's job, out of validation's scope).
+api_version: sulis.workflows/v1
+kind: TOOL
+id: refinement-output-present
+version: 1.0.0
+title: Output present checker
+mechanism: { kind: CODE, ref: "recursive_refinement.checkers:output_present" }
+checker_for: { control: CONVENTIONS }
+inputs:
+  value:   { type: any }
+  control: { type: string }
+output:
+  result: { type: "profile:control-result@1" }
+controls: [ { profile: control-result@1 } ]
+effect: QUERY
+examples:
+  - name: a present value passes
+    inputs: { value: "COMPLEX", control: "refinement-output-present@1" }
+    expect: { result: { passed: true } }
+  - name: an absent value fails
+    inputs: { value: null, control: "refinement-output-present@1" }
+    expect: { result: { passed: false } }

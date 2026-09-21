@@ -1,0 +1,24 @@
+# This translation's own addition, standing in for SYM-1007's own richer
+# report shape (owned by sulis-ai/platform, not this format) — just enough
+# for check-completeness's result to route on: did the WBS pass, and why not
+# if it didn't.
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: completeness-report
+version: 1.0.0
+title: Completeness report
+summary: >-
+  Whether an assembled WBS is complete enough to mint — the deterministic
+  gate's own verdict, standing in for the real SYM-1007 report (owned by
+  sulis-ai/platform, out of this format's own scope).
+grounded_in: This translation's own convention — no external standard applies.
+checker: profile-conformance@1
+schema:
+  type: object
+  required: [passed, findings]
+  additionalProperties: false
+  properties:
+    passed: { type: boolean }
+    findings:
+      type: array
+      items: { type: string }

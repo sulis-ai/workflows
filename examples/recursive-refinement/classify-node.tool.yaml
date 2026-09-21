@@ -1,0 +1,20 @@
+# The source document's own `entry_decision`: classify a node by how much
+# ambiguity it carries (Cynefin: Snowden). SKILL rather than CODE — unlike
+# appendix_a_corpus's own classify-inquiry@1 (a binary SINGLE/RECURSIVE
+# split the source treats as scriptable), telling COMPLEX from COMPLICATED
+# from CLEAR is real judgement about whether the unknowns are known, the
+# same territory grounded-recon/interrogate/review-recommendations already
+# hand to an agent rather than a function.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: classify-node
+version: 1.0.0
+title: Classify a node by Cynefin domain
+inputs:
+  node_brief: { type: string }
+output:
+  cynefin_domain: { type: "enum[COMPLEX, COMPLICATED, CLEAR]" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: SKILL, ref: skills/classify-node }
+permission: workflows.recursive-refinement.classify
+effect: QUERY

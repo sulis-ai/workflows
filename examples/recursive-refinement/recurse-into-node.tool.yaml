@@ -1,0 +1,33 @@
+# The source document's own recursion, declared rather than implied: both
+# `recurse-on-sub-problems` (inquire path) and `rolling-wave` (decompose
+# path) re-enter the SAME process for each child it produced. This Tool is
+# the shared recursive call both FOR_EACH bodies dispatch — a process that
+# can reach itself MUST declare on_depth_exhausted (spec §9.2); that lives
+# on the calling STEP in recursive-refinement.process.yaml, not here.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: recurse-into-node
+version: 1.0.0
+title: Recursively re-classify one child node
+inputs:
+  node_brief: { type: string }
+output:
+  ending: { type: "enum[WORK_TREE_COMPLETE, INSUFFICIENT, DROPPED, DENIED, DEPTH_LIMIT_REACHED, ESCALATED, FAILED, FORBIDDEN, CANCELLED]" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism:
+  kind: PROCESS
+  ref: recursive-refinement@1.0.0
+  inputs: { node_brief: node_brief }
+  result:
+    outputs: {}
+    endings:
+      WORK_TREE_COMPLETE: WORK_TREE_COMPLETE
+      INSUFFICIENT: INSUFFICIENT
+      DROPPED: DROPPED
+      DENIED: DENIED
+      DEPTH_LIMIT_REACHED: DEPTH_LIMIT_REACHED
+      ESCALATED: ESCALATED
+      FAILED: FAILED
+      FORBIDDEN: FORBIDDEN
+      CANCELLED: CANCELLED
+effect: QUERY

@@ -1,0 +1,19 @@
+# The source document's `completeness-gate` step (maturity: code) — CODE,
+# matching the source's own tag: a deterministic pass/fail, not judgement.
+# Stands in for the real SYM-1007 gate (run by the platform's own executor
+# on a live WBS instance, per the source's own note — out of this format's
+# reach); here it is a Tool this process's own ROUTE loops on until it
+# passes, the same on_fail_goto shape the source names explicitly.
+api_version: sulis.workflows/v1
+kind: TOOL
+id: check-completeness
+version: 1.0.0
+title: Check a WBS for completeness before minting
+inputs:
+  wbs_children: { type: "list<profile:refinement-node@1>" }
+output:
+  completeness_report: { type: "profile:completeness-report@1" }
+controls: [ { conventions: refinement-output-present@1 } ]
+mechanism: { kind: CODE, ref: "recursive_refinement.tools:check_completeness" }
+permission: workflows.recursive-refinement.check-completeness
+effect: QUERY

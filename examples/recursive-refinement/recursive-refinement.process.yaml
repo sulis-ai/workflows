@@ -1,0 +1,169 @@
+# A v1 translation of sulis-ai/platform's `recursive-refinement` controller
+# (ADR-0020) into this format. Validates cleanly (`sulis-workflows validate`)
+# loaded together with tests/definition/fixtures/appendix_a_corpus/ and
+# src/sulis_workflows/definition/builtin/ — see
+# tests/examples/test_recursive_refinement.py.
+#
+# What translates faithfully: the core control flow (classify a node by
+# Cynefin domain, route to inquire/decompose/execute, recurse on what each
+# produces — a STEP returning a typed verdict followed by a ROUTE, spec
+# §7.2's own pattern for a judgement); the recursion itself
+# (recurse-into-node.tool.yaml is a PROCESS-mechanism Tool whose `ref` is
+# this same process — spec §9's own supported shape, V10-checked); and
+# dispatching the real, already-registered grounded-inquiry@1.0.0 process
+# by reference rather than restating it (spec §9.1's own worked example is,
+# in fact, this exact call).
+#
+# What had to be simplified: the source's own `solution_spec`/
+# `contract_set` (sulis-ai/platform ADR-0027/ADR-0030/ADR-0031) are not
+# modelled — their real shape is owned by a repository this translation
+# was not done with access to, and declaring them would mean guessing at a
+# schema rather than reading one off a source of truth; only the source's
+# own "bare node, no upstream Solution" case is translated. A WBS child
+# (refinement-node@1, this translation's own addition) and grounded-
+# inquiry's own recommendation (recommendation@1, already registered,
+# {id, action}) are the two real "units of further work" recursed on — the
+# source names "sub-problems" a recommendation somehow exposes but never
+# shows their shape. The SYM-1007 completeness gate and the WorkPackage
+# standard's own six sections (ADR-0019) are both stood in for by minimal
+# profiles (completeness-report@1, work-package@1) for the same reason.
+# extract-recommendation-brief@1/extract-child-brief@1 are this
+# translation's own plumbing (in:/out: read a whole state channel, never a
+# projection into one of its fields, confirmed by V4) — the source has no
+# equivalent step.
+#
+# What does not run on today's engine yet: FOR_EACH (spec §7.5) is how
+# this expresses "for each recommendation/WBS child, recurse" — the real
+# fan-out shape, not a serialised approximation that would quietly change
+# the source's own semantics. It is schema- and validator-legal (V12) but
+# this repository's engine does not execute PARALLEL/JOIN/FOR_EACH yet —
+# out of WP-02's stated scope (engine/run.py's own module docstring),
+# refused cleanly at runtime rather than mishandled, the same as
+# EXTERNAL/TOOL-composite mechanisms and kind: INPUT gates elsewhere in
+# this format. This definition is real and checkable now; running it
+# end-to-end needs that engine work done first.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: recursive-refinement
+version: 1.0.0
+title: Recursive refinement
+summary: >-
+  Takes a problem of any size and keeps breaking it down until every piece is
+  small enough to act on. Vague pieces get researched first, big pieces get
+  split again, and clear pieces become units of work.
+permission: workflows.recursive-refinement.start
+inputs:
+  node_brief: { type: string, required: false, default: "", description: "The node's ask, when reached with no upstream Solution." }
+state:
+  cynefin_domain:  { type: "enum[COMPLEX, COMPLICATED, CLEAR]", reducer: REPLACE }
+  brief:           { type: "profile:brief@1", reducer: REPLACE }
+  recommendations: { type: "list<profile:recommendation@1>", reducer: REPLACE, default: [] }
+  inquiry_ending:  { type: "enum[COMPLETE, INSUFFICIENT, DROPPED, DENIED, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+  recommendation:  { type: "profile:recommendation@1", reducer: REPLACE }
+  current_node_brief: { type: string, reducer: REPLACE }
+  recurse_ending:  { type: "enum[WORK_TREE_COMPLETE, INSUFFICIENT, DROPPED, DENIED, DEPTH_LIMIT_REACHED, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+  recurse_endings: { type: "list<any>", reducer: APPEND }
+  wbs_children:    { type: "list<profile:refinement-node@1>", reducer: REPLACE, default: [] }
+  child:           { type: "profile:refinement-node@1", reducer: REPLACE }
+  completeness_report: { type: "profile:completeness-report@1", reducer: REPLACE }
+  work_package:    { type: "profile:work-package@1", reducer: REPLACE }
+start: classify
+endings:
+  WORK_TREE_COMPLETE:   { outcome: SUCCESS, says: "Every leaf below this node is a conformant work package." }
+  INSUFFICIENT:         { outcome: SUCCESS, says: "Stopped honestly: the evidence does not support classifying this node yet." }
+  DROPPED:              { outcome: SUCCESS, says: "Nothing survived inquiry, or the WBS could not be made complete within budget." }
+  DENIED:               { outcome: STOPPED, says: "Stopped: an inquiry recommendation was not approved." }
+  DEPTH_LIMIT_REACHED:  { outcome: STOPPED, says: "Stopped: the recursion depth limit was reached before this branch bottomed out." }
+nodes:
+  # entry_decision: classify the node by Cynefin domain (Snowden), then
+  # route on it — the same "a judgement is a step whose Tool returns a
+  # typed verdict, followed by a route on it" pattern spec §7.2 names.
+  classify:
+    { type: STEP, tool: classify-node@1.0.0, in: { node_brief: inputs.node_brief },
+      out: { cynefin_domain: state.cynefin_domain }, next: route-by-domain }
+  route-by-domain:
+    type: ROUTE
+    when:
+      - { if: 'state.cynefin_domain == "COMPLEX"', next: frame-brief-for-inquiry }
+      - { if: 'state.cynefin_domain == "COMPLICATED"', next: wbs-decompose }
+      - { if: 'state.cynefin_domain == "CLEAR"', next: mint-work-package }
+
+  # --- inquire path (COMPLEX): resolve the ambiguity by dispatching
+  # grounded-inquiry, then recurse on each recommendation it signs off. ---
+  frame-brief-for-inquiry:
+    { type: STEP, tool: frame-brief@1.0.0, in: { node_brief: inputs.node_brief },
+      out: { brief: state.brief }, next: dispatch-grounded-inquiry }
+  dispatch-grounded-inquiry:
+    { type: STEP, tool: run-grounded-inquiry@1.0.0, in: { brief: state.brief },
+      out: { recommendations: state.recommendations, ending: state.inquiry_ending },
+      on_depth_exhausted: { end: DEPTH_LIMIT_REACHED }, next: route-inquiry-outcome }
+  route-inquiry-outcome:
+    type: ROUTE
+    when:
+      - { if: 'state.inquiry_ending == "COMPLETE"', next: refine-each-recommendation }
+      - { if: 'state.inquiry_ending == "INSUFFICIENT"', end: INSUFFICIENT }
+      - { if: 'state.inquiry_ending == "DROPPED"', end: DROPPED }
+      - { if: 'state.inquiry_ending == "DENIED"', end: DENIED }
+      - { if: 'state.inquiry_ending == "ESCALATED"', end: ESCALATED }
+      - { if: 'state.inquiry_ending == "FAILED"', end: FAILED }
+      - { if: 'state.inquiry_ending == "FORBIDDEN"', end: FORBIDDEN }
+      - { if: 'state.inquiry_ending == "CANCELLED"', end: CANCELLED }
+  refine-each-recommendation:
+    type: FOR_EACH
+    over: state.recommendations
+    as: recommendation
+    do: extract-recommendation-brief-step
+    join: ALL_COMPLETE
+    collect: { output: ending, into: state.recurse_endings }
+    end: WORK_TREE_COMPLETE
+  # `in:`/`out:` read a whole state channel, not a projection into one of
+  # its fields — this step reads the FOR_EACH item's own recommendation
+  # object (state.recommendation) down to the plain string
+  # recurse-into-node@1.0.0 actually takes, since a dotted path into a
+  # profile-typed channel is not itself a mappable source (V4).
+  extract-recommendation-brief-step:
+    { type: STEP, tool: extract-recommendation-brief@1.0.0, in: { recommendation: state.recommendation },
+      out: { node_brief: state.current_node_brief }, next: recurse-on-recommendation }
+  recurse-on-recommendation:
+    { type: STEP, tool: recurse-into-node@1.0.0, in: { node_brief: state.current_node_brief },
+      out: { ending: state.recurse_ending }, on_depth_exhausted: { end: DEPTH_LIMIT_REACHED },
+      end: WORK_TREE_COMPLETE }
+
+  # --- decompose path (COMPLICATED): a PMI/PMBOK WBS under the 100% rule,
+  # recurse on each child, then gate completeness before minting. ---
+  wbs-decompose:
+    { type: STEP, tool: wbs-decompose@1.0.0, in: { node_brief: inputs.node_brief },
+      out: { wbs_children: state.wbs_children }, next: refine-each-child }
+  refine-each-child:
+    type: FOR_EACH
+    over: state.wbs_children
+    as: child
+    do: extract-child-brief-step
+    join: ALL_COMPLETE
+    collect: { output: ending, into: state.recurse_endings }
+    next: completeness-gate
+  extract-child-brief-step:
+    { type: STEP, tool: extract-child-brief@1.0.0, in: { child: state.child },
+      out: { node_brief: state.current_node_brief }, next: recurse-on-child }
+  recurse-on-child:
+    { type: STEP, tool: recurse-into-node@1.0.0, in: { node_brief: state.current_node_brief },
+      out: { ending: state.recurse_ending }, on_depth_exhausted: { end: DEPTH_LIMIT_REACHED },
+      end: WORK_TREE_COMPLETE }
+  completeness-gate:
+    { type: STEP, tool: check-completeness@1.0.0, in: { wbs_children: state.wbs_children },
+      out: { completeness_report: state.completeness_report }, next: route-completeness }
+  # completeness_report.passed is boolean, not enum — V6's "provably
+  # exhaustive without otherwise" exemption only covers an enum-typed path
+  # compared for equality, so this needs an explicit otherwise even though
+  # true/false is exhaustive in fact. on_fail_goto in the source (loop back
+  # to wbs-decompose) is this ROUTE's own loop.
+  route-completeness:
+    type: ROUTE
+    when:
+      - { if: 'state.completeness_report.passed == true', end: WORK_TREE_COMPLETE }
+    otherwise: { next: wbs-decompose, loop: { budget: 3, on_exhausted: { end: DROPPED } } }
+
+  # --- execute path (CLEAR): mint one conformant work package. ---
+  mint-work-package:
+    { type: STEP, tool: mint-work-package@1.0.0, in: { node_brief: inputs.node_brief },
+      out: { work_package: state.work_package }, end: WORK_TREE_COMPLETE }

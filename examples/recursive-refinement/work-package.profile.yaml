@@ -1,0 +1,27 @@
+# This translation's own addition, standing in for the real WorkPackage
+# standard (sulis-ai/platform ADR-0019's own six sections) — just enough to
+# name what was minted and which process the register would hand it to.
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: work-package
+version: 1.0.0
+title: Work package
+summary: >-
+  A single conformant work package minted from a CLEAR node — standing in
+  for the real WorkPackage standard's own six sections (ADR-0019, owned by
+  sulis-ai/platform, out of this format's own scope).
+grounded_in: This translation's own convention — no external standard applies.
+checker: profile-conformance@1
+schema:
+  type: object
+  required: [id, title, executing_process]
+  additionalProperties: false
+  properties:
+    id: { type: string }
+    title: { type: string }
+    executing_process:
+      type: string
+      description: >-
+        id@version of the Process that executes this package (conformance-
+        convergence for a code deliverable, grounded-inquiry for a research
+        one — sulis-ai/platform ADR-0016/ADR-0018).

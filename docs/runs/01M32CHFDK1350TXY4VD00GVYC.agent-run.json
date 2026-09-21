@@ -1,0 +1,154 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M32CHFDK1350TXY4VD00GVYC",
+  "started_at": "2026-09-21T15:55:00Z",
+  "completed_at": "2026-09-21T16:24:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — translate sulis-ai/platform's recursive-refinement controller (ADR-0020) into this repo's own v1 format",
+  "branch": "example/recursive-refinement-translation",
+  "summary_for_principal": "You asked whether a real-world process (breaking a problem down until every piece is small enough to act on) could be defined in this system's own format, expecting it probably couldn't be, fully.\n\nMost of it translates cleanly: classifying a piece of work, routing to the next step, and the hard part — the process calling itself as it descends — were all already supported. I reused this repository's own research process rather than rebuilding it.\n\nTwo simplifications, made honestly rather than guessed at. Two inputs tying this to another system live in a repository I can't read, so I left them out. More importantly: fanning out to work on several pieces at once is expressible in the format, but this system doesn't yet run that part — a known, already-declared limit, not something new.\n\nChecked by the real validator (17 tests, passing), documented in the files themselves. Also found one small, separate gap in an existing checker — a follow-up PR fixes it.\n\nNumbered actions:\n1. Nothing needs deciding right now.\n2. Want 'several pieces at once' built for real? That's separate work I can scope on request.",
+  "subjects": {
+    "primary": {
+      "coordinate": "examples/recursive-refinement/",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/examples/test_recursive_refinement.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "End-to-end validation of the whole translation (mirrors test_appendix_a.py's own pattern): validates cleanly, every supporting file validates alone, and removing any one of this translation's own files makes V2 refuse the process."
+      },
+      {
+        "coordinate": "tests/definition/fixtures/appendix_a_corpus/",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Reused, not duplicated: the translation's inquire path dispatches the real, already-registered grounded-inquiry@1.0.0 process from this corpus (spec §9.1's own worked example is, in fact, this exact call) rather than restating the methodology."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "The principal supplied a real process definition from a different, ungoverned-from-here system (sulis-ai/platform's recursive-refinement controller, ADR-0020) and asked whether an equivalent could be defined in this repository's own v1 process-definition format, explicitly acknowledging the exact original probably is not supported.",
+    "read_as": "Produce the most faithful translation this format and engine can actually support today, using real, already-registered assets where they exist (grounded-inquiry) rather than restating them, and be explicit and honest about every place fidelity had to give — a simplification made because the real shape is owned by an inaccessible repository, versus a genuine current engine limit (FOR_EACH not yet executed) that is not new and not this translation's own gap.",
+    "filled_in": [
+      {
+        "gap": "The source names 'sub-problems' a grounded-inquiry recommendation somehow exposes for further recursion, but never shows their shape, and this format's own grounded-inquiry process (spec Appendix A, already registered here) has no 'sub_problems' field — only recommendations ({id, action}).",
+        "assumed": "Recurse on each recommendation directly (its 'action' text becomes the next node's own brief) rather than inventing a new field on an existing, tested profile that no fixture or test uses. A WBS child (a genuinely new concept the source names but never shapes) gets one minimal new profile, refinement-node@1 ({id, brief}), clearly marked as this translation's own addition.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'ground honestly' and 'measure, don't author' — recommendation@1 is a real, already-registered, already-tested shape; inventing a second, undeclared field on it would be guessing at something the source itself never specifies.",
+        "reversal_cost": "Low — a future pass that learns the real sub-problem shape (from the platform repository itself) can add a dedicated profile and re-point the FOR_EACH's `over` at it without touching the rest of the translation's own control flow.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "The source's own inputs (backfilled per its own ADR-0033 comment) include solution_spec/contract_set, integrating this controller with sulis-ai/platform's own solution-delivery process (ADR-0027/ADR-0030/ADR-0031) — a repository this session has no access to, so their real schema cannot be read, only guessed at.",
+        "assumed": "Omit them entirely rather than declare opaque `any`-typed pass-through fields that would do nothing and could mislead a reader into thinking the integration is modelled. Only the source's own 'bare node, no upstream Solution' case — its own words, 'the pre-existing, still-legitimate case' — is translated.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md: 'If the spec is silent or wrong, do not invent a rule in code' — extended here to a schema this session cannot read at all, not merely one the spec leaves silent.",
+        "reversal_cost": "Low — additive; a future pass with access to the platform repository's own ADR-0027/0030/0031 shapes can add the real fields and the COMPLICATED/CLEAR-by-construction branching they drive without restructuring what exists.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "The source's recursion is a genuine fan-out (an unbounded number of sub-problems/WBS children, each independently recursed on) — this format has FOR_EACH (spec §7.5) for exactly this shape, but this repository's own engine does not execute PARALLEL/JOIN/FOR_EACH yet (engine/run.py's own module docstring: out of WP-02's stated scope, refused cleanly at runtime).",
+        "assumed": "Use FOR_EACH anyway — the real, validator-legal structure — rather than serialise the fan-out into a single-item ROUTE loop, which would have quietly changed the source's own semantics (independent, structurally-unordered descent) into an invented one (a specific processing order the source never specifies) just to get something that runs today.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now; defer the expensive guess' — the format's own real shape is the cheap, correct seam; forcing a false serialisation to dodge an already-known, already-documented engine gap would be the expensive guess.",
+        "reversal_cost": "None avoided — nothing about this choice needs undoing; once FOR_EACH is engine-executed (existing, separately-tracked scope, not opened here), this translation runs without any further change.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "Express the source's own recursive fan-out (an unbounded number of independent sub-problems/WBS children, each recursively re-classified) using this format's real FOR_EACH construct, rather than serialising it into a single-item ROUTE loop to get something the current engine can already run end-to-end.",
+      "problem": "The source process fans out to a variable number of children, each independently descending through its own classify/route/recurse cycle. This format's own FOR_EACH (spec §7.5) is the real shape for that — but this repository's engine does not execute FOR_EACH yet (PARALLEL/JOIN/FOR_EACH are out of WP-02's stated scope, refused cleanly at runtime).",
+      "options_rejected": [
+        "Serialise the fan-out into a ROUTE loop processing one child at a time, so the translation is runnable end-to-end today: rejected — this would quietly invent a specific processing order and a 'hold every other child pending until this one's whole sub-tree finishes' semantics the source never states, trading a real structural gap (declared, engine-refused) for a silent behavioural one (a guess presented as if it were the source's own design).",
+        "Skip modelling the fan-out at all, ending the tree at the first level of children: rejected — this is not a translation of the source's own recursion, only of its entry classification; the recursion is the process's own defining feature."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "None avoided — nothing here needs undoing; once FOR_EACH is engine-executed (separate, already-tracked scope), this translation runs without further change to its own structure.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "The whole translation, including both FOR_EACH nodes, validates with zero findings against the real validator (schema- and rule-legal today).",
+          "source": "tests/examples/test_recursive_refinement.py::test_recursive_refinement_validates_end_to_end_with_the_full_corpus, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "engine/run.py's own dispatch raises EngineRefusal for any PARALLEL/JOIN/FOR_EACH node, citing WP-02's own stated scope boundary — a pre-existing, already-documented limit, not something this translation newly triggers.",
+          "source": "src/sulis_workflows/engine/run.py, module docstring and the node-kind dispatch's own else-branch, read directly this session."
+        }
+      ],
+      "revisit_if": "The principal wants recursive-refinement to actually run end-to-end — needs FOR_EACH (and, for full parallel fan-out, PARALLEL/JOIN) engine execution built first, separate and substantial work."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "The whole translation (14 files: 1 Process, 8 Tools, 3 Profiles, 1 Control, 1 checker Tool) validated together with the real grounded-inquiry corpus and this format's own builtins.",
+      "method": "sulis-workflows validate <all files>; tests/examples/test_recursive_refinement.py (validate_definition end-to-end, every file valid alone, every one of this translation's own files load-bearing under a remove-and-re-validate check).",
+      "location": "examples/recursive-refinement/, tests/examples/test_recursive_refinement.py",
+      "result": "0 findings across every file, both via the CLI and the library call. 17 new tests, all passing. Full suite: 406 passed (389 pre-existing + 17 new)."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "recursive-refinement-for-each-not-engine-executed",
+      "location": "examples/recursive-refinement/recursive-refinement.process.yaml (refine-each-recommendation, refine-each-child — both FOR_EACH)",
+      "divergence": "This translation cannot be driven end-to-end by next()/report()/decide() today — the engine refuses any FOR_EACH node at runtime.",
+      "governed_exception": true,
+      "why_not_now": "Pre-existing, already-declared engine scope boundary (WP-02), not something this translation introduces or could resolve on its own — implementing PARALLEL/JOIN/FOR_EACH execution is separate, substantial work needing its own work package."
+    },
+    {
+      "id": "recursive-refinement-solution-delivery-integration-not-modelled",
+      "location": "examples/recursive-refinement/recursive-refinement.process.yaml (inputs:)",
+      "divergence": "solution_spec/contract_set and the COMPLICATED/CLEAR-by-construction branching they drive in the source are absent from this translation.",
+      "governed_exception": true,
+      "why_not_now": "Their real shape is owned by sulis-ai/platform (ADR-0027/ADR-0030/ADR-0031), a repository this session was not given access to; declaring them without reading the real schema would be guessing, which CLAUDE.md refuses."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Translating an unfamiliar source document into this format surfaces real bugs in the format's own tooling that a familiar, already-exercised corpus (Appendix A) never would — building something genuinely new is itself a useful pressure test, not only a deliverable.",
+      "incident": "While confirming a ROUTE loop declared on `otherwise` (rather than a `when` option) behaved correctly, found that both V8 (the loop-budget validator rule) and the `explain` CLI command's own loop listing only ever check a RouteNode's `when` options for `.loop` — never `otherwise` — silently missing a bad-but-conformant budget (e.g. 0, or `counts: FAILURES`) declared there. Confirmed genuinely reachable: this translation's own route-completeness node uses exactly this shape. Fixed separately (see the follow-up PR this run record's own branch is not for), test-first, the same pattern already used to add otherwise-coverage to V18 earlier this session.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "A same-sized, separate PR (single concern) fixing _all_loops (validate.py) and _iter_loops (cli.py) to also walk `otherwise`.",
+      "proposed_check": "When building a new definition that uses a format feature in a shape none of the existing corpus/fixtures exercise (here: a loop on `otherwise` specifically, not a `when` option), treat that as a deliberate probe of the tooling's own coverage, not just a means to an end.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A complete, validator-clean v1 translation of recursive-refinement exists at examples/recursive-refinement/, checkable with `sulis-workflows validate` or the new test file.",
+      "Every place fidelity was simplified is documented directly in the process file's own header comment, not left implicit."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "FOR_EACH is not engine-executed, so this translation cannot be run end-to-end yet.",
+        "untouched_id": "recursive-refinement-for-each-not-engine-executed",
+        "trigger": "The principal wants a real recursive-refinement run to actually execute.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "This is a pre-existing, already-known engine scope boundary (WP-02), not new risk this translation introduces."
+      },
+      {
+        "item": "solution_spec/contract_set integration with sulis-ai/platform's solution-delivery process is not modelled.",
+        "untouched_id": "recursive-refinement-solution-delivery-integration-not-modelled",
+        "trigger": "This session (or a future one) gains read access to sulis-ai/platform's own ADR-0027/0030/0031 schemas.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Only the source's own 'bare node' case is affected — the translation is complete and honest for that case as it stands."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "No action needed unless the principal wants FOR_EACH execution built (separate, substantial engine work) or the solution-delivery integration modelled (needs access to the other repository's own schemas first).",
+      "reason": "The translation itself is complete, validated, and honestly documented for what this session had access to and this engine currently supports.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
