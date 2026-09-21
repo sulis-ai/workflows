@@ -1,0 +1,165 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M32EDBYZEZGG8VNWT0E5BMWA",
+  "started_at": "2026-09-21T16:35:00Z",
+  "completed_at": "2026-09-21T16:57:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — actually run examples/recursive-refinement/ through the engine (the principal asked whether it had been); fix what running it found",
+  "branch": "fix/recursive-refinement-process-call-input-paths",
+  "summary_for_principal": "You asked a fair, sharp question: had I actually run the last piece of work, not just checked its shape. I hadn't — I had only validated it, which checks structure, not behaviour. I ran it now.\n\nRunning it found a real problem, not where I expected. My translation followed this system's own instructions literally, exactly where they show how to call another process. Those instructions are wrong: the example syntax silently does nothing, confirmed by testing it directly, separate from my own work. Anyone following the documentation as written would hit the same silent failure.\n\nFixed both: my own files, and the documentation, so the next person doesn't repeat this. Verified by running the fixed version three ways, including genuinely nested behaviour two steps deep.\n\nOne smaller gap noticed, not fixed: a failure inside a called process can sometimes be reported as success. Worth a look, not urgent.\n\nFull test suite: 412 passed, 3 new.\n\nNumbered actions:\n1. Nothing needs deciding now — complete and verified.\n2. Say if you'd like the smaller masked-failure gap looked at next.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/spec/process-definition.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "examples/recursive-refinement/run-grounded-inquiry.tool.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "mechanism.inputs corrected from the spec's own (broken) literal syntax to a fully-qualified path."
+      },
+      {
+        "coordinate": "examples/recursive-refinement/recurse-into-node.tool.yaml",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Same fix, for the recursive self-call this Tool wraps."
+      },
+      {
+        "coordinate": "tests/examples/test_recursive_refinement.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Three new engine-execution tests (next()/report()-driven, not just validate()) for the CLEAR, COMPLICATED, and COMPLEX paths — the COMPLEX one proves real nested process composition by resuming a hand-off from inside grounded-inquiry's own scope, twice."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] entry for D39."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Have you run it to test it works?\" — a direct question about the previous PR (examples/recursive-refinement/), which had only been checked with the validator (validate_definition), never actually driven through next()/report().",
+    "read_as": "Answer honestly first (no), then actually do it, since the honest answer alone does not close the gap the question points at. Running it, rather than reasoning about whether it WOULD run, is exactly the 'measure, don't author' discipline CLAUDE.md names — validation proves shape, not behaviour, and the two can diverge in ways only execution reveals.",
+    "filled_in": [
+      {
+        "gap": "Running the COMPLEX path (the one exercising real process-to-process composition, the hardest and most novel part of this translation) failed immediately with a masked internal error, traced to mechanism.inputs: { brief: brief } — copied verbatim from spec §9.1's own worked example — silently resolving to None against the real engine.",
+        "assumed": "This is a documentation bug in the spec's own worked example, not a mistake unique to this translation, confirmed by reproducing the identical failure in a minimal, standalone wrapper process built from scratch (not reusing any of this translation's own files) that calls grounded-inquiry@1.0.0 directly with the spec's literal syntax.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'ground honestly' and 'measure, don't author', and this session's own established precedent (D19, D35, D38) of correcting a spec worked example found not to match reality, rather than treating the spec's own illustrative text as beyond question.",
+        "reversal_cost": "Low — a documentation and two-Tool-file correction; no schema, model, or engine behaviour changed.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Whether to fix this by changing the ENGINE (so a bare mechanism.inputs name resolves against the calling STEP's own in:-mapped Tool inputs, arguably the more natural reading of the spec's own intent) or the SPEC's own text (matching the qualified-path behaviour the engine already implements and an existing test already exercises).",
+        "assumed": "Fix the spec's text, not the engine. The qualified-path behaviour is not an accident: tests/engine/test_run.py already has a passing PROCESS-mechanism test using a fully-qualified path, and it is the only convention used anywhere else in the whole corpus for any path reference. Changing the engine's own core §9 call-input resolution to support a second, bare-name semantic is a materially bigger, more invasive change than this pass's own scope (found while verifying a translation, not commissioned as engine work) — flagged as a proposed spec clarification for a future pass to properly weigh, not decided unilaterally here.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now; defer the expensive guess' and the standing rule to scope PRs to one reviewable concern — a core-engine input-resolution change deserves its own dedicated, carefully-designed pass, not a rider on a translation's own bug fix.",
+        "reversal_cost": "Low — the door stays open; a future pass can still build the bare-name-against-Tool-inputs semantic without undoing anything this fix did (the qualified-path form would keep working either way).",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "PARTIAL",
+  "decisions": [
+    {
+      "headline": "D39 — spec §9.1's own worked example is corrected: mechanism.inputs: { brief: brief } (bare, unqualified) becomes { brief: state.brief } (fully qualified) — confirmed, by actually running it, that the bare form silently resolves to nothing against the real engine.",
+      "problem": "mechanism.inputs' values are resolved via _first_present directly against the calling process's own run_state (inputs.*/state.*/host.*/steps.*) — the same four namespaces every other path in this format uses. A bare, unqualified name matches none of them and always resolves to None. The calling STEP's own in: mapping is never consulted for a PROCESS-mechanism dispatch at all, so there is no third namespace a bare name could mean either. Spec §9.1's own worked example is the only place in the entire document, and the only place in the real corpus, that a bare name is used.",
+      "options_rejected": [
+        "Change the engine so a bare mechanism.inputs name resolves against the calling STEP's own in:-mapped Tool inputs (the more natural reading of §9.1's own apparent intent): rejected for this pass — needs new resolution machinery in the core §9 call mechanism every process-call in the corpus goes through, and the currently-built qualified-path behaviour is deliberate and already tested (tests/engine/test_run.py), not an oversight."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — a documentation and two-Tool-file correction with no schema, model, or engine behaviour change; reverting restores the literal (non-functional) example text.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "The bare-name form (mechanism.inputs: { brief: brief }) resolves to child_inputs = {'brief': None}, causing the child process's own first input-dependent step to fail with INPUT_UNRESOLVED, absorbed into a FAILED ending, then reported as SUCCESS by a calling step whose own controls (empty, in the minimal reproduction) never caught it.",
+          "source": "A minimal, standalone two-node wrapper process (not part of this translation's own files) built directly against grounded-inquiry@1.0.0 with the spec's literal syntax, driven through next() this session — reproduced the identical failure shape outside this translation entirely."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The qualified-path form (mechanism.inputs: { brief: state.brief }) resolves correctly: the same call reaches grounded-inquiry's own real 'gather' hand-off, and that hand-off can be resumed (twice, through 'gather' then 'interrogate') via report() targeting the nested scope's own path (root/dispatch-grounded-inquiry).",
+          "source": "tests/examples/test_recursive_refinement.py::test_a_complex_node_dispatches_the_real_grounded_inquiry_process_and_resumes_its_hand_off, passing after the fix; failing (ENDED/FAILED at the first hop) before it, confirmed test-first."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The CLEAR and COMPLICATED paths (which never call a PROCESS-mechanism Tool) were unaffected by this bug and unaffected by this fix — re-run before and after, identical results both times.",
+          "source": "tests/examples/test_recursive_refinement.py::test_a_clear_node_mints_a_work_package_end_to_end, ::test_a_complicated_node_is_refused_cleanly_at_the_for_each_fan_out, both passing throughout."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 412 tests (392 pre-existing at this branch's base + 20 in tests/examples/test_recursive_refinement.py, 3 of them new engine-execution tests); ruff check, ruff format --check and mypy all pass clean on the changed test file.",
+          "source": "python -m pytest -q; python -m ruff check/format --check/mypy on tests/examples/test_recursive_refinement.py, run locally."
+        }
+      ],
+      "revisit_if": "A future pass wants the bare-name-resolves-against-Tool-inputs semantic built for real (this decision's own proposed spec clarification) — would let a PROCESS-mechanism Tool be written generically, reusable by any caller, rather than coupled to a caller whose own state happens to use a matching path name."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Whether examples/recursive-refinement/ actually runs through the real engine, not only validates.",
+      "method": "Drove all three paths (CLEAR, COMPLICATED, COMPLEX) through next()/report() with stub adapters, both by hand (an ad hoc script, deleted after use) and as committed regression tests.",
+      "location": "tests/examples/test_recursive_refinement.py",
+      "result": "CLEAR: reaches WORK_TREE_COMPLETE end-to-end. COMPLICATED: reaches the documented FOR_EACH refusal exactly as claimed, not merely asserted. COMPLEX: before the fix, failed silently at the first process-call hop; after the fix, genuinely descends into grounded-inquiry's own nested scope and resumes a hand-off from inside it twice."
+    },
+    {
+      "subject": "Whether the bare-name mechanism.inputs failure was specific to this translation's own files or a general engine/spec mismatch.",
+      "method": "Reproduced the identical failure with a minimal, from-scratch wrapper process (no files from this translation) calling grounded-inquiry@1.0.0 directly with the spec's own literal syntax.",
+      "location": "ad hoc reproduction, not committed (the point was isolation, not a permanent fixture — tests/engine/test_run.py's own existing PROCESS-mechanism coverage already exercises the correct, qualified-path form)",
+      "result": "Identical failure (INPUT_UNRESOLVED inside the child, masked as SUCCESS by the parent) — confirming a general spec/engine mismatch, not a mistake unique to this translation."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "process-call-failure-can-be-masked-as-success",
+      "location": "engine/run.py (_advance_process_call / report()'s own check_controls call for a PROCESS-mechanism STEP)",
+      "divergence": "A PROCESS-mechanism call whose child ends FAILED (or another non-success ending) can be reported as the calling STEP's own SUCCESS if the calling Tool declares no controls (or controls that happen to pass regardless), because control-checking runs against the Tool's OWN mapped output shape, not against whether the child's own ending was a 'good' one — result.endings mapping the ending into an output field is the only signal available, and nothing forces the calling process's own route to check it.",
+      "governed_exception": true,
+      "why_not_now": "Found as a side effect of chasing D39, not this pass's own scope; fixing it well needs a considered design (should the engine itself refuse an unrouted non-success ending value, or is checking result.outputs.ending entirely the calling process author's own responsibility, as recursive-refinement.process.yaml's own route-inquiry-outcome ROUTE already does correctly?) rather than a reactive patch alongside an unrelated fix."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "Validating a definition (schema + rule conformance) and running it (real engine behaviour) are different claims, and only the second one is evidence that something works — a translation that 'validates cleanly' can still fail its very first real dispatch if the thing it validated against (here, the spec's own worked example) was itself never executed either.",
+      "incident": "examples/recursive-refinement/ passed 17 validate()-based tests and was reported as complete; the principal asked directly whether it had actually been run, and it had not. Running it immediately found a real, previously-unknown bug — not in the translation's own design, but in the spec's own flagship worked example for the exact mechanism (calling another process) the translation most needed to prove.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "tests/examples/test_recursive_refinement.py now carries real engine-execution tests alongside the validate()-only ones, for this file and as a pattern for any future translation.",
+      "proposed_check": "When a deliverable's own value depends on it actually running (not just being well-formed), drive it through the real execution path before reporting it complete — 'validates cleanly' is not the same claim as 'works', and should not be presented as though it were.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "examples/recursive-refinement/ now genuinely runs through the real engine as far as it structurally can (CLEAR to completion; COMPLICATED to the documented FOR_EACH refusal; COMPLEX into real, resumable nested process composition).",
+      "Spec §9.1's own worked example now shows working syntax; a definition author copying it literally will not repeat this failure."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "A PROCESS-mechanism call's own child FAILED ending can be masked as the calling step's SUCCESS when the calling Tool has no controls to catch it.",
+        "untouched_id": "process-call-failure-can-be-masked-as-success",
+        "trigger": "The principal wants this investigated and fixed.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "A process author who correctly routes on the mapped ending value (as recursive-refinement.process.yaml's own route-inquiry-outcome does) is unaffected; the risk is specific to a caller that maps result.outputs but never checks result.outputs.ending."
+      },
+      {
+        "item": "D39's own proposed spec clarification: should mechanism.inputs support a bare-name-resolves-against-the-Tool's-own-inputs semantic, for a more genuinely reusable PROCESS-mechanism Tool?",
+        "trigger": "A future pass wants PROCESS-mechanism Tools to be callable generically rather than coupled to a specific caller's own state shape.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Not decided here — flagged as a genuine open design question, not a defect."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "No action required now. If the masked-failure gap (process-call-failure-can-be-masked-as-success) concerns the principal, it is worth its own small, focused pass.",
+      "reason": "Everything this pass set out to verify is now verified by actual execution, not just validation; the one open finding is real but low-severity for any process author who already routes on the mapped ending (the established, correct pattern this translation itself follows).",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
