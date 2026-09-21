@@ -53,6 +53,7 @@ honest, tested slice over a guessed-at complete one):
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -985,6 +986,7 @@ async def _advance_step(
     # anything, so a stale or premature attempt is never mistaken for the
     # current one.
     attempts = _visit_prefix(attempts)
+    retry_backoff_seconds: float | None = None
 
     if attempts:
         last = attempts[-1]
@@ -1005,7 +1007,17 @@ async def _advance_step(
                 retry.max if retry and retry.max is not None else fmt_defaults.RETRY_MAX
             )
             if error_class == "TRANSIENT" and len(attempts) <= max_retries:
-                pass  # fall through to dispatch another attempt below
+                # §7.1/§15: "backoff_seconds is the starting delay before
+                # exponential backoff" — `attempts` already holds `len(attempts)`
+                # TRANSIENT attempts, so this dispatch is retry number
+                # `len(attempts)`; the delay doubles from `backoff_seconds`
+                # on the first retry.
+                base_backoff = (
+                    retry.backoff_seconds
+                    if retry and retry.backoff_seconds is not None
+                    else fmt_defaults.RETRY_BACKOFF_SECONDS
+                )
+                retry_backoff_seconds = base_backoff * (2 ** (len(attempts) - 1))
             else:
                 return _Advance(
                     next_node_id=_route_for_step_failure(node, last, tool),
@@ -1161,6 +1173,9 @@ async def _advance_step(
                     scope=scope,
                 )
             )
+
+    if retry_backoff_seconds is not None:
+        await asyncio.sleep(retry_backoff_seconds)
 
     result = await attempt_step(
         node,

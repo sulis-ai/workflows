@@ -27,6 +27,7 @@ from sulis_workflows.definition.model import (
     OutputSpec,
     Process,
     ProcessDefaults,
+    RetrySpec,
     RouteNode,
     RouteOption,
     RouteTarget,
@@ -195,6 +196,11 @@ def _fresh_ctx(records=None, claims=None, policy=None, code_tool=None) -> Engine
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+async def _no_real_sleep(seconds: float) -> None:
+    """Stub for `asyncio.sleep` in tests that exercise a TRANSIENT retry but
+    aren't testing its backoff timing — keeps them fast."""
 
 
 def test_full_run_reaches_complete_via_step_route_gate():
@@ -1342,7 +1348,14 @@ def test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied(
     assert answer.ending == "FORBIDDEN"
 
 
-def test_transient_error_retries_then_succeeds():
+def test_transient_error_retries_then_succeeds(monkeypatch):
+    # D31 makes a TRANSIENT retry sleep for real (`backoff_seconds`) before
+    # redispatching; this test is about retry happening at all, not about
+    # timing, so the backoff sleep itself is stubbed out to keep it fast.
+    monkeypatch.setattr(
+        "sulis_workflows.engine.run.asyncio.sleep",
+        _no_real_sleep,
+    )
     process = _process()
     records = StubRecordsAdapter()
     code_tool = StubCodeToolAdapter()
@@ -1366,6 +1379,61 @@ def test_transient_error_retries_then_succeeds():
     )
     assert answer.ending == "COMPLETE"
     assert call_count["n"] == 2
+
+
+def test_transient_retry_waits_with_exponential_backoff(monkeypatch):
+    """spec §7.1/§15: `backoff_seconds` is "the starting delay before
+    exponential backoff" for a TRANSIENT retry. Before this fix, nothing in
+    `_advance_step` ever read `retry.backoff_seconds` (or the format
+    default) at all — every retry redispatched back-to-back with no delay,
+    silently ignoring a declared or defaulted backoff."""
+    sleeps: list[float] = []
+
+    async def _record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("sulis_workflows.engine.run.asyncio.sleep", _record_sleep)
+
+    base_process = _process()
+    nodes = dict(base_process.nodes)
+    nodes["classify"] = StepNode(
+        id="classify",
+        tool="classify@1",
+        in_={"question": "inputs.question"},
+        out={"verdict": "state.verdict"},
+        next="after-classify",
+        on_error={"FLAKY": RouteTarget(end="FAILED_FLAKY")},
+        retry=RetrySpec(max=3, backoff_seconds=1.0),
+    )
+    process = _process(nodes=nodes)
+
+    call_count = {"n": 0}
+
+    class FlakyTwiceThenOkAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            call_count["n"] += 1
+            if call_count["n"] <= 2:
+                raise ToolTransientError("FLAKY")
+            return {"verdict": "A"}
+
+    ctx = _fresh_ctx(records=StubRecordsAdapter(), code_tool=FlakyTwiceThenOkAdapter())
+    answer = _run(
+        next_(
+            process,
+            "run-backoff-1",
+            "root",
+            ctx,
+            inputs={"question": "why"},
+            host_inputs={},
+        )
+    )
+    assert answer.ending == "COMPLETE"
+    assert call_count["n"] == 3
+    # backoff_seconds=1.0: first retry waits 1.0s (2**0), second waits 2.0s (2**1).
+    assert sleeps == [1.0, 2.0]
 
 
 def test_mutation_step_second_caller_told_step_running():
