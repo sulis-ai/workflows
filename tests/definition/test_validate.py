@@ -1254,6 +1254,103 @@ endings:
     assert "V11" in _rules(findings)
 
 
+def test_v11_refused_branch_naming_no_real_node() -> None:
+    """WP-03 Part 3 (D48): a `branches` entry that is not a real node id —
+    the same "bad-but-conformant" shape `_all_targets`/V7's own
+    reachability walker silently drops rather than refuses. V11 already
+    fires here even pre-fix, as a SIDE EFFECT of `_bfs`'s own "cannot
+    reach join" check (a branch id absent from the graph entirely can
+    never reach anything) — this fixture is still worth keeping as a
+    regression: post-fix, the message names the REAL cause (`does not
+    name a node`) instead of the confusing, coincidental one."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+start: par
+nodes:
+  par: { type: PARALLEL, branches: [a, nonexistent], join: joined }
+  a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, next: joined }
+  joined: { type: JOIN, next: done }
+  done: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V11" in _rules(findings)
+
+
+def test_v11_refused_parallel_join_naming_no_real_node() -> None:
+    """Also fires pre-fix, same coincidental "cannot reach join" reason as
+    the branch case above — kept for the same reason."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+start: par
+nodes:
+  par: { type: PARALLEL, branches: [a], join: nonexistent }
+  a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V11" in _rules(findings)
+
+
+def test_v11_refused_join_reachable_from_two_parallel_nodes() -> None:
+    """D48: two `PARALLEL` nodes both naming the same `join` — ambiguous
+    which branch set it joins; the runtime's own equivalent
+    (`_find_parallel_for_join`) used to silently pick whichever came first
+    in `process.nodes`'s own iteration order rather than refusing."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+start: par1
+nodes:
+  par1: { type: PARALLEL, branches: [a], join: joined }
+  a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, next: joined }
+  par2: { type: PARALLEL, branches: [b], join: joined }
+  b: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, next: joined }
+  joined: { type: JOIN, next: done }
+  done: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V11" in _rules(findings)
+
+
+def test_v11_refused_join_reachable_from_no_parallel() -> None:
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+start: step
+nodes:
+  step: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, next: joined }
+  joined: { type: JOIN, next: done }
+  done: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V11" in _rules(findings)
+
+
 # ------------------------------------------------------------------------------ V12 --
 
 
@@ -1292,6 +1389,29 @@ start: fe
 nodes:
   fe: { type: FOR_EACH, over: state.count, as: item, do: work, next: done }
   work: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+  done: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V12" in _rules(findings)
+
+
+def test_v12_refused_do_naming_no_real_node() -> None:
+    """WP-03 Part 3 (D48): `do` naming no real node — the same
+    silent-skip gap `v11_parallel` closes for `branches`/`join`."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  items: { type: "list<string>", reducer: REPLACE }
+start: fe
+nodes:
+  fe: { type: FOR_EACH, over: state.items, as: item, do: nonexistent, next: done }
   done: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: {}, end: DONE }
 inputs: { x: { type: string } }
 endings:

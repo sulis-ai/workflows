@@ -2692,13 +2692,26 @@ async def _advance_parallel(
 def _find_parallel_for_join(
     scope_def: _ScopeDef, join_node_id: str
 ) -> tuple[str, ParallelNode]:
-    for candidate_id, candidate in scope_def.nodes.items():
-        if isinstance(candidate, ParallelNode) and candidate.join == join_node_id:
-            return candidate_id, candidate
-    raise EngineRefusal(
-        f"join {join_node_id!r} is not reachable from exactly one PARALLEL's own "
-        "`join` field (V11 should have refused this at validation time)"
-    )
+    """WP-03 Part 3 (D48): refuses cleanly for EITHER zero or more than one
+    matching `PARALLEL` — the ambiguous "which branch set does this join?"
+    case is a validation-bypass hazard too, not just an authoring mistake
+    V11 now catches: the original version of this function silently
+    returned the FIRST match `scope_def.nodes.items()` happened to iterate
+    (dict insertion order), which would have made a bad-but-conformant
+    definition with two `PARALLEL`s naming the same `join` misbehave
+    quietly instead of refusing."""
+    matches = [
+        (candidate_id, candidate)
+        for candidate_id, candidate in scope_def.nodes.items()
+        if isinstance(candidate, ParallelNode) and candidate.join == join_node_id
+    ]
+    if len(matches) != 1:
+        raise EngineRefusal(
+            f"join {join_node_id!r} is reachable from {len(matches)} PARALLEL "
+            "nodes' own `join` field, not exactly one (V11 should have refused "
+            "this at validation time)"
+        )
+    return matches[0]
 
 
 def _join_success_target(node: JoinNode) -> str:

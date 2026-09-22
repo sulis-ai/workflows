@@ -1,0 +1,140 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M34B14YD2BX847GHMHS55VB8",
+  "started_at": "2026-09-22T13:45:00Z",
+  "completed_at": "2026-09-22T14:50:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-03 Part 3 (validator checks) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/parallel-for-each-validation",
+  "summary_for_principal": "This closes the last of eight planned pieces of work across the three build tracks — everything originally scoped is now built, tested and ready to merge.\n\nThis piece adds two specific checks that catch authoring mistakes before a process ever runs: naming a step that doesn't exist as part of a parallel-work or list-iteration setup, and having two separate parallel-work setups both claim to feed the same join point (which one wins would otherwise be silently arbitrary, based on nothing meaningful).\n\nWhile writing that second check, I found a real bug in code from two runs ago: the system's own join-handling had a comment claiming this exact case was already prevented, but it wasn't — it would have silently picked one of the two setups at random rather than stopping cleanly. Fixed that alongside the check that should have existed with it from the start.\n\nFull test suite: 467 passed. Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when green.\n2. This is the last of the eight pieces I set out to build across all three tracks. Once this merges, everything originally planned is done.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "_find_parallel_for_join rewritten to collect every matching PARALLEL and refuse unless exactly one matches, instead of silently returning whichever came first in iteration order."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Six new tests: a branch/join/do naming no real node (V11 x2, V12 x1), a JOIN reachable from two PARALLEL nodes, and a JOIN reachable from none."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "One new test proving the runtime fix: two PARALLEL nodes naming the same JOIN now refuses cleanly instead of silently routing through whichever was declared first."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D48 added to §18; §14's V11/V12 rows updated."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D48."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-03-concurrent-execution.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Scope item 3 (validator checks: a JOIN not reachable from exactly one PARALLEL's own join field; a branch/do naming a node id that does not exist) is exactly what this PR implements."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code. This run covers WP-03 Part 3, the eighth and last PR of the originally planned sequence.",
+    "read_as": "Implement exactly the two validator checks WP-03's own design document named in its scope item 3, extending V11 (PARALLEL) and V12 (FOR_EACH) rather than inventing new rule numbers -- and, having found while implementing the join-ambiguity check that the runtime side of that same gap was never actually closed despite an existing code comment claiming it was, fix that too in the same PR rather than leaving the claim false.",
+    "filled_in": [
+      {
+        "gap": "The design document's own scope item 3 named these checks as extending 'the existing V2/V7 reference/reachability checks' without specifying which validator rule number(s) should carry them, or whether new rule numbers were warranted.",
+        "assumed": "Extend V11 (already 'parallel'-scoped) and V12 (already 'for_each'-scoped) rather than inventing new rule numbers -- each existing rule already covers more than one sub-check (V11 already has two, V14 has two), and both new checks are squarely within each rule's own existing concern area (PARALLEL structural correctness; FOR_EACH structural correctness respectively).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'hold conventions once' -- matching the established rule-grouping convention (one rule number per concern area, not per individual check) rather than fragmenting into new numbers for closely related checks.",
+        "reversal_cost": "Low -- rule numbers are validator-internal API; splitting these into new numbers later would only change which rule name a Finding carries, not any behaviour.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D48 — V11 refuses a PARALLEL's branches/join naming no real node and a JOIN reachable from other than exactly one PARALLEL's own join field; V12 refuses a FOR_EACH's do naming no real node; _find_parallel_for_join is fixed to actually refuse the ambiguous case rather than silently picking one, closing a gap its own docstring falsely claimed the validator already closed.",
+      "problem": "The design document named these two validator gaps directly, noting _all_targets (validate.py's reachability walker) 'already partially covers' them. Reading it found the coverage is precisely silent: a target that is not a real node id is dropped from the reachability graph, never flagged. While implementing the join-ambiguity check specifically, a second, more consequential gap surfaced: _find_parallel_for_join (built in D46, two PRs ago) scans for a matching PARALLEL and returns the FIRST one found -- its own docstring said 'V11 should have refused this at validation time', but V11 never actually checked for it until this PR, meaning the claim was aspirational, not true, and a bad-but-conformant definition with two PARALLEL nodes naming the same join would have silently misrouted rather than refused.",
+      "options_rejected": [
+        "Extend the reference-existence check to EVERY node kind's own next:/end: targets, not only PARALLEL/FOR_EACH: rejected for this pass -- genuinely outside the design document's own named scope, and the runtime already defends every other node kind's own case via _drive_scope's existing _ending_answer fallback; a broader validator pass is a separate, bigger undertaking worth its own decision.",
+        "Leave _find_parallel_for_join unchanged, treating the new V11 check alone as sufficient and accepting the validation-bypass risk: rejected -- every other engine dispatch function in this codebase pairs a validator refusal with a matching runtime one 'in case validation is bypassed' (D26, D34, D38, D41, D45, D46 all state this explicitly); leaving this one asymmetric, having just written the validator half in the same PR, would be inconsistent with the codebase's own established discipline for no good reason."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — every new V11/V12 check is a pure widening (refuses more, never less); _find_parallel_for_join's rewrite only changes behaviour for the previously-mishandled ambiguous case, identical for every well-formed definition.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, three of five new validator tests failed outright (join reachable from two PARALLEL nodes, join reachable from none, do naming no real node); the other two (branch/join naming no real node) already passed pre-fix as a coincidental side effect of the existing 'branch cannot reach join' check, not because the real cause was detected -- confirmed by inspecting the pre-fix Finding messages directly, which named the wrong reason.",
+          "source": "git stash push -- validate.py run.py, then running the new tests against the stashed (pre-fix) code; 3 failed as expected, 2 passed but with a Finding message naming the wrong cause, confirmed by direct inspection."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the runtime fix, two PARALLEL nodes naming the same join silently routed through whichever was declared first (reaching ENDED/DONE via the first one's own branch), never refusing; after the fix, the same definition is refused cleanly (ENDED/FAILED, naming PARALLEL in the says text).",
+          "source": "tests/engine/test_run.py::test_join_reachable_from_two_parallel_nodes_is_refused_cleanly_rather_than_misrouted, confirmed failing (reached DONE, not FAILED) against the pre-fix code via git stash, passing after."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A test fixture mistake found and self-corrected during this same pass: an early draft routed a PARALLEL branch's own last STEP via next: <join-id> instead of end: <declared ending>, which -- since a branch shares the parent's own node map (D46) -- caused the branch's own nested drive to dispatch the JOIN node from inside itself, recursing without bound (RecursionError). Not a new engine bug: D46's own spec text already documented that a branch must terminate via end:, never route to the join directly; fixed by giving each branch its own checkpoint ending, matching every other PARALLEL fixture in this corpus.",
+          "source": "Observed directly during development: the test raised RecursionError until the fixture was corrected to use end: A_DONE/end: B_DONE instead of next: joined."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 467 tests (461 pre-existing + 6 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "A future pass wants the reference-existence check to cover every node kind's own next:/end: targets, not only PARALLEL/FOR_EACH -- named here as a rejected, out-of-scope option, not built."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the CI-scoped path lists already in .github/workflows/ci.yml (unchanged this PR — no new top-level module was added).",
+      "location": "repository root",
+      "result": "467 passed, 0 failed (461 pre-existing + 6 new). ruff check, ruff format --check and mypy all clean (\"Success: no issues found in 22 source files\")."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "A docstring's own claim about what the validator does ('V11 should have refused this at validation time') is a promise, not a fact, until the corresponding validator rule is actually read and confirmed to check for it -- write such comments as forward-looking TODOs to verify, or verify them before writing them, not as settled fact.",
+      "incident": "D46's own _find_parallel_for_join docstring asserted the ambiguous-join case was already refused by V11 at validation time -- a reasonable-sounding claim that was never actually true, since V11 never checked for join ambiguity until this PR wrote that exact check. The claim propagated unchallenged for two PRs before this pass's own work on the SAME topic surfaced it.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "CLAUDE.md's 'Measure, don't author' principle already covers this in spirit; worth citing this incident as a concrete instance the next time a docstring or run record makes a claim about validator coverage that isn't the record's own primary subject.",
+      "confidence": "MEDIUM"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "All eight originally planned PRs across WP-03 (concurrent execution), WP-04 (external and composite dispatch) and WP-05 (gate-input, lease-renewal, ending-routing) are built, tested and, once this one merges, complete. The 'Build all' instruction's own scope is fully delivered."
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green. No further work is queued under the standing 'Build all' instruction -- the principal may want to review the full set of merged changes, or name a new priority.",
+      "reason": "This is the last item in the previously agreed priority-ordered sequence; nothing further is authorized to proceed on without a new instruction.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

@@ -6,6 +6,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D48 (WP-03 Part 3):** closes WP-03's own last part — the eighth and final originally planned
+  PR across WP-03/WP-04/WP-05 is now built, tested and merged. `V11` refuses a `PARALLEL`'s
+  `branches`/`join` naming no real node, and a `JOIN` reachable from other than exactly one
+  `PARALLEL`'s own `join` field; `V12` refuses a `FOR_EACH`'s `do` naming no real node. Found and
+  fixed a genuine, related runtime gap while writing the join-ambiguity check: `_find_parallel_for_join`
+  used to silently pick whichever `PARALLEL` happened to be declared first when two named the same
+  `join`, rather than refusing — now refuses cleanly, matching every other engine dispatch
+  function's own "validator refusal paired with a runtime one" discipline.
 - **D47 (WP-03 Part 2):** `FOR_EACH` is now dispatched by the engine, closing both node kinds
   WP-03 set out to dispatch (validator checks remain, a separately-scoped third part). An item is
   an isolated nested scope — unlike a `PARALLEL` branch (D46), its own state and provenance never

@@ -1182,12 +1182,41 @@ def _reaches(graph: dict[str, set[str]], start: str, target: str) -> bool:
 
 
 def v11_parallel(process: model.Process) -> list[Finding]:
+    """WP-03 Part 3 (D48): also refuses a `branches`/`join` entry naming no
+    real node, and a `JOIN` reachable from other than exactly one
+    `PARALLEL`'s own `join` field — ambiguous which branch set it joins,
+    and (0 owners) simply orphaned. `_all_targets`/V7's own reachability
+    walker already silently drops a target that is not a real node id
+    (`if next_id and next_id in forward`) rather than refusing it — the
+    same silent-skip gap `_apply_compose_output`/`_apply_collect` (D45,
+    D47) already document for their own targets, closed here instead of
+    inherited, since nothing else refuses it for `PARALLEL`/`JOIN`."""
     findings: list[Finding] = []
+    join_owners: dict[str, list[str]] = {}
     for node_id, node in process.nodes.items():
         if not isinstance(node, model.ParallelNode):
             continue
+        if node.join not in process.nodes:
+            findings.append(
+                Finding(
+                    rule="V11",
+                    node=node_id,
+                    message=f"`join: {node.join!r}` does not name a node in this process",
+                )
+            )
+        else:
+            join_owners.setdefault(node.join, []).append(node_id)
         writes_by_channel: dict[str, list[str]] = {}
         for branch in node.branches:
+            if branch not in process.nodes:
+                findings.append(
+                    Finding(
+                        rule="V11",
+                        node=node_id,
+                        message=f"branch {branch!r} does not name a node in this process",
+                    )
+                )
+                continue
             for channel in _branch_state_writes(branch, node.join, process):
                 writes_by_channel.setdefault(channel, []).append(branch)
             if not _bfs(branch, _forward_graph(process)).intersection({node.join}):
@@ -1212,6 +1241,21 @@ def v11_parallel(process: model.Process) -> list[Finding]:
                         message=f"branches {branches} both write state.{channel} (reducer REPLACE)",
                     )
                 )
+    for node_id, node in process.nodes.items():
+        if not isinstance(node, model.JoinNode):
+            continue
+        owners = join_owners.get(node_id, [])
+        if len(owners) != 1:
+            findings.append(
+                Finding(
+                    rule="V11",
+                    node=node_id,
+                    message=(
+                        f"join {node_id!r} is reachable from {len(owners)} PARALLEL "
+                        "nodes' own `join` field, not exactly one"
+                    ),
+                )
+            )
     return findings
 
 
@@ -1251,7 +1295,9 @@ def _branch_state_writes(start: str, join: str, process: model.Process) -> set[s
 
 
 def v12_for_each(process: model.Process, ctx: TypeContext) -> list[Finding]:
-    """`over` not list-typed."""
+    """`over` not list-typed; `do` naming no real node (WP-03 Part 3, D48
+    — the same silent-skip gap `v11_parallel` closes for `branches`/`join`,
+    `_all_targets`/V7's own reachability walker never refuses either)."""
 
     findings: list[Finding] = []
     for node_id, node in process.nodes.items():
@@ -1264,6 +1310,14 @@ def v12_for_each(process: model.Process, ctx: TypeContext) -> list[Finding]:
                     rule="V12",
                     node=node_id,
                     message=f"for_each {node_id!r}: `over` ({node.over!r}) is {_type_repr(over_type)!r}, not a list",
+                )
+            )
+        if node.do not in process.nodes:
+            findings.append(
+                Finding(
+                    rule="V12",
+                    node=node_id,
+                    message=f"`do: {node.do!r}` does not name a node in this process",
                 )
             )
     return findings
