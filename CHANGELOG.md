@@ -6,6 +6,15 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D42 (WP-05 Part 2):** `ClaimsPort.renew` is now reachable through a new public call,
+  `heartbeat(run, scope, node)` — a still-in-progress `MUTATION`/`SIDE_EFFECT` step's hand-off
+  can have its lease genuinely extended, closing the "no renewal for a hand-off slower than the
+  lease" gap D37 left open. Fixed a real, previously-latent bug found while building this:
+  `StubClaimsAdapter.renew` used to unconditionally overwrite its own store with whatever the
+  caller's own `claim` argument said, never checking whether that caller still actually held it —
+  a claim already taken over by a second caller could still be "renewed" by the first, silently
+  defeating §12.3's own at-most-once guarantee. `renew` now fails with `TAKEN_OVER` (reusing
+  `acquire`'s own status) when the caller no longer holds the claim or it has already expired.
 - **D41 (WP-05 Part 1):** `kind: INPUT` gates (spec §7.6) are now implemented, closing D26's
   outright refusal. A `person` decider answers via a new `decide(..., value=...)` parameter
   (checked against the gate's own `answer_type` before being recorded); `policy`/`agent` deciders

@@ -86,6 +86,75 @@ def test_expired_claim_may_be_taken_over_and_the_takeover_is_logged():
     assert "may already have run" in takeover.note
 
 
+def test_renew_after_someone_else_took_over_fails_cleanly_rather_than_re_granting():
+    """D42 (WP-05 Part 2): the bad-but-conformant case `renew`'s own
+    earlier, unconditional-overwrite implementation missed — a caller
+    whose claim already expired and was taken over by someone else
+    calling `acquire` again must not be able to "renew" its own,
+    now-stale claim back into existence."""
+    claims = StubClaimsAdapter()
+    first = asyncio.run(
+        claims.acquire(
+            _key(), lease_seconds=-1, claimed_by="engine", platform_id="t", run_id="r"
+        )
+    )
+    takeover = asyncio.run(
+        claims.acquire(
+            _key(), lease_seconds=30, claimed_by="engine-2", platform_id="t", run_id="r"
+        )
+    )
+    assert takeover.status == ClaimStatus.TAKEN_OVER
+
+    renew_attempt = asyncio.run(
+        claims.renew(first.claim, lease_seconds=30, platform_id="t", run_id="r")
+    )
+    assert renew_attempt.status == ClaimStatus.TAKEN_OVER
+    assert "may already have run" in renew_attempt.note
+    # The genuine current holder's own claim is untouched by the stale renewal attempt.
+    assert renew_attempt.claim.claimed_by == "engine-2"
+
+
+def test_renew_of_an_already_expired_but_not_yet_taken_over_claim_fails_cleanly():
+    """Even with no second claimant yet, a caller may not renew a lease
+    that has already lapsed — §12.3's own time-bound guarantee, not a
+    guarantee that holds only once someone else happens to show up."""
+    claims = StubClaimsAdapter()
+    first = asyncio.run(
+        claims.acquire(
+            _key(), lease_seconds=-1, claimed_by="engine", platform_id="t", run_id="r"
+        )
+    )
+    renew_attempt = asyncio.run(
+        claims.renew(first.claim, lease_seconds=30, platform_id="t", run_id="r")
+    )
+    assert renew_attempt.status == ClaimStatus.TAKEN_OVER
+
+
+def test_renew_before_expiry_extends_the_deadline_a_stale_takeover_attempt_then_fails():
+    """A1 (WP-05 Part 2): renewing before expiry genuinely extends the
+    deadline — a later `acquire` racing in still sees the RENEWED
+    `expires_at`, not the original one, and is told `STEP_RUNNING` rather
+    than being allowed to take over."""
+    claims = StubClaimsAdapter()
+    first = asyncio.run(
+        claims.acquire(
+            _key(), lease_seconds=30, claimed_by="engine", platform_id="t", run_id="r"
+        )
+    )
+    renewed = asyncio.run(
+        claims.renew(first.claim, lease_seconds=30, platform_id="t", run_id="r")
+    )
+    assert renewed.status == ClaimStatus.GRANTED
+    assert renewed.claim.expires_at > first.claim.expires_at
+
+    still_running = asyncio.run(
+        claims.acquire(
+            _key(), lease_seconds=30, claimed_by="engine-2", platform_id="t", run_id="r"
+        )
+    )
+    assert still_running.status == ClaimStatus.STEP_RUNNING
+
+
 def test_tenancy_propagated_to_the_adapter():
     claims = StubClaimsAdapter()
     asyncio.run(

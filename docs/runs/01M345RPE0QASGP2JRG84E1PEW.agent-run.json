@@ -1,0 +1,169 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M345RPE0QASGP2JRG84E1PEW",
+  "started_at": "2026-09-22T10:25:00Z",
+  "completed_at": "2026-09-22T11:15:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-05 Part 2 (ClaimsPort.renew / heartbeat()) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/claims-heartbeat",
+  "summary_for_principal": "A capability that was built and tested months ago, but never actually reachable by anyone, now is.\n\nWhen a long-running task (sending something, changing something) is claimed, it has a time limit, so a crashed or stuck attempt doesn't block things forever. Extending that time limit while genuinely still working was already fully built underneath, just never wired up to anything callable — now it is.\n\nWhile building this I found and fixed a real, previously-invisible bug: extending a claim never actually checked whether the caller still held it. A claim someone else had already taken over could still be silently \"extended\" by the party who'd lost it — exactly the kind of double-run risk this whole mechanism exists to prevent. No existing test caught it because none tried that exact sequence. It's fixed now, and the fix is what made this safe to expose at all.\n\nFull test suite: 440 passed (10 new). Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when CI is green.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/domain/ports/claims.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New public heartbeat(process, run_id, scope, node_id, ctx) -> HeartbeatAnswer call and HeartbeatAnswer dataclass."
+      },
+      {
+        "coordinate": "tests/test_claims_port.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New port-level tests for the renew() fix: extends-and-blocks-a-later-takeover, fails-after-takeover, fails-on-a-lapsed-but-not-yet-taken-over claim."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New engine-level heartbeat() tests: renews a hand-off step's claim, extends the deadline so a racing caller sees STEP_RUNNING not a takeover (A1), fails cleanly against an already-taken-over claim (A2), and refuses cleanly for a non-STEP node or a QUERY-effect tool."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D42 added to §18; §12.1 and §12.3 updated to name heartbeat() and the takeover-on-renew behaviour."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D42."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-05-gate-input-lease-renewal-and-ending-routing.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 2's own design (a fifth public call mirroring report()'s shape, resolving the same AttemptKey _claim_if_effectful uses) is what this PR implements, largely as drafted."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code. This run covers WP-05 Part 2, the second of the eight planned PRs in the priority order recorded in the prior design-only run.",
+    "read_as": "Implement WP-05 Part 2 exactly as designed (a heartbeat() public call exposing ClaimsPort.renew), and, since CLAUDE.md's 'measure, don't assert' applies to a dependency's own already-tested claim as much as to newly-written code, actually read and exercise StubClaimsAdapter.renew's own current behaviour before building on top of it — rather than trusting the prior work package's own 'already fully implemented and unit-tested' characterisation at face value.",
+    "filled_in": [
+      {
+        "gap": "WP-05's own design assumed StubClaimsAdapter.renew was correct as built (D37's own finding: 'already fully implemented and unit-tested'). Reading it directly while implementing heartbeat() found it was not — it never checked whether the calling claim still matched the store's own current entry, so it could silently re-grant an already-taken-over claim. This was not named as an open question in the WP-05 design document.",
+        "assumed": "Fix the bug in the same PR, rather than building heartbeat() on top of a renew() that cannot actually satisfy the design's own A2 acceptance criterion (a heartbeat() against an already-taken-over claim must fail cleanly). Shipping the public call without the fix would mean shipping a safety property that is asserted but false.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't assert' and 'survive the bad-but-conformant attack' — the existing committed test for renew() only ever exercised the one case (a still-held, unexpired claim) where the buggy and correct implementations behave identically; the bad-but-conformant case (a stale claim renewed after being taken over) was never written, so the bug was never caught.",
+        "reversal_cost": "None avoided — the fix tightens an existing, already-declared contract (ClaimsPort.renew's own docstring already says a running step renews ITS lease, implying ownership matters) rather than changing it; no caller could have been correctly relying on the old, buggy behaviour.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "heartbeat()'s own Claim argument to ctx.claims.renew needs claimed_at/expires_at values, but the engine holds nothing in memory between calls and has no way to read back the TRUE original claim's own timestamps.",
+        "assumed": "Pass a best-effort, current-time placeholder for both fields, and make the FIX to renew() treat the adapter's own stored entry as authoritative — reading only key/claimed_by off the caller's argument to decide ownership, never trusting the argument's own timestamps. This is the only approach consistent with the stateless-replay design (§12.1); it also matches how a real backing store's own renewal logic would naturally work (the store, not the caller, is the source of truth for when a claim was first acquired).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "engine/run.py's own module docstring ('nothing held in memory between calls') — a design constraint already established by WP-02, applied here rather than worked around.",
+        "reversal_cost": "Low — this is a property of the adapter's own renew() implementation, not of heartbeat()'s own public signature; a future adapter is free to use the passed timestamps differently as long as it still enforces the same ownership/expiry check.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D42 — ClaimsPort.renew is now exposed as a public call, heartbeat(run, scope, node), closing D37's own second-named gap; a real, previously-latent bug in StubClaimsAdapter.renew (it never checked whether the caller still actually held the claim) is fixed alongside it.",
+      "problem": "D37 found renew fully built and unit-tested at the port level but never called anywhere — no public call let a still-working caller extend its own claim's lease, so a real MUTATION/SIDE_EFFECT hand-off slower than lease_seconds could be silently taken over mid-flight with no way to prevent it. Building the fix found renew() itself was not actually safe to expose: it never verified the caller still held the claim before extending it.",
+      "options_rejected": [
+        "Build heartbeat() without touching renew()'s own adapter implementation, treating the takeover gap as a separate, later finding: rejected — the design's own A2 acceptance criterion (a heartbeat against an already-taken-over claim must fail cleanly) is not satisfiable without this fix; shipping the public call on top of a renew() whose safety property is false would be worse than not shipping it.",
+        "Have heartbeat() itself track a Claim's own timestamps across calls to pass into renew(): rejected — this engine holds nothing in memory between calls; the true original claimed_at is fundamentally unavailable to it, so the fix instead makes the adapter's own stored entry authoritative."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — heartbeat()/HeartbeatAnswer are additive; the renew() fix tightens an existing, already-declared contract and only changes behaviour for a bad-but-conformant case no committed test previously exercised.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, StubClaimsAdapter.renew() unconditionally granted a renewal for a claim already taken over by a second caller, silently re-issuing a lease to the caller who had already lost the race.",
+          "source": "tests/test_claims_port.py::test_renew_after_someone_else_took_over_fails_cleanly_rather_than_re_granting and ::test_renew_of_an_already_expired_but_not_yet_taken_over_claim_fails_cleanly, both confirmed returning GRANTED (not TAKEN_OVER) against the pre-fix code."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, both scenarios correctly return TAKEN_OVER with a note naming who currently holds the claim, and a genuine renewal-before-expiry still extends the deadline (a later racing acquire() sees STEP_RUNNING, not a fresh grant).",
+          "source": "The same two tests, plus test_renew_before_expiry_extends_the_deadline_a_stale_takeover_attempt_then_fails, all passing after the fix."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "heartbeat() reaches the same claim _claim_if_effectful acquired at TOOL_STEP hand-off time, genuinely extends its deadline, and a second caller racing in afterwards is told STEP_RUNNING against the renewed expiry.",
+          "source": "tests/engine/test_run.py::test_heartbeat_renews_a_hand_off_steps_claim, ::test_heartbeat_extends_the_deadline_so_a_later_caller_sees_step_running_not_a_takeover — both passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "heartbeat() against a claim already taken over by a second caller's own dispatch fails cleanly (TAKEN_OVER, a says naming 'may already have run'), never re-granting it to the first caller.",
+          "source": "tests/engine/test_run.py::test_heartbeat_against_an_already_taken_over_claim_fails_cleanly, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "heartbeat() refuses cleanly (EngineRefusal) for a non-STEP node or a QUERY-effect tool, rather than silently no-op-ing or inventing a claim.",
+          "source": "tests/engine/test_run.py::test_heartbeat_on_a_query_tool_is_refused_cleanly, ::test_heartbeat_on_a_non_step_node_is_refused_cleanly, passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Every new test, in both tests/test_claims_port.py and tests/engine/test_run.py, was confirmed failing against the pre-fix code before the fix (git stash of the relevant source files) — either a wrong ClaimStatus or an ImportError for heartbeat.",
+          "source": "python -m pytest, run against a git stash of src/sulis_workflows/domain/ports/claims.py (for the port-level tests) and src/sulis_workflows/engine/run.py (for the engine-level tests) in turn, before restoring each."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 440 tests (430 pre-existing + 10 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "A real ClaimsPort backing adapter (not the in-memory stub) is built — it must implement the same ownership/expiry check renew() now requires, not the old unconditional-overwrite behaviour; this decision's own evidence is what to point a reviewer at when checking a new adapter's own contract tests."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists this repository's own CI workflow uses.",
+      "location": "repository root",
+      "result": "440 passed, 0 failed (430 pre-existing + 10 new). ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "A prior pass's own 'already fully implemented and unit-tested' characterisation of a dependency is a claim to verify by reading the code and its own tests directly before building on it, not a fact to trust unread — an existing test suite passing is evidence the code does what ITS OWN tests check, not evidence it is correct for every case a NEW caller will actually exercise.",
+      "incident": "D37 (a prior pass) described StubClaimsAdapter.renew as 'already fully implemented and unit-tested,' which this run initially took at face value while designing heartbeat() on top of it. Reading the implementation directly (per CLAUDE.md's own 'measure, don't assert') found it unconditionally overwrote its own store with the caller's own asserted claimed_by/claimed_at, never checking the store's current entry — so an already-taken-over claim could be silently re-granted to the caller who had lost it. The one committed test for renew() happened to be the single case (a still-held, unexpired claim) where the buggy and a correct implementation behave identically, so it never caught this.",
+      "applies_to": "NONE",
+      "confidence": "LOW"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A genuinely still-in-progress MUTATION/SIDE_EFFECT hand-off can now have its claim's lease extended for real via heartbeat(), closing the D37 gap. The second of eight planned PRs (WP-05 Part 2) toward the principal's 'Build all' instruction."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-05 Part 3 (ending-routing exhaustiveness), then WP-04 (EXTERNAL/TOOL-composite dispatch), then WP-03 (PARALLEL/JOIN/FOR_EACH) — the remaining six of eight planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Each remaining part is independently scoped in its own work-package document; none blocks any other."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-05 Part 3 (ending-routing exhaustiveness) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

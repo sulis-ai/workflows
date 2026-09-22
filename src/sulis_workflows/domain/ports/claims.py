@@ -169,12 +169,44 @@ class StubClaimsAdapter:
         platform_id: str,
         run_id: str,
     ) -> ClaimResult:
+        """D42 (WP-05 Part 2): before this fix, `renew` blindly overwrote
+        `self._store[claim.key]` with whatever `claimed_by`/`claimed_at`
+        the CALLER'S OWN `claim` argument carried, never once reading the
+        store's own current entry — so a caller whose claim had already
+        expired and been taken over by someone else (`acquire`'s own
+        `TAKEN_OVER` path) could still "renew" it, silently re-granting a
+        lease to a caller who had already lost the race, defeating §12.3's
+        own at-most-once guarantee. `renew` now looks up the CURRENT
+        stored claim for `claim.key` and only extends it when this caller
+        genuinely still holds it (same `claimed_by`, not yet expired) —
+        otherwise it fails the same `TAKEN_OVER` way `acquire` already
+        does for an expired-and-reclaimed key, rather than inventing a
+        fourth status. `claim.claimed_at`/`claim.expires_at` are the
+        caller's own possibly-stale echo of what it last saw — never
+        trusted here; the store's own entry is authoritative.
+        """
         self.observed_calls.append((platform_id, run_id))
         now = time.time()
+        existing = self._store.get(claim.key)
+        if (
+            existing is None
+            or existing.claimed_by != claim.claimed_by
+            or existing.expires_at <= now
+        ):
+            current = existing if existing is not None else claim
+            return ClaimResult(
+                status=ClaimStatus.TAKEN_OVER,
+                claim=current,
+                note=(
+                    f"claim on {claim.key!r} is no longer held by "
+                    f"{claim.claimed_by!r} (now {current.claimed_by!r}) — cannot "
+                    "renew; may already have run"
+                ),
+            )
         renewed = Claim(
             key=claim.key,
-            claimed_by=claim.claimed_by,
-            claimed_at=claim.claimed_at,
+            claimed_by=existing.claimed_by,
+            claimed_at=existing.claimed_at,
             expires_at=now + lease_seconds,
         )
         self._store[claim.key] = renewed
