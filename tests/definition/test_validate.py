@@ -1487,11 +1487,10 @@ def test_v17_accepted_code_mechanism() -> None:
     assert "V17" not in _rules(findings)
 
 
-def test_v17_refused_external_mechanism() -> None:
-    """D34: spec §4.3/§12.1 — EXTERNAL is a real mechanism kind meant to
-    run BY THE ENGINE (through a host adapter), but nothing in the engine
-    implements dispatch for it; refused rather than silently misrouted as
-    a SKILL hand-off."""
+def test_v17_accepted_external_mechanism() -> None:
+    """D44 (WP-04 Part 1): EXTERNAL is now dispatched by the engine
+    (`ExternalToolPort`, `attempt_step`), the same side of the split as
+    CODE — the outright refusal D34 put here for it is gone."""
     doc = """
 api_version: sulis.workflows/v1
 kind: TOOL
@@ -1505,7 +1504,7 @@ mechanism: { kind: EXTERNAL, ref: "adapter:notify" }
 effect: SIDE_EFFECT
 """
     findings = validate(doc, registry=_base_registry())
-    assert "V17" in _rules(findings)
+    assert "V17" not in _rules(findings)
 
 
 def test_v17_refused_tool_composite_mechanism() -> None:

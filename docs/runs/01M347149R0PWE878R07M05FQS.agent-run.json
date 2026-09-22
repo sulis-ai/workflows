@@ -1,0 +1,190 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M347149R0PWE878R07M05FQS",
+  "started_at": "2026-09-22T12:35:00Z",
+  "completed_at": "2026-09-22T14:05:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-04 Part 1 (ExternalToolPort + EXTERNAL dispatch) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/external-tool-dispatch",
+  "summary_for_principal": "A governed process can now genuinely call an outside service, not just run its own code or hand work to a person.\n\nThis was previously refused outright, alongside one other kind (composing several small tools together, still refused, coming next). The design doc had judged the gap unclear; re-reading the format's own written rules found the answer was already there, unconnected. Now closed: an external call runs with the same discipline as internal code — checked, retried on temporary failure, recorded — kept visibly distinct from it, not blurred together.\n\nBuilding this meant threading the new capability through every place the system builds its own working context, since it's one of the small set every governed run needs. Mechanical, done everywhere at once.\n\nFull test suite: 448 passed. Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when CI is green.\n2. Next up: composing several small tools together as one unit.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/domain/ports/external_tool.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/steps.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "attempt_step extended to dispatch CODE or EXTERNAL through whichever port matches the Tool's own mechanism.kind, sharing every surrounding rule unchanged."
+      },
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "EngineContext gains external_tool; _advance_step's D34 refusal narrowed to TOOL only; the SKILL-hand-off precondition branch narrowed so EXTERNAL is never misrouted as a hand-off."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "V17 no longer refuses EXTERNAL; TOOL (composite) remains refused."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Replaced the now-obsolete D34 EXTERNAL-refusal regression test with real dispatch coverage (A1: no TOOL_STEP hand-off, output capture, shared TRANSIENT-retry path). Also updated every EngineContext(...) construction site (46 in this file alone) to supply the new required external_tool field."
+      },
+      {
+        "coordinate": "tests/engine/test_steps.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "attempt_step's own test helper updated for the new external_tool parameter."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Replaced the now-obsolete V17-refuses-EXTERNAL test with a V17-accepts-EXTERNAL one."
+      },
+      {
+        "coordinate": "tests/engine/test_a_send_back_note_reaches_the_next_attempt.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "EngineContext construction site updated for the new required field."
+      },
+      {
+        "coordinate": "tests/engine/test_grounded_inquiry_e2e.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "EngineContext construction site updated for the new required field."
+      },
+      {
+        "coordinate": "tests/examples/test_recursive_refinement.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "EngineContext construction site updated for the new required field."
+      },
+      {
+        "coordinate": ".github/workflows/ci.yml",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Extended the ruff check/format/mypy path lists to cover the new domain/ports/external_tool.py module, per this repository's own convention of extending CI scope in the PR that introduces each new module."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D44 added to §18, splitting D34's own combined EXTERNAL/TOOL refusal; §14's V17 row updated."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D44."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-04-external-and-composite-dispatch.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 1's own design (a new ExternalToolPort mirroring CodeToolPort, wired into attempt_step, V17's refusal removed for EXTERNAL only) is what this PR implements, as drafted."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code. This run covers WP-04 Part 1, the fourth of eight planned PRs, and the first of WP-04's own two parts.",
+    "read_as": "Implement WP-04 Part 1 exactly as designed: a new ExternalToolPort mirroring CodeToolPort's own shape, wired into the shared CODE/EXTERNAL dispatch path attempt_step already has (per the design document's own explicit instruction to reuse it rather than duplicate its surrounding logic), removing V17's refusal for EXTERNAL only (TOOL composite stays refused, WP-04 Part 2's own scope).",
+    "filled_in": [
+      {
+        "gap": "The design document named 'the exact same shape as CodeToolPort... the same ToolTransientError/ToolPermanentError pair' without specifying whether that meant a second, parallel pair of exception classes defined in external_tool.py, or the literal same classes imported from code_tool.py.",
+        "assumed": "Reuse code_tool.py's own ToolTransientError/ToolPermanentError classes verbatim (import, don't redefine) — both dispatch kinds classify a failure by the identical mechanism (the Tool's own declared errors[], spec §4.6), so a second, structurally identical pair would be pure duplication; attempt_step's own error-handling code catches one pair regardless of which port raised it, which a duplicate pair would have broken (two except clauses, or an isinstance check).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'no half-finished implementations' and general minimal-duplication discipline — the design's own reasoning for keeping ExternalToolPort itself distinct (a real compliance-bar difference) does not extend to the exception classes, which carry no dispatch-kind-specific meaning.",
+        "reversal_cost": "Low — a future pass that needs EXTERNAL-specific exception behaviour can add a distinct pair without touching CODE's own.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Extending EngineContext with a new required field (external_tool, no default, matching every other port field's own convention) meant every existing EngineContext(...) construction site across the test suite needed updating — 49 call sites across 4 files, 46 of them in tests/engine/test_run.py alone.",
+        "assumed": "Update every call site (via a small parsing script that finds each EngineContext(...) call's own code_tool= argument and inserts external_tool=StubExternalToolAdapter() right after it) rather than giving external_tool a default value to avoid the churn. Consistency with every other port field (policy/code_tool/records/claims/registry/identity/platform_id all lack defaults; only lease_seconds, a host SETTING not a port, has one) was judged worth the mechanical diff, especially since a caller silently getting a default 'do-nothing' external adapter it never asked for is a worse failure mode than being forced to supply one explicitly.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'fail closed' — EngineContext's own existing pattern (every port mandatory) is itself already an expression of that principle; breaking it for one field to save test-file churn would have been inconsistent with the pattern this exact PR is extending.",
+        "reversal_cost": "Low — giving external_tool a default later is a pure loosening, breaking nothing currently passing.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D44 — mechanism.kind: EXTERNAL is now dispatched by the engine, closing the EXTERNAL half of D34: a new ExternalToolPort, mirroring CodeToolPort's own shape exactly, is wired into attempt_step alongside CodeToolPort, sharing every surrounding rule.",
+      "problem": "D34 refused both EXTERNAL and TOOL (composite) together, reasoning EXTERNAL needed a new domain port whose shape the spec did not describe ('per adapter' names no operational contract). Re-reading spec §4.3 directly found that reasoning had already been answered: EXTERNAL's own contract (an opaque adapter id, checked by the adapter's own contract tests) is the same SHAPE CODE already has, differing only in what the ref names.",
+      "options_rejected": [
+        "Reuse CodeToolPort itself for EXTERNAL dispatch rather than a second port: rejected — the compliance bar genuinely differs (CODE's contract is exercisable by this engine's own tests; EXTERNAL's is entirely the host adapter's own), a boundary worth keeping visible in the type system.",
+        "Give EXTERNAL its own parallel ToolTransientError/ToolPermanentError pair: rejected — both dispatch kinds classify failures identically (the Tool's own declared errors[]), so reusing code_tool.py's own pair verbatim avoids pure duplication.",
+        "Duplicate attempt_step's own surrounding logic (permission, precondition, inputs, controls) in engine/run.py for a separate EXTERNAL-only dispatch path: rejected — steps.py's own module docstring already named extending attempt_step as 'a later step' for exactly this reason."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — ExternalToolPort/StubExternalToolAdapter are additive; attempt_step's own dispatch-kind branch and _advance_step's narrowed condition are both small, local changes with no schema or durable-record shape change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, an EXTERNAL-mechanism STEP reached ENDED/FAILED via D34's own refusal (confirmed by the pre-existing regression test's own assertion, which this PR's changes flipped to ENDED/DONE without any edit to the test's own scenario).",
+          "source": "test_external_mechanism_step_is_refused_cleanly_rather_than_misrouted_as_a_skill, run against the code mid-development: assert 'DONE' == 'FAILED' failure, confirming the transition from refused to dispatched."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix, an EXTERNAL-mechanism STEP dispatches through ExternalToolPort.call before the engine answers (no TOOL_STEP hand-off), its output is captured into state correctly, and a TRANSIENT failure retries through the same shared error-classification path CODE already has.",
+          "source": "tests/engine/test_run.py's three new EXTERNAL-mechanism tests, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "V17 accepts a well-formed EXTERNAL-mechanism Tool (previously refused) and still refuses TOOL (composite).",
+          "source": "tests/definition/test_validate.py::test_v17_accepted_external_mechanism (new, replacing the obsolete refusal test) and ::test_v17_refused_tool_composite_mechanism (unchanged, still passing)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 448 tests (446 pre-existing + 2 net new, after replacing 2 now-obsolete tests with 5 new ones); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path, extended to cover the new external_tool.py module.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses (now including domain/ports/external_tool.py), run locally."
+        }
+      ],
+      "revisit_if": "A host needs EXTERNAL-specific error semantics that CODE's own shared ToolTransientError/ToolPermanentError pair cannot express — needs a genuinely new, EXTERNAL-only exception pair, named here as a rejected option, not built."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy (extended to include the new external_tool.py module).",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the CI-scoped path lists, extended in .github/workflows/ci.yml to add src/sulis_workflows/domain/ports/external_tool.py alongside code_tool.py in all three steps.",
+      "location": "repository root",
+      "result": "448 passed, 0 failed (446 pre-existing + 2 net new). ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 22 source files\")."
+    }
+  ],
+  "untouched": [],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "An EXTERNAL-mechanism STEP now dispatches through the host's own adapter before the engine answers, exactly as CODE already does. The fourth of eight planned PRs (WP-04 Part 1) toward the principal's 'Build all' instruction."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-04 Part 2 (TOOL-composite dispatch), then WP-03 (PARALLEL/JOIN/FOR_EACH) — the remaining four of eight planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "TOOL (composite) remains a clean, honest refusal (V17, EngineRefusal) until WP-04 Part 2 lands — no risk accrues by waiting."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-04 Part 2 (TOOL-composite dispatch) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

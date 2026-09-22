@@ -1,12 +1,20 @@
-"""STEP execution — the CODE mechanism-kind path (spec §7.1, §10, §12.4, WP-02 step 2).
+"""STEP execution — the CODE/EXTERNAL mechanism-kind paths (spec §7.1, §10,
+§12.4, WP-02 step 2; EXTERNAL added WP-04 Part 1).
 
-Scope note: only `CODE`-kind Tools (deterministic, "a function the host can
-call", §4.3) are dispatched here. `SKILL` Tools (and a non-deterministic
-`PROCESS` call) are non-deterministic and are handed to the caller as a
-`TOOL_STEP` by `next()` instead of run here (§12.1); `EXTERNAL`, deterministic `PROCESS`
-and the `TOOL` composite mechanism follow in a later step, alongside
-`next()`/`report()` itself — that is where the engine's dispatch-or-defer
-decision actually lives (`docs/work-packages/WP-02-execution-engine.md`).
+Scope note: only `CODE`/`EXTERNAL`-kind Tools (both deterministic, both
+"run by the engine before it answers", §12.1) are dispatched here, sharing
+every surrounding rule (permission, precondition, input resolution, error
+classification, control-checking) — the two differ only in WHICH port's
+`call(ref, ...)` actually performs the dispatch (§4.3: `CODE`'s `ref` is a
+`module:function` path this engine's own process imports directly;
+`EXTERNAL`'s `ref` is an opaque adapter id a host-supplied adapter
+interprets). `SKILL` Tools (and a non-deterministic `PROCESS` call) are
+non-deterministic and are handed to the caller as a `TOOL_STEP` by
+`next()` instead of run here (§12.1); deterministic `PROCESS` and the
+`TOOL` composite mechanism are driven elsewhere in `engine/run.py`
+(`_advance_process_call`, and — WP-04 Part 2 — composite dispatch) — that
+is where the engine's dispatch-or-defer decision actually lives
+(`docs/work-packages/WP-02-execution-engine.md`).
 
 ``attempt_step`` does exactly one attempt and reports what happened; it
 does not retry, does not repair, and does not write anything into state or
@@ -31,6 +39,7 @@ from sulis_workflows.domain.ports.code_tool import (
     ToolPermanentError,
     ToolTransientError,
 )
+from sulis_workflows.domain.ports.external_tool import ExternalToolPort
 from sulis_workflows.domain.ports.policy import PolicyPort, Verdict
 from sulis_workflows.engine.controls import ControlsResult, check_controls
 
@@ -89,6 +98,7 @@ async def attempt_step(
     run_id: str,
     policy: PolicyPort,
     code_tool: CodeToolPort,
+    external_tool: ExternalToolPort,
     registry: Registry,
 ) -> StepAttemptResult:
     """Permission, then precondition, then inputs, then dispatch, then controls —
@@ -126,20 +136,28 @@ async def attempt_step(
             rationale=f"no present, non-empty value for required input(s): {', '.join(missing)}",
         )
 
-    if tool.mechanism.kind != "CODE":
+    if tool.mechanism.kind not in ("CODE", "EXTERNAL"):
         return StepAttemptResult(
             outcome=StepOutcome.NOT_DISPATCHABLE,
             rationale=(
                 f"mechanism kind {tool.mechanism.kind!r} is not yet executable by "
-                "this engine (WP-02 step 2 handles CODE only)."
+                "this engine (this module handles CODE/EXTERNAL only)."
             ),
         )
 
     ref = tool.mechanism.ref
-    assert ref is not None  # schema/V1 requires a CODE mechanism to declare `ref`
+    assert (
+        ref is not None
+    )  # schema/V1 requires a CODE/EXTERNAL mechanism to declare `ref`
 
+    # Same "run before the engine answers" placement §12.1 already puts CODE
+    # in — EXTERNAL differs only in which port's own `call(ref, ...)`
+    # actually performs the dispatch (WP-04 Part 1); everything else in
+    # this function (permission, precondition, inputs, error
+    # classification, control-checking) is shared unchanged.
+    dispatch = code_tool.call if tool.mechanism.kind == "CODE" else external_tool.call
     try:
-        output = await code_tool.call(
+        output = await dispatch(
             ref, resolved_inputs, platform_id=platform_id, run_id=run_id
         )
     except (ToolTransientError, ToolPermanentError) as exc:

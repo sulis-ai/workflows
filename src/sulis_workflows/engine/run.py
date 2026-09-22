@@ -93,6 +93,7 @@ from sulis_workflows.definition.model import (
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.domain.ports.claims import Claim, ClaimsPort, ClaimStatus
 from sulis_workflows.domain.ports.code_tool import CodeToolPort
+from sulis_workflows.domain.ports.external_tool import ExternalToolPort
 from sulis_workflows.domain.ports.policy import PolicyPort, Verdict
 from sulis_workflows.domain.ports.records import (
     AttemptKey,
@@ -139,14 +140,19 @@ def _now() -> str:
 class EngineContext:
     """The port bundle + tenancy every call in this module needs.
 
-    Bundled rather than five separate parameters per call, since every
-    function here needs all five. ``lease_seconds`` is a host setting
+    Bundled rather than several separate parameters per call, since every
+    function here needs all of them. ``lease_seconds`` is a host setting
     (spec §18, D3 — "not in the format"), not a format default; 300s is
     this engine's own placeholder until a host configures its own.
+    ``external_tool`` (WP-04 Part 1) is a distinct port from ``code_tool``
+    even though both dispatch a Tool call the same way — see
+    ``domain/ports/external_tool.py``'s own module docstring for why the
+    two are kept separate rather than one port reused under two names.
     """
 
     policy: PolicyPort
     code_tool: CodeToolPort
+    external_tool: ExternalToolPort
     records: RecordsPort
     claims: ClaimsPort
     registry: Registry
@@ -1302,16 +1308,16 @@ async def _advance_step(
             depth,
         )
 
-    if tool.mechanism.kind in ("EXTERNAL", "TOOL"):
-        # D34: spec §4.3/§12.1 — CODE, EXTERNAL and deterministic PROCESS
-        # are all run BY THE ENGINE, never handed off; without this check,
-        # the generic `!= "CODE"` branch just below would treat an
-        # EXTERNAL or TOOL-composite mechanism exactly like a SKILL
-        # hand-off, which is wrong for both (EXTERNAL should never need a
-        # hand-off at all; TOOL-composite has no `ref` to hand off, and
-        # its own `composes` children would simply never be dispatched).
-        # V17 already refuses this at validation time; this is the
-        # runtime half, in case validation is bypassed.
+    if tool.mechanism.kind == "TOOL":
+        # D34: spec §4.3/§12.1 — TOOL-composite has no `ref` to hand off,
+        # and its own `composes` children would simply never be dispatched
+        # by the generic `not in ("CODE", "EXTERNAL")` branch just below,
+        # which is written for a SKILL hand-off's own shape. WP-04 Part 1
+        # closed the equivalent EXTERNAL gap (D44) by dispatching it the
+        # same way CODE already is, below; TOOL-composite dispatch is
+        # WP-04 Part 2, not yet built. V17 already refuses this at
+        # validation time; this is the runtime half, in case validation is
+        # bypassed.
         raise EngineRefusal(
             f"step {node_id!r}: tool {tool.header.id!r} declares "
             f"mechanism.kind: {tool.mechanism.kind} — not yet executable "
@@ -1322,13 +1328,13 @@ async def _advance_step(
         run=run_id, scope=scope, node=node_id, attempt=baseline + len(attempts) + 1
     )
 
-    if tool.mechanism.kind != "CODE":
+    if tool.mechanism.kind not in ("CODE", "EXTERNAL"):
         # §10.1/D12: permission is checked before ANY dispatch, hand-off
         # included — a `TOOL_STEP` hand-off IS the dispatch for a `SKILL`
         # Tool (the caller's agent session performs it next), so
         # refusing this check here rather than only inside `attempt_step`
-        # (CODE-only) closes a gap where a permission-less or refused
-        # non-CODE Tool was previously handed off uncontrolled.
+        # (CODE/EXTERNAL only) closes a gap where a permission-less or
+        # refused SKILL Tool was previously handed off uncontrolled.
         precheck: StepAttemptResult | None
         if tool.permission is None:
             precheck = StepAttemptResult(
@@ -1425,6 +1431,7 @@ async def _advance_step(
         run_id=run_id,
         policy=ctx.policy,
         code_tool=ctx.code_tool,
+        external_tool=ctx.external_tool,
         registry=ctx.registry,
     )
     return await _record_step_result(
@@ -1441,7 +1448,7 @@ async def _advance_step(
         scope,
         ctx,
         depth,
-        performed_by=f"CODE:{tool.mechanism.ref}",
+        performed_by=f"{tool.mechanism.kind}:{tool.mechanism.ref}",
     )
 
 

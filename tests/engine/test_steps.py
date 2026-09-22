@@ -1,8 +1,13 @@
-"""attempt_step — one STEP dispatch attempt (spec §7.1, §10, §12.4, WP-02 step 2).
+"""attempt_step — one STEP dispatch attempt (spec §7.1, §10, §12.4, WP-02
+step 2; EXTERNAL added WP-04 Part 1).
 
-Covers the CODE-mechanism path only (this PR's scope): permission, then
-precondition, then input resolution, then dispatch, then controls — in
-that order, each one able to stop the attempt before the next runs.
+Covers the shared CODE/EXTERNAL path: permission, then precondition, then
+input resolution, then dispatch, then controls — in that order, each one
+able to stop the attempt before the next runs. Most fixtures below use a
+CODE-mechanism Tool (the two dispatch kinds share every surrounding rule,
+so one set of coverage suffices for those); the EXTERNAL-specific tests
+near the bottom prove the dispatch itself actually reaches
+`ExternalToolPort.call`, not `CodeToolPort.call`.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from sulis_workflows.domain.ports.code_tool import (
     ToolPermanentError,
     ToolTransientError,
 )
+from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
 from sulis_workflows.domain.ports.policy import StubPolicyAdapter
 from sulis_workflows.engine.steps import (
     ENGINE_INPUT_UNRESOLVED,
@@ -77,7 +83,16 @@ def _node(**overrides) -> StepNode:
     return StepNode(**defaults)
 
 
-def _run(node, tool, run_state, *, policy=None, code_tool=None, registry=None):
+def _run(
+    node,
+    tool,
+    run_state,
+    *,
+    policy=None,
+    code_tool=None,
+    external_tool=None,
+    registry=None,
+):
     return asyncio.run(
         attempt_step(
             node,
@@ -88,6 +103,7 @@ def _run(node, tool, run_state, *, policy=None, code_tool=None, registry=None):
             run_id="run-1",
             policy=policy or StubPolicyAdapter(),
             code_tool=code_tool or StubCodeToolAdapter(),
+            external_tool=external_tool or StubExternalToolAdapter(),
             registry=registry or Registry([_insight_profile()]),
         )
     )

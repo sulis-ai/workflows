@@ -6,6 +6,13 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D44 (WP-04 Part 1):** `mechanism.kind: EXTERNAL` is now dispatched by the engine, closing the
+  `EXTERNAL` half of D34's own refusal. A new `ExternalToolPort` (`domain/ports/external_tool.py`),
+  mirroring `CodeToolPort`'s own shape exactly, is wired into `attempt_step` alongside
+  `CodeToolPort` — the two share every surrounding rule (permission, precondition, inputs, error
+  classification, control-checking), differing only in which port's `call(ref, ...)` performs the
+  dispatch. `V17` no longer refuses `EXTERNAL`; `TOOL` (composite) remains refused until WP-04
+  Part 2.
 - **D43 (WP-05 Part 3), new rule `V19`:** the fuller half of spec §9.1's "the calling step MUST
   route every value of `ending`" is now provable, not just documented as unimplemented (D36).
   A `PROCESS`-mechanism call's own captured ending must be written to an `enum[...]`-typed

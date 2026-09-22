@@ -14,6 +14,7 @@ from pathlib import Path
 from sulis_workflows.definition.load import load_definition
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.domain.ports.claims import StubClaimsAdapter
+from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
 from sulis_workflows.domain.ports.policy import StubPolicyAdapter, Verdict
 from sulis_workflows.domain.ports.records import StubRecordsAdapter
 from sulis_workflows.engine.run import AnswerKind, EngineContext, decide, next_, report
@@ -96,6 +97,7 @@ def _ctx() -> EngineContext:
     return EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=None,
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=registry,
