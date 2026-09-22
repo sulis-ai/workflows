@@ -395,7 +395,8 @@
             "additionalProperties": false,
             "properties": {
               "kind": true,
-              "composes": true
+              "composes": true,
+              "result": true
             }
           }
         }

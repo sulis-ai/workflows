@@ -1507,11 +1507,10 @@ effect: SIDE_EFFECT
     assert "V17" not in _rules(findings)
 
 
-def test_v17_refused_tool_composite_mechanism() -> None:
-    """D34: TOOL (composite) is a real mechanism kind — child Tools run in
-    order over shared values (spec §4.3) — but nothing in the engine
-    dispatches `composes`; refused rather than silently misrouted as an
-    opaque SKILL hand-off with no instructions."""
+def test_v17_accepted_well_formed_tool_composite_mechanism() -> None:
+    """D45 (WP-04 Part 2): `TOOL` (composite) is now dispatched by the
+    engine (`_advance_compose`) — the outright refusal D34 put here for
+    it is gone, replaced by real shape checks (below)."""
     doc = """
 api_version: sulis.workflows/v1
 kind: TOOL
@@ -1524,7 +1523,95 @@ controls: [ { profile: finding@1 } ]
 mechanism:
   kind: TOOL
   composes:
+    - { tool: echo@1, inputs: { value: inputs.value }, output: { value: compose.echoed } }
+  result:
+    outputs: { value: compose.echoed }
+effect: QUERY
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V17" not in _rules(findings)
+
+
+def test_v17_refused_composed_child_declares_process_mechanism() -> None:
+    """Out of scope, named explicitly in the WP-04 design document: a
+    `PROCESS`- or `TOOL`-mechanism composed child is refused — only
+    `CODE`/`EXTERNAL`/`SKILL` are supported."""
+    process_child = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: process-child
+version: 1.0.0
+title: Process child
+inputs: { x: { type: string } }
+output: { x: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism: { kind: PROCESS, process: { start: a, nodes: { a: { type: STEP, tool: echo@1, in: { value: inputs.x }, out: { value: state.x }, end: DONE } }, endings: { DONE: { outcome: SUCCESS, says: "Done." } } } }
+effect: QUERY
+"""
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: composite-with-process-child
+version: 1.0.0
+title: Composite with process child
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: TOOL
+  composes:
+    - { tool: process-child@1, inputs: { x: inputs.value }, output: { x: compose.result } }
+  result:
+    outputs: { value: compose.result }
+effect: QUERY
+"""
+    findings = validate(doc, registry=_base_registry(process_child))
+    assert "V17" in _rules(findings)
+
+
+def test_v17_refused_compose_item_output_not_targeting_compose_namespace() -> None:
+    """D45: a composed child's own `output:` targeting a bare/wrong-prefixed
+    path — the same bad-but-conformant shape D39 found for
+    `mechanism.inputs` — is silently ignored by `_advance_compose`;
+    refused here rather than at runtime only."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: composite-echo-bad-output
+version: 1.0.0
+title: Composite echo (bad output target)
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: TOOL
+  composes:
     - { tool: echo@1, inputs: { value: inputs.value }, output: { value: value } }
+  result:
+    outputs: { value: compose.value }
+effect: QUERY
+"""
+    findings = validate(doc, registry=_base_registry())
+    assert "V17" in _rules(findings)
+
+
+def test_v17_refused_tool_composite_output_not_mapped_by_result() -> None:
+    """D45: an `output:` field with no corresponding
+    `mechanism.result.outputs` entry would never be filled at runtime —
+    mirrors V4's own "every declared output MUST be mapped" discipline."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: TOOL
+id: composite-echo-no-result
+version: 1.0.0
+title: Composite echo (no result mapping)
+inputs: { value: { type: string } }
+output: { value: { type: string } }
+controls: [ { profile: finding@1 } ]
+mechanism:
+  kind: TOOL
+  composes:
+    - { tool: echo@1, inputs: { value: inputs.value }, output: { value: compose.echoed } }
 effect: QUERY
 """
     findings = validate(doc, registry=_base_registry())

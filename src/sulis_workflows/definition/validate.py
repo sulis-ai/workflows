@@ -204,7 +204,9 @@ def validate_tool(tool: model.Tool, registry: Registry) -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(v3_tool_controls(tool, registry))
     findings.extend(v3_checker_examples(tool))
-    findings.extend(v17_mechanism_kinds(tool))
+    findings.extend(v17_mechanism_kinds(tool, registry))
+    findings.extend(v17_compose_item_output_targets_compose(tool))
+    findings.extend(v17_call_result_present(tool))
     for control_ref in tool.controls:
         if control_ref.kind in ("conventions", "fitness", "policy"):
             _, err = _resolve(registry, "CONTROL", control_ref.ref)
@@ -1341,38 +1343,106 @@ def v16_state_channels(process: model.Process) -> list[Finding]:
 
 # ------------------------------------------------------------------------ V17 --
 
-_NOT_YET_EXECUTABLE_MECHANISM_KINDS = ("TOOL",)
+_COMPOSABLE_CHILD_KINDS = ("CODE", "EXTERNAL", "SKILL")
 
 
-def v17_mechanism_kinds(tool: model.Tool) -> list[Finding]:
-    """`mechanism.kind: TOOL` (composite) — spec §4.3, §12.1. A real,
-    schema- and model-accepted mechanism kind, but nothing in
-    `engine/run.py`'s dispatch-or-defer decision (`_advance_step`)
-    branches on it yet: a StepNode whose Tool declares `TOOL` falls into
-    the generic non-`CODE`/`EXTERNAL` branch and would be silently handed
-    off to the caller's agent session as a `TOOL_STEP` — wrong, since
-    `TOOL`-composite has no `ref` for `instructions_ref` to even carry,
-    and its own `composes` children would never be dispatched by anyone.
-    Refused rather than implemented for this pass: `TOOL`-composite needs
-    the spec's own "shared values" and intermediate-hand-off semantics
-    settled first (WP-04 Part 2, not yet built).
+def v17_mechanism_kinds(tool: model.Tool, registry: Registry) -> list[Finding]:
+    """D34/D44/D45: `mechanism.kind: EXTERNAL`/`TOOL` (composite) were
+    both refused outright here until the engine actually dispatched them
+    (WP-04 Parts 1 and 2) — neither refusal applies any more, both kinds
+    are now real. What replaces V17's own former "not yet executable"
+    role is the one corner `TOOL`-composite dispatch (`_advance_compose`,
+    `engine/run.py`) still refuses on its own: a composed child whose own
+    resolved Tool declares `mechanism.kind: PROCESS` or `TOOL` (nested
+    composite) — named explicitly as out of this pass's own scope in the
+    WP-04 design document ("the spec does not name this shape either way;
+    refuse it explicitly ... rather than silently allow untested
+    recursion"). Checked here so a bad-but-conformant nested composite is
+    caught at validation time, not only by the matching engine-runtime
+    refusal (the validator-bypass defence-in-depth this codebase's other
+    rules already keep).
 
-    `mechanism.kind: EXTERNAL` was refused here for the identical reason
-    (D34) until WP-04 Part 1 built `ExternalToolPort` and wired
-    `_advance_step`/`attempt_step` to dispatch it the same way `CODE`
-    already is (D44) — no longer refused."""
+    A composed child's own reference not resolving at all is `_v2_
+    mechanism_references`'s own job, not this rule's — this only runs
+    once that reference is already known to resolve."""
 
-    if tool.mechanism.kind in _NOT_YET_EXECUTABLE_MECHANISM_KINDS:
+    if tool.mechanism.kind != "TOOL":
+        return []
+    findings: list[Finding] = []
+    for index, item in enumerate(tool.mechanism.composes):
+        child, err = _resolve(registry, "TOOL", item.tool)
+        if err or child is None:
+            continue  # _v2_mechanism_references already reports this
+        if child.mechanism.kind not in _COMPOSABLE_CHILD_KINDS:
+            findings.append(
+                Finding(
+                    rule="V17",
+                    message=(
+                        f"tool {tool.header.id!r}'s composed child {index} "
+                        f"({item.tool!r}) declares mechanism.kind: "
+                        f"{child.mechanism.kind} — only CODE, EXTERNAL and "
+                        "SKILL composed children are supported by this "
+                        "engine (spec §4.3, WP-04 Part 2)"
+                    ),
+                    fix="compose a CODE, EXTERNAL or SKILL Tool instead",
+                )
+            )
+    return findings
+
+
+def v17_compose_item_output_targets_compose(tool: model.Tool) -> list[Finding]:
+    """D45: a composed child's own `output:` mapping that targets
+    anything other than `compose.*` is silently ignored by
+    `_advance_compose` (`engine/run.py`) — its own `_apply_compose_output`
+    only ever writes a `compose.*` target, the same bare-or-wrong-prefixed
+    path gap D39 found for `mechanism.inputs`. Refused here for the
+    identical reason, rather than silently dropping a value nothing
+    downstream will ever read."""
+
+    if tool.mechanism.kind != "TOOL":
+        return []
+    findings: list[Finding] = []
+    for index, item in enumerate(tool.mechanism.composes):
+        for field_name, target_path in item.output.items():
+            if not target_path.startswith("compose."):
+                findings.append(
+                    Finding(
+                        rule="V17",
+                        message=(
+                            f"tool {tool.header.id!r}'s composed child {index}'s "
+                            f"own output field {field_name!r} targets "
+                            f"{target_path!r}, not compose.* — nothing reads it"
+                        ),
+                        fix=f"target compose.<name> instead of {target_path!r}",
+                    )
+                )
+    return findings
+
+
+def v17_call_result_present(tool: model.Tool) -> list[Finding]:
+    """D45 (WP-04 Part 2): a `TOOL`-composite Tool that declares its own
+    `output:` fields but no `mechanism.result` (or one missing some of
+    those fields) would silently produce an incomplete output dict at
+    runtime — `_advance_compose` (`engine/run.py`) only ever fills
+    `output:` from `mechanism.result.outputs`, the same reused shape a
+    `PROCESS` call's own top-level output already has (§9.1). Mirrors
+    V4's own "every declared output MUST be mapped" discipline, applied
+    to the composite's own top-level mapping rather than a STEP's `out:`."""
+
+    if tool.mechanism.kind != "TOOL" or not tool.output:
+        return []
+    mapped = set(tool.mechanism.result.outputs) if tool.mechanism.result else set()
+    missing = set(tool.output) - mapped
+    if missing:
         return [
             Finding(
                 rule="V17",
                 message=(
-                    f"tool {tool.header.id!r} declares mechanism.kind: "
-                    f"{tool.mechanism.kind} — not yet executable by this "
-                    "engine (spec §4.3/§12.1, D34)"
+                    f"tool {tool.header.id!r} declares output field(s) "
+                    f"{sorted(missing)} but its own `mechanism.result.outputs` "
+                    "does not map them — nothing would ever fill them"
                 ),
-                fix="use a CODE, EXTERNAL, SKILL, or PROCESS mechanism until "
-                "TOOL (composite) dispatch is implemented",
+                fix="add a mechanism.result.outputs entry for each declared output field",
             )
         ]
     return []
