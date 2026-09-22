@@ -54,6 +54,7 @@ honest, tested slice over a guessed-at complete one):
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -78,6 +79,7 @@ from sulis_workflows.definition.expressions import (
     parse_type,
 )
 from sulis_workflows.definition.model import (
+    ComposeItem,
     Decider,
     Ending,
     GateNode,
@@ -272,7 +274,27 @@ async def report(
     the attempt, checks controls (STEP) or the decision's evidence and
     separation-of-duty (GATE), then continues driving forward exactly as
     `next()` would.
+
+    WP-04 Part 2: a composed `SKILL` child's own hand-off (`_advance_compose`)
+    names itself `f"{outer_node_id}.compose[{i}]"`, in the SAME scope as its
+    own composite STEP (not a nested one — see `_advance_compose`'s own
+    docstring for why) — checked here, before the ordinary `scope_def.nodes`
+    lookup, since a synthetic compose-child id is never a real node.
     """
+    compose_match = _COMPOSE_CHILD_NODE_ID_RE.match(node_id)
+    if compose_match:
+        return await _report_compose_child(
+            process,
+            run_id,
+            scope,
+            compose_match.group("outer"),
+            int(compose_match.group("index")),
+            ctx,
+            inputs=inputs,
+            host_inputs=host_inputs,
+            output=output,
+            error_code=error_code,
+        )
     scope_def = _resolve_scope(process, scope, ctx.registry)
     node = scope_def.nodes[node_id]
     if isinstance(node, GateNode):
@@ -1309,19 +1331,27 @@ async def _advance_step(
         )
 
     if tool.mechanism.kind == "TOOL":
-        # D34: spec §4.3/§12.1 — TOOL-composite has no `ref` to hand off,
-        # and its own `composes` children would simply never be dispatched
-        # by the generic `not in ("CODE", "EXTERNAL")` branch just below,
-        # which is written for a SKILL hand-off's own shape. WP-04 Part 1
-        # closed the equivalent EXTERNAL gap (D44) by dispatching it the
-        # same way CODE already is, below; TOOL-composite dispatch is
-        # WP-04 Part 2, not yet built. V17 already refuses this at
-        # validation time; this is the runtime half, in case validation is
-        # bypassed.
-        raise EngineRefusal(
-            f"step {node_id!r}: tool {tool.header.id!r} declares "
-            f"mechanism.kind: {tool.mechanism.kind} — not yet executable "
-            "by this engine (spec §4.3/§12.1, D34)"
+        # D34/D45: TOOL-composite has no `ref` to hand off, and its own
+        # `composes` children would simply never be dispatched by the
+        # generic `not in ("CODE", "EXTERNAL")` branch just below, which
+        # is written for a SKILL hand-off's own shape — so it is driven
+        # here, the same way a `PROCESS`-mechanism call is (above), rather
+        # than falling into that branch. This only fires on a fresh visit
+        # or a retry/repair fallthrough (never on plain replay of an
+        # already-recorded SUCCESS/failure, handled above).
+        return await _advance_compose(
+            process,
+            scope_def,
+            node,
+            node_id,
+            tool,
+            attempts,
+            baseline,
+            run_state,
+            run_id,
+            scope,
+            ctx,
+            depth,
         )
 
     key = AttemptKey(
@@ -1929,6 +1959,461 @@ async def _advance_process_call(
         depth,
         performed_by=f"PROCESS:{mechanism.ref or 'inline'}",
     )
+
+
+# ---------------------------------------------------------------------- composing tools --
+
+_COMPOSE_CHILD_NODE_ID_RE = re.compile(r"^(?P<outer>.+)\.compose\[(?P<index>\d+)\]$")
+
+
+def _apply_compose_output(
+    item: ComposeItem, child_output: Mapping[str, Any], compose_state: dict[str, Any]
+) -> None:
+    """`ComposeItem.output` maps ITS OWN Tool's output fields into
+    `compose.<path>` — the composite call's own private, ordered scratch
+    space (WP-04 Part 2, D45), mirroring exactly how a STEP's own `out:`
+    maps a Tool's output into `state.*` (`apply_output`, `engine/state.py`)
+    — simpler, since `compose.*` has no declared channels or reducers of
+    its own: a bare, last-write-wins write, silently skipping a field the
+    child's own output didn't actually produce (the same leniency
+    `apply_output` already has for `out:`, spec §7.1)."""
+    for tool_field, target_path in item.output.items():
+        if not target_path.startswith("compose."):
+            continue  # schema/V4-equivalent already restricts targets to compose.* (D45)
+        if tool_field not in child_output:
+            continue
+        compose_state[target_path[len("compose.") :]] = child_output[tool_field]
+
+
+async def _advance_compose(
+    process: Process,
+    scope_def: _ScopeDef,
+    node: StepNode,
+    node_id: str,
+    tool: Tool,
+    attempts: list[AttemptRecord],
+    baseline: int,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+) -> _Advance:
+    """WP-04 Part 2 (D45): dispatches a `TOOL`-composite STEP — walks
+    `composes` in declared order, each child dispatched through the SAME
+    per-mechanism-kind dispatch every other Tool already has (`attempt_step`
+    for `CODE`/`EXTERNAL`; the identical permission-check-then-hand-off
+    shape `_advance_step`'s own `SKILL` branch already has for `SKILL`) —
+    reused, not duplicated. `compose.*` (a new, composite-call-scoped
+    run-state namespace, parallel to `steps.*`) accumulates each earlier
+    child's own mapped `output`, readable by a LATER child's own `inputs:`
+    mapping alongside the composite Tool's own `inputs.*`/`state.*`/`host.*`.
+
+    Mirrors `_advance_process_call`'s own "nothing recorded at the OUTER
+    node until the whole call finally resolves" discipline (§9's own
+    nested-scope pattern, applied one level down without an actual nested
+    SCOPE — see below): each child's own durable attempt is recorded under
+    its own synthetic node id (`f"{node_id}.compose[{i}]"`, the SAME scope
+    as the composite STEP itself, not a deeper one — a documented departure
+    from this work package's own design draft, decided here because
+    composed children are a flat, fixed-length sequence, not an independent
+    node graph with its own `start`/`nodes`/`endings`; a nested scope's
+    real purpose elsewhere is representing exactly that, which `composes`
+    never has). Only ever recorded ON SUCCESS (`_report_compose_child`'s
+    own docstring): a FAILING child's own dispatch is never durably keyed,
+    so a later composite-level TRANSIENT retry (the OUTER node's own
+    existing retry logic, unchanged) re-dispatches the failing child fresh
+    rather than replaying a stale failure forever, while every
+    already-succeeded child is skipped via its own durable record.
+
+    Refuses (`EngineRefusal`) a composed child whose own `mechanism.kind`
+    is anything but `CODE`/`EXTERNAL`/`SKILL` — `PROCESS` recursion and
+    nested `TOOL`-composite children are both out of this pass's own scope
+    (the latter named explicitly in the WP-04 design document itself); V2
+    already refuses a nested-`TOOL` child at validation time, this is the
+    runtime half.
+    """
+    mechanism = tool.mechanism
+    compose_state: dict[str, Any] = {}
+    compose_run_state = {**run_state, "compose": compose_state}
+
+    for i, item in enumerate(mechanism.composes):
+        child_tool = _resolve_tool(item.tool, ctx.registry)
+        if child_tool.mechanism.kind not in ("CODE", "EXTERNAL", "SKILL"):
+            raise EngineRefusal(
+                f"step {node_id!r}: composed child {i} ({item.tool!r}) declares "
+                f"mechanism.kind: {child_tool.mechanism.kind} — only CODE, "
+                "EXTERNAL and SKILL composed children are supported by this "
+                "engine (spec §4.3, WP-04 Part 2)"
+            )
+        child_node_id = f"{node_id}.compose[{i}]"
+
+        child_attempts = await ctx.records.get_attempts(
+            run_id, scope, child_node_id, platform_id=ctx.platform_id, run_id=run_id
+        )
+        if child_attempts:
+            # Only ever durably recorded on success (see above) — replay
+            # reapplies the same already-known output and moves on,
+            # without re-dispatching a child that already ran.
+            _apply_compose_output(item, child_attempts[-1].output or {}, compose_state)
+            continue
+
+        child_key = AttemptKey(run=run_id, scope=scope, node=child_node_id, attempt=1)
+
+        if child_tool.mechanism.kind == "SKILL":
+            # §10.1/D12, mirroring `_advance_step`'s own SKILL branch: a
+            # composed child's own permission is checked before ANY
+            # dispatch, hand-off included — composing does not bypass
+            # governance for the Tools it composes.
+            permission_rationale: str | None
+            if child_tool.permission is None:
+                permission_rationale = (
+                    f"Tool {child_tool.header.id!r} declares no `permission` — "
+                    "refusing to dispatch rather than skip the check (spec "
+                    "§10.1, D12)."
+                )
+            else:
+                decision = await ctx.policy.authorize(
+                    child_tool.permission,
+                    identity=ctx.identity,
+                    platform_id=ctx.platform_id,
+                    run_id=run_id,
+                )
+                permission_rationale = (
+                    None
+                    if decision.verdict is Verdict.PERMIT
+                    else (decision.rationale or "composed child permission refused")
+                )
+            if permission_rationale is not None:
+                forbidden_result = StepAttemptResult(
+                    outcome=StepOutcome.FORBIDDEN, rationale=permission_rationale
+                )
+                return await _record_step_result(
+                    process,
+                    scope_def,
+                    node,
+                    node_id,
+                    tool,
+                    forbidden_result,
+                    attempts,
+                    baseline,
+                    run_state,
+                    run_id,
+                    scope,
+                    ctx,
+                    depth,
+                    performed_by=f"AGENT:{child_tool.mechanism.ref}::{ctx.identity}",
+                )
+            claim_advance = await _claim_if_effectful(
+                ctx,
+                child_tool,
+                child_key,
+                run_id=run_id,
+                scope=scope,
+                node_id=child_node_id,
+            )
+            if claim_advance is not None:
+                return claim_advance
+            resolved_inputs, _missing = _resolve_inputs_preview(
+                StepNode(id=child_node_id, tool=item.tool, in_=item.inputs, out={}),
+                child_tool,
+                compose_run_state,
+            )
+            return _Advance(
+                answer=NextAnswer(
+                    kind=AnswerKind.TOOL_STEP,
+                    says=f"Waiting on {item.tool} to run.",
+                    node_id=child_node_id,
+                    scope=scope,
+                    resolved_inputs=resolved_inputs,
+                    instructions_ref=child_tool.mechanism.ref,
+                    controls=tuple(
+                        {"kind": c.kind, "ref": c.ref} for c in child_tool.controls
+                    ),
+                    skippable=False,
+                )
+            )
+
+        # CODE / EXTERNAL — dispatched synchronously, the exact shape a
+        # top-level STEP's own inline dispatch already has (`attempt_step`,
+        # WP-04 Part 1's own reuse of it for EXTERNAL applies identically
+        # here, one level down).
+        claim_advance = await _claim_if_effectful(
+            ctx,
+            child_tool,
+            child_key,
+            run_id=run_id,
+            scope=scope,
+            node_id=child_node_id,
+        )
+        if claim_advance is not None:
+            return claim_advance
+        child_step_node = StepNode(
+            id=child_node_id, tool=item.tool, in_=item.inputs, out={}
+        )
+        child_result = await attempt_step(
+            child_step_node,
+            child_tool,
+            compose_run_state,
+            identity=ctx.identity,
+            platform_id=ctx.platform_id,
+            run_id=run_id,
+            policy=ctx.policy,
+            code_tool=ctx.code_tool,
+            external_tool=ctx.external_tool,
+            registry=ctx.registry,
+        )
+        if child_result.outcome is not StepOutcome.SUCCESS:
+            # A4: never durably recorded (see above) — the composite's own
+            # ONE attempt, at the OUTER node, carries this failure, routed
+            # through the calling STEP's own on_error/on_control_fail by
+            # the same `_record_step_result`/`_route_for_step_failure`
+            # machinery any other dispatch failure already uses.
+            return await _record_step_result(
+                process,
+                scope_def,
+                node,
+                node_id,
+                tool,
+                child_result,
+                attempts,
+                baseline,
+                run_state,
+                run_id,
+                scope,
+                ctx,
+                depth,
+                performed_by=f"{child_tool.mechanism.kind}:{item.tool}",
+            )
+        child_record = AttemptRecord(
+            key=child_key,
+            inputs={},
+            output=dict(child_result.output or {}),
+            control_results=(
+                [
+                    {
+                        "control": o.control.ref,
+                        "passed": o.passed,
+                        "findings": list(o.findings),
+                    }
+                    for o in child_result.controls.outcomes
+                ]
+                if child_result.controls
+                else []
+            ),
+            verdict=child_result.outcome.value,
+            performed_by=f"{child_tool.mechanism.kind}:{item.tool}",
+            started_at=_now(),
+            ended_at=_now(),
+        )
+        await _record_attempt(ctx, child_record, run_id=run_id)
+        _apply_compose_output(item, child_result.output or {}, compose_state)
+
+    # Every child succeeded — fill the composite's own top-level `output:`
+    # the same way §9.1's own `mechanism.result.outputs` already fills a
+    # `PROCESS` call's output (`_advance_process_call`, above): reusing
+    # `CallResult`'s own shape verbatim rather than inventing a
+    # composite-only field, since the shape (`{name: path}`) is identical
+    # either way and `mechanism.result` is not schema-gated to `PROCESS`
+    # mechanisms only.
+    output: dict[str, Any] = {}
+    if mechanism.result is not None:
+        output = {
+            name: _evaluate(path, compose_run_state)
+            for name, path in mechanism.result.outputs.items()
+        }
+    success_result = StepAttemptResult(outcome=StepOutcome.SUCCESS, output=output)
+    return await _record_step_result(
+        process,
+        scope_def,
+        node,
+        node_id,
+        tool,
+        success_result,
+        attempts,
+        baseline,
+        run_state,
+        run_id,
+        scope,
+        ctx,
+        depth,
+        performed_by="TOOL:compose",
+    )
+
+
+async def _report_compose_child(
+    process: Process,
+    run_id: str,
+    scope: str,
+    outer_node_id: str,
+    child_index: int,
+    ctx: EngineContext,
+    *,
+    inputs: Mapping[str, Any],
+    host_inputs: Mapping[str, Any],
+    output: Mapping[str, Any] | None,
+    error_code: str | None,
+) -> NextAnswer:
+    """Completes a composed `SKILL` child's own `TOOL_STEP` hand-off
+    (WP-04 Part 2, D45).
+
+    On SUCCESS: records the child's own durable attempt (keyed by the
+    synthetic `f"{outer_node_id}.compose[{i}]"` node id, same scope as
+    `_advance_compose` already uses) and resumes driving from the top;
+    replay naturally re-enters `_advance_compose` for the OUTER node,
+    reads this child's own now-durable attempt, and continues to the
+    next child (or finishes).
+
+    On FAILURE (an `error_code`, or the reported output's own controls
+    not passing): NEVER durably records the child's own attempt (the
+    same "only success is durable" discipline `_advance_compose` itself
+    keeps, for the identical reason — a later composite-level retry must
+    re-dispatch this exact child fresh, not replay a stale failure) —
+    instead routes the failure to the OUTER node directly, via the same
+    `_record_step_result` a synchronous `CODE`/`EXTERNAL` child failure
+    already uses in `_advance_compose`, returning its own answer without
+    restarting the top-level replay at all (nothing was recorded that
+    replay would need to re-discover).
+    """
+    scope_def = _resolve_scope(process, scope, ctx.registry)
+    outer_node = scope_def.nodes.get(outer_node_id)
+    if not isinstance(outer_node, StepNode):
+        raise EngineRefusal(
+            f"report() called for a composed child of {outer_node_id!r}, which "
+            "is not a STEP node"
+        )
+    outer_tool = _resolve_tool(outer_node.tool, ctx.registry)
+    if outer_tool.mechanism.kind != "TOOL" or not (
+        0 <= child_index < len(outer_tool.mechanism.composes)
+    ):
+        raise EngineRefusal(
+            f"report() called for {outer_node_id!r}.compose[{child_index}], "
+            "which does not name a composed child of a TOOL-composite Tool"
+        )
+    item = outer_tool.mechanism.composes[child_index]
+    child_tool = _resolve_tool(item.tool, ctx.registry)
+    child_node_id = f"{outer_node_id}.compose[{child_index}]"
+    child_key = AttemptKey(run=run_id, scope=scope, node=child_node_id, attempt=1)
+
+    if error_code is not None:
+        child_result = StepAttemptResult(
+            outcome=StepOutcome.ERROR,
+            error_code=error_code,
+            error_class=_classify_error(child_tool, error_code),
+            rationale=f"composed child {child_index} reported error {error_code!r}",
+        )
+    else:
+        from sulis_workflows.engine.controls import check_controls
+
+        controls_result = await check_controls(
+            child_tool,
+            output or {},
+            registry=ctx.registry,
+            code_tool=ctx.code_tool,
+            platform_id=ctx.platform_id,
+            run_id=run_id,
+        )
+        if not controls_result.checkable:
+            child_outcome = StepOutcome.CONTROLS_UNCHECKABLE
+        elif controls_result.all_passed:
+            child_outcome = StepOutcome.SUCCESS
+        else:
+            child_outcome = StepOutcome.CONTROL_FAILED
+        child_result = StepAttemptResult(
+            outcome=child_outcome, output=output, controls=controls_result
+        )
+
+    if child_result.outcome is StepOutcome.SUCCESS:
+        record = AttemptRecord(
+            key=child_key,
+            inputs={},
+            output=dict(child_result.output or {}),
+            control_results=(
+                [
+                    {
+                        "control": o.control.ref,
+                        "passed": o.passed,
+                        "findings": list(o.findings),
+                    }
+                    for o in child_result.controls.outcomes
+                ]
+                if child_result.controls
+                else []
+            ),
+            verdict=child_result.outcome.value,
+            performed_by=f"AGENT:{child_tool.mechanism.ref}::{ctx.identity}",
+            started_at=_now(),
+            ended_at=_now(),
+        )
+        await _record_attempt(ctx, record, run_id=run_id)
+        top_scope = scope.split("/")[0]
+        result = await _drive_scope(
+            process,
+            _scope_def_for_process(process),
+            run_id,
+            top_scope,
+            ctx,
+            inputs,
+            host_inputs,
+        )
+        return result.answer
+
+    # FAILURE — never recorded at the child's own key (see docstring);
+    # route it straight to the OUTER node's own ONE attempt instead.
+    # `attempts`/`baseline`/`run_state`/`depth` for the OUTER node are
+    # necessarily approximated here rather than replayed (report() is not
+    # itself a replay walk) — the same simplification `report()`'s own
+    # plain STEP branch already makes for its own `AttemptRecord.inputs`
+    # (always `{}`, a known, accepted limitation; see the run record for
+    # this decision). This is safe because a `TOOL`-composite STEP never
+    # itself recurses into another process call (composed `PROCESS`
+    # children are refused, above), so `depth` has no observable effect
+    # here.
+    outer_attempts = await ctx.records.get_attempts(
+        run_id, scope, outer_node_id, platform_id=ctx.platform_id, run_id=run_id
+    )
+    outer_run_state: dict[str, Any] = {
+        "inputs": inputs,
+        "host": host_inputs,
+        "state": {},
+        "steps": {},
+    }
+    outer_advance = await _record_step_result(
+        process,
+        scope_def,
+        outer_node,
+        outer_node_id,
+        outer_tool,
+        child_result,
+        outer_attempts,
+        0,
+        outer_run_state,
+        run_id,
+        scope,
+        ctx,
+        0,
+        performed_by=f"AGENT:{child_tool.mechanism.ref}::{ctx.identity}",
+    )
+    if outer_advance.answer is not None:
+        return outer_advance.answer
+    # `_record_step_result` returned a routing decision (`next_node_id`),
+    # not a terminal answer — e.g. a CONTROL_FAILED repair budget not yet
+    # exhausted recursed back into `_advance_step` itself, which (since
+    # nothing was actually recorded for a compose-child failure) always
+    # resolves synchronously; restarting the top-level replay reaches the
+    # identical conclusion the same way any other STEP's own eventual
+    # routing decision would.
+    top_scope = scope.split("/")[0]
+    result = await _drive_scope(
+        process,
+        _scope_def_for_process(process),
+        run_id,
+        top_scope,
+        ctx,
+        inputs,
+        host_inputs,
+    )
+    return result.answer
 
 
 # ----------------------------------------------------------------------------- ROUTE --

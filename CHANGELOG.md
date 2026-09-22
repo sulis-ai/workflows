@@ -6,6 +6,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D45 (WP-04 Part 2):** `mechanism.kind: TOOL` (composite) is now dispatched by the engine,
+  closing the `TOOL` half of D34's own refusal — WP-04 is now complete. `composes[]` children run
+  in declared order over a private `compose.*` run-state namespace, addressed in the SAME `scope`
+  as the outer `STEP` (not a nested one — composed children are a flat, fixed-length sequence, not
+  an independently graphed process). Only `CODE`/`EXTERNAL`/`SKILL` children are supported; a
+  `SKILL` child's own hand-off surfaces and resumes exactly as an ordinary `SKILL` Tool's does. A
+  composed child's own durable record is written only on success, so a composite-level retry
+  genuinely re-dispatches a failed child rather than replaying a stale failure. `V17` is rewritten
+  to check composed-child kinds, `output:` targeting, and `result.outputs` coverage instead of
+  refusing `TOOL` outright; `tool.v1.schema.json`'s `TOOL`-branch gains `result` (a genuine schema
+  gap found while building this — the `PROCESS` branch already allowed it, `TOOL`'s never had).
 - **D44 (WP-04 Part 1):** `mechanism.kind: EXTERNAL` is now dispatched by the engine, closing the
   `EXTERNAL` half of D34's own refusal. A new `ExternalToolPort` (`domain/ports/external_tool.py`),
   mirroring `CodeToolPort`'s own shape exactly, is wired into `attempt_step` alongside

@@ -38,6 +38,7 @@ from sulis_workflows.definition.registry import Registry
 from sulis_workflows.domain.ports.claims import ClaimStatus, StubClaimsAdapter
 from sulis_workflows.domain.ports.code_tool import (
     StubCodeToolAdapter,
+    ToolPermanentError,
     ToolTransientError,
 )
 from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
@@ -3045,30 +3046,34 @@ def test_external_mechanism_step_transient_error_is_retried(monkeypatch):
     assert call_count["n"] == 2
 
 
-def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted():
-    """D34: `TOOL` (composite — child Tools run in order over shared
-    values, spec §4.3) is also meant to be run BY THE ENGINE, but has no
-    `ref` at all (only `composes`). Before this fix, the same generic
-    hand-off branch produced a `TOOL_STEP` answer with `instructions_ref`
-    silently `None` and every one of `composes`'s children dropped on the
-    floor — refused instead, the validator-bypass case for V17."""
-    from sulis_workflows.definition.model import ComposeItem
-
-    composite_tool = Tool(
-        header=_header("composite-echo", "TOOL"),
+def _compose_step_a_tool() -> Tool:
+    return Tool(
+        header=_header("step-a", "TOOL"),
         output={"value": OutputSpec(type="string")},
         controls=(),
-        mechanism=Mechanism(
-            kind="TOOL",
-            composes=(
-                ComposeItem(tool="echo@1", inputs={"value": "inputs.value"}, output={}),
-            ),
-        ),
+        mechanism=Mechanism(kind="CODE", ref="mod:step_a"),
         effect="QUERY",
         inputs={},
-        permission="workflows.composite-echo.dispatch",
+        permission="workflows.step-a.dispatch",
     )
-    process = Process(
+
+
+def _compose_step_b_tool() -> Tool:
+    return Tool(
+        header=_header("step-b", "TOOL"),
+        output={"value": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:step_b"),
+        effect="QUERY",
+        inputs={"prev": InputSpec(type="string")},
+        permission="workflows.step-b.dispatch",
+    )
+
+
+def _compose_two_code_children_process(composite_tool: Tool) -> Process:
+    from sulis_workflows.definition.model import StateChannel
+
+    return Process(
         header=_header("composite-process", "PROCESS"),
         start="run-composite",
         permission="workflows.composite-process.start",
@@ -3076,6 +3081,282 @@ def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted(
             "run-composite": StepNode(
                 id="run-composite",
                 tool="composite-echo@1",
+                in_={},
+                out={"final": "state.final_value"},
+                end="DONE",
+            ),
+        },
+        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+        state={"final_value": StateChannel(type="string", reducer="REPLACE")},
+    )
+
+
+class _RecordingCodeToolAdapter:
+    def __init__(self):
+        self.identity = StubCodeToolAdapter().identity
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call(self, ref, inputs, *, platform_id, run_id):
+        self.calls.append((ref, dict(inputs)))
+        if ref == "mod:step_a":
+            return {"value": "A"}
+        if ref == "mod:step_b":
+            return {"value": f"B-saw-{inputs.get('prev')}"}
+        if ref == "mod:step_fail":
+            raise ToolTransientError("this-should-not-be-called")
+        raise AssertionError(f"unexpected ref {ref!r}")
+
+
+def test_tool_composite_two_code_children_thread_compose_state_and_fill_output():
+    """A2 (WP-04 Part 2): the second child's own `inputs:` mapping reads a
+    `compose.*` value the first child's own `output:` mapping wrote; the
+    composite's own top-level `output:` correctly reflects the final
+    `compose.*` state."""
+    from sulis_workflows.definition.model import CallResult, ComposeItem
+
+    composite_tool = Tool(
+        header=_header("composite-echo", "TOOL"),
+        output={"final": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(
+            kind="TOOL",
+            composes=(
+                ComposeItem(
+                    tool="step-a@1", inputs={}, output={"value": "compose.a_value"}
+                ),
+                ComposeItem(
+                    tool="step-b@1",
+                    inputs={"prev": "compose.a_value"},
+                    output={"value": "compose.b_value"},
+                ),
+            ),
+            result=CallResult(outputs={"final": "compose.b_value"}),
+        ),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.composite-echo.dispatch",
+    )
+    process = _compose_two_code_children_process(composite_tool)
+    code_tool = _RecordingCodeToolAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=code_tool,
+        external_tool=StubExternalToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry(
+            [composite_tool, _compose_step_a_tool(), _compose_step_b_tool()]
+        ),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-composite-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "DONE"
+    assert answer.outcome == "SUCCESS"
+    assert code_tool.calls == [
+        ("mod:step_a", {}),
+        ("mod:step_b", {"prev": "A"}),
+    ]
+
+
+def test_tool_composite_skill_child_hands_off_and_resumes_via_report():
+    """A3 (WP-04 Part 2): a composite Tool with a `SKILL` child hands off
+    with its own scope; a `report()` against it resumes the composite and
+    continues to (in this case, finishes) its own remaining children."""
+    from sulis_workflows.definition.model import CallResult, ComposeItem
+
+    skill_child_tool = Tool(
+        header=_header("step-c", "TOOL"),
+        output={"note": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/step_c"),
+        effect="QUERY",
+        inputs={"prev": InputSpec(type="string")},
+        permission="workflows.step-c.dispatch",
+    )
+    composite_tool = Tool(
+        header=_header("composite-echo", "TOOL"),
+        output={"final": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(
+            kind="TOOL",
+            composes=(
+                ComposeItem(
+                    tool="step-a@1", inputs={}, output={"value": "compose.a_value"}
+                ),
+                ComposeItem(
+                    tool="step-c@1",
+                    inputs={"prev": "compose.a_value"},
+                    output={"note": "compose.c_note"},
+                ),
+            ),
+            result=CallResult(outputs={"final": "compose.c_note"}),
+        ),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.composite-echo.dispatch",
+    )
+    process = _compose_two_code_children_process(composite_tool)
+    records = StubRecordsAdapter()
+    code_tool = _RecordingCodeToolAdapter()
+    registry = Registry([composite_tool, _compose_step_a_tool(), skill_child_tool])
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=code_tool,
+        external_tool=StubExternalToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    first = _run(
+        next_(process, "run-composite-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+    assert first.node_id == "run-composite.compose[1]"
+    assert first.scope == "root"
+    assert first.resolved_inputs == {"prev": "A"}
+
+    second = _run(
+        report(
+            process,
+            "run-composite-2",
+            "root",
+            "run-composite.compose[1]",
+            EngineContext(
+                policy=StubPolicyAdapter(),
+                code_tool=code_tool,
+                external_tool=StubExternalToolAdapter(),
+                records=records,
+                claims=StubClaimsAdapter(),
+                registry=registry,
+                identity="user:iain",
+                platform_id="tenant-1",
+            ),
+            inputs={},
+            host_inputs={},
+            output={"note": "hello-from-c"},
+        )
+    )
+    assert second.kind is AnswerKind.ENDED
+    assert second.ending == "DONE"
+    assert second.outcome == "SUCCESS"
+
+
+def test_tool_composite_child_permanent_error_routes_through_outer_on_error():
+    """A4 (WP-04 Part 2): a composed child that fails (a `PERMANENT`
+    error) routes the WHOLE composite Tool's own dispatch through the
+    calling STEP's own `on_error` — never silently swallowed partway
+    through `composes`."""
+    from sulis_workflows.definition.model import ComposeItem
+
+    failing_child_tool = Tool(
+        header=_header("step-fail", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:step_fail"),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.step-fail.dispatch",
+        errors=(ErrorSpec(code="BOOM", error_class="PERMANENT"),),
+    )
+    composite_tool = Tool(
+        header=_header("composite-fail", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(
+            kind="TOOL",
+            composes=(ComposeItem(tool="step-fail@1", inputs={}, output={}),),
+        ),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.composite-fail.dispatch",
+    )
+    process = Process(
+        header=_header("composite-fail-process", "PROCESS"),
+        start="run-composite",
+        permission="workflows.composite-fail-process.start",
+        nodes={
+            "run-composite": StepNode(
+                id="run-composite",
+                tool="composite-fail@1",
+                in_={},
+                out={},
+                on_error={"BOOM": RouteTarget(end="COMPOSITE_FAILED")},
+                end="DONE",
+            ),
+        },
+        endings={
+            "DONE": Ending(outcome="SUCCESS", says="Done."),
+            "COMPOSITE_FAILED": Ending(outcome="FAILURE", says="Composite failed."),
+        },
+    )
+
+    class FailingCodeAdapter:
+        def __init__(self):
+            self.identity = StubCodeToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            raise ToolPermanentError("BOOM")
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=FailingCodeAdapter(),
+        external_tool=StubExternalToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([composite_tool, failing_child_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(process, "run-composite-3", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "COMPOSITE_FAILED"
+    assert answer.outcome == "FAILURE"
+
+
+def test_tool_composite_nested_composite_child_is_refused_cleanly():
+    """Out of scope, named explicitly in the WP-04 design document: a
+    composed child that is itself a `TOOL`-composite is refused rather
+    than silently allowing untested recursion. This is the
+    validator-bypass case; `v17_mechanism_kinds` refuses it at validation
+    time."""
+    from sulis_workflows.definition.model import ComposeItem
+
+    inner_composite_tool = Tool(
+        header=_header("inner-composite", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(kind="TOOL", composes=(ComposeItem(tool="step-a@1"),)),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.inner-composite.dispatch",
+    )
+    outer_composite_tool = Tool(
+        header=_header("outer-composite", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(
+            kind="TOOL", composes=(ComposeItem(tool="inner-composite@1"),)
+        ),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.outer-composite.dispatch",
+    )
+    process = Process(
+        header=_header("nested-composite-process", "PROCESS"),
+        start="run-composite",
+        permission="workflows.nested-composite-process.start",
+        nodes={
+            "run-composite": StepNode(
+                id="run-composite",
+                tool="outer-composite@1",
                 in_={},
                 out={},
                 end="DONE",
@@ -3089,17 +3370,18 @@ def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted(
         external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
-        registry=Registry([composite_tool]),
+        registry=Registry(
+            [outer_composite_tool, inner_composite_tool, _compose_step_a_tool()]
+        ),
         identity="user:iain",
         platform_id="tenant-1",
     )
     answer = _run(
-        next_(process, "run-composite-1", "root", ctx, inputs={}, host_inputs={})
+        next_(process, "run-composite-4", "root", ctx, inputs={}, host_inputs={})
     )
     assert answer.kind is AnswerKind.ENDED
     assert answer.ending == "FAILED"
     assert answer.outcome == "FAILURE"
-    assert "TOOL" in answer.says
 
 
 def test_control_fail_repair_gives_one_more_attempt_before_then():
