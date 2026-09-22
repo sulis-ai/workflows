@@ -2476,56 +2476,229 @@ def test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own
     assert answer.outcome == "SUCCESS"
 
 
-def test_input_gate_is_refused_cleanly_rather_than_misrouted():
-    """WP-03a Fault 2: `kind: INPUT` gates are refused at validation time
-    (V9), but the validator is advisory — nothing stops a Process built
-    directly (as every test here does) or loaded without going through
-    `sulis-workflows validate` from reaching the engine with one. Before
-    this fix, `_advance_gate` never read `node.kind` at all: a `policy`
-    decider's PERMIT/DENY answer was evaluated as if this were an
-    APPROVAL gate, found no matching route in `on` (an INPUT gate only
-    ever declares `ANSWERED`), and raised the genuinely confusing "no
-    route declared for verdict 'PERMIT'" — naming a verdict the gate's
-    own author never wrote anywhere. The engine now recognises `kind:
-    INPUT` itself and refuses with a clear, correctly-worded reason
-    instead, the same defence-in-depth PARALLEL/JOIN/FOR_EACH already
-    have against a validator bypass."""
+def _input_gate_process(**overrides) -> Process:
+    """A minimal `kind: INPUT` gate process (D26/D41, WP-05 Part 1) —
+    mirrors `_agent_gate_process`'s own standalone-`Process` style, not
+    `_process()`'s bigger fixture, since none of that one's STEP/ROUTE
+    scaffolding is relevant here."""
+    defaults = {
+        "header": _header("input-gate-process", "PROCESS"),
+        "start": "ask",
+        "permission": "workflows.input-gate.start",
+        "nodes": {
+            "ask": GateNode(
+                id="ask",
+                kind="INPUT",
+                asks="What is the target date?",
+                reviewing=(),
+                deciders=(Decider(kind="person", permission="answer.thing"),),
+                answer_type="string",
+                answer_into="state.target_date",
+                on={"ANSWERED": RouteTarget(end="COMPLETE")},
+            ),
+        },
+        "endings": {"COMPLETE": Ending(outcome="SUCCESS", says="Done.")},
+    }
+    defaults.update(overrides)
+    return Process(**defaults)
 
-    process = Process(
-        header=_header("input-gate-process", "PROCESS"),
-        start="ask",
-        permission="workflows.input-gate.start",
+
+def test_input_gate_with_person_decider_hands_off_awaiting_decision():
+    """A1 (WP-05 Part 1): an `INPUT` gate with a single `person` decider
+    hands off as `AWAITING_DECISION`, exactly like an `APPROVAL` gate's
+    own person decider — the gate is asking for a value, not yet holding
+    one."""
+    process = _input_gate_process()
+    ctx = _fresh_ctx()
+    answer = _run(next_(process, "run-input-1", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+    assert answer.node_id == "ask"
+
+
+def test_decide_value_resolves_an_input_gate_and_writes_answer_into():
+    """A1 (WP-05 Part 1): `decide(..., value=...)` resolves an `AWAITING_
+    DECISION` INPUT gate, routes via `on.ANSWERED`, and writes the value
+    to `answer_into`'s own state path — the same shape
+    `test_decide_completes_a_person_gate_and_the_run_reaches_complete`
+    already proves for `verdict` on an `APPROVAL` gate."""
+    process = _input_gate_process()
+    records = StubRecordsAdapter()
+    ctx = _fresh_ctx(records=records)
+    first = _run(next_(process, "run-input-2", "root", ctx, inputs={}, host_inputs={}))
+    assert first.kind is AnswerKind.AWAITING_DECISION
+
+    second = _run(
+        decide(
+            process,
+            "run-input-2",
+            "root",
+            "ask",
+            _fresh_ctx(records=records),
+            inputs={},
+            host_inputs={},
+            value="2026-01-01",
+            subject="user-42",
+        )
+    )
+    assert second.kind is AnswerKind.ENDED
+    assert second.ending == "COMPLETE"
+
+
+def test_input_gate_policy_decider_never_answers_and_falls_through_to_person():
+    """A2 (WP-05 Part 1), and the regression this replaces (WP-03a Fault
+    2): `PolicyPort.evaluate_policy` returns an ADR-028 `Verdict`, which
+    has nowhere to carry an `answer_type`-typed value — a `policy`
+    decider asked on an INPUT gate can never actually answer it, so its
+    own PERMIT/DENY/INDETERMINATE verdict is recorded for provenance only
+    and always passes to the next decider (D26/D41's own design), exactly
+    as an ordinary INDETERMINATE outcome already does for `resolve_gate`.
+    Before this fix, the engine never read `node.kind` at all and this
+    exact shape crashed with the confusing "no route declared for verdict
+    'PERMIT'" — this proves that is gone, and the gate correctly falls
+    through to its `person` decider instead."""
+    process = _input_gate_process(
         nodes={
             "ask": GateNode(
                 id="ask",
                 kind="INPUT",
                 asks="What is the target date?",
                 reviewing=(),
-                deciders=(Decider(kind="policy", ref="always-permit@1"),),
+                deciders=(
+                    Decider(kind="policy", ref="always-permit@1"),
+                    Decider(kind="person", permission="answer.thing"),
+                ),
                 answer_type="string",
                 answer_into="state.target_date",
                 on={"ANSWERED": RouteTarget(end="COMPLETE")},
             ),
-        },
-        endings={"COMPLETE": Ending(outcome="SUCCESS", says="Done.")},
+        }
     )
-    ctx = EngineContext(
-        policy=StubPolicyAdapter(),
-        code_tool=StubCodeToolAdapter(),
-        records=StubRecordsAdapter(),
-        claims=StubClaimsAdapter(),
-        registry=Registry([]),
-        identity="user:iain",
-        platform_id="tenant-1",
+    ctx = _fresh_ctx()
+    answer = _run(next_(process, "run-input-3", "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+    assert answer.node_id == "ask"
+    assert "no route declared for verdict" not in (answer.says or "")
+
+
+def test_decide_with_a_verdict_for_an_input_gate_is_refused():
+    """`kind: INPUT` is answered with `value`, not decided with a
+    `Verdict` (§7.6) — passing `verdict` for one is refused rather than
+    silently ignored or misread. Raised directly from `decide()`, before
+    ever reaching `_drive_scope` — the same "checked before recording"
+    shape `skip()`'s own early refusals already use (e.g.
+    `test_skip_required_step_is_refused`), so this propagates as a bare
+    `EngineRefusal`, not a `FAILED` ending."""
+    process = _input_gate_process()
+    ctx = _fresh_ctx()
+    _run(next_(process, "run-input-4", "root", ctx, inputs={}, host_inputs={}))
+    with pytest.raises(EngineRefusal, match="value"):
+        _run(
+            decide(
+                process,
+                "run-input-4",
+                "root",
+                "ask",
+                _fresh_ctx(),
+                inputs={},
+                host_inputs={},
+                verdict=Verdict.PERMIT,
+                subject="user-42",
+            )
+        )
+
+
+def test_decide_value_not_matching_answer_type_is_refused():
+    """`decide(..., value=...)` is checked against the gate's own
+    `answer_type` before being recorded (§7.6) — a `string`-typed INPUT
+    gate answered with an integer is refused, not silently coerced or
+    written as-is. Same bare-`EngineRefusal` shape as the previous test."""
+    process = _input_gate_process()
+    ctx = _fresh_ctx()
+    _run(next_(process, "run-input-5", "root", ctx, inputs={}, host_inputs={}))
+    with pytest.raises(EngineRefusal, match="answer_type"):
+        _run(
+            decide(
+                process,
+                "run-input-5",
+                "root",
+                "ask",
+                _fresh_ctx(),
+                inputs={},
+                host_inputs={},
+                value=42,
+                subject="user-42",
+            )
+        )
+
+
+def test_decide_value_matching_an_enum_answer_type_resolves_the_gate():
+    """`_value_matches_answer_type` covers `enum[...]` the same as every
+    other §2.1 primitive — a member value is accepted."""
+    process = _input_gate_process(
+        nodes={
+            "ask": GateNode(
+                id="ask",
+                kind="INPUT",
+                asks="Which region?",
+                reviewing=(),
+                deciders=(Decider(kind="person", permission="answer.thing"),),
+                answer_type="enum[NORTH, SOUTH]",
+                answer_into="state.region",
+                on={"ANSWERED": RouteTarget(end="COMPLETE")},
+            ),
+        }
     )
+    records = StubRecordsAdapter()
+    ctx = _fresh_ctx(records=records)
+    _run(next_(process, "run-input-6", "root", ctx, inputs={}, host_inputs={}))
     answer = _run(
-        next_(process, "run-input-gate-1", "root", ctx, inputs={}, host_inputs={})
+        decide(
+            process,
+            "run-input-6",
+            "root",
+            "ask",
+            _fresh_ctx(records=records),
+            inputs={},
+            host_inputs={},
+            value="NORTH",
+            subject="user-42",
+        )
     )
     assert answer.kind is AnswerKind.ENDED
-    assert answer.ending == "FAILED"
-    assert answer.outcome == "FAILURE"
-    assert "INPUT" in answer.says
-    assert "no route declared for verdict" not in answer.says
+    assert answer.ending == "COMPLETE"
+
+
+def test_decide_value_outside_an_enum_answer_type_is_refused():
+    process = _input_gate_process(
+        nodes={
+            "ask": GateNode(
+                id="ask",
+                kind="INPUT",
+                asks="Which region?",
+                reviewing=(),
+                deciders=(Decider(kind="person", permission="answer.thing"),),
+                answer_type="enum[NORTH, SOUTH]",
+                answer_into="state.region",
+                on={"ANSWERED": RouteTarget(end="COMPLETE")},
+            ),
+        }
+    )
+    ctx = _fresh_ctx()
+    _run(next_(process, "run-input-7", "root", ctx, inputs={}, host_inputs={}))
+    with pytest.raises(EngineRefusal, match="answer_type"):
+        _run(
+            decide(
+                process,
+                "run-input-7",
+                "root",
+                "ask",
+                _fresh_ctx(),
+                inputs={},
+                host_inputs={},
+                value="EAST",
+                subject="user-42",
+            )
+        )
 
 
 def test_external_mechanism_step_is_refused_cleanly_rather_than_misrouted_as_a_skill():

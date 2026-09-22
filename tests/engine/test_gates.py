@@ -13,11 +13,13 @@ import asyncio
 from sulis_workflows.definition.model import Decider, GateNode, RouteTarget
 from sulis_workflows.domain.ports.policy import StubPolicyAdapter, Verdict
 from sulis_workflows.engine.gates import (
+    AnswerOutcome,
     DeciderOutcome,
     GateResolution,
     check_agent_decision,
     evaluate_policy_decider,
     resolve_gate,
+    resolve_input_gate,
 )
 
 
@@ -106,6 +108,104 @@ def test_first_of_several_true_deciders_wins_not_a_later_one():
     ]
     decision = resolve_gate(_gate(), outcomes, person_required=False)
     assert decision.verdict is Verdict.DENY
+    assert decision.decided_by.decider_index == 0
+
+
+# ---------------------------------------------------------------- resolve_input_gate --
+# D26/D41 (WP-05 Part 1): `resolve_input_gate`'s own counterpart tests, mirroring
+# `resolve_gate`'s sequencing tests above exactly — same shape, `{ANSWERED,
+# INDETERMINATE}` instead of `Verdict`.
+
+
+def _input_gate(**overrides) -> GateNode:
+    defaults = {
+        "id": "ask",
+        "kind": "INPUT",
+        "asks": "What is the target date?",
+        "reviewing": (),
+        "deciders": (
+            Decider(kind="policy", ref="sign-off-policy@1"),
+            Decider(kind="agent", ref="review-recommendations@1"),
+            Decider(kind="person", permission="agents.answer.give"),
+        ),
+        "answer_type": "string",
+        "answer_into": "state.target_date",
+        "on": {"ANSWERED": RouteTarget(next="decompose-to-work")},
+    }
+    defaults.update(overrides)
+    return GateNode(**defaults)
+
+
+def _answer(index: int, answered: bool, decided_by: str, value=None) -> AnswerOutcome:
+    return AnswerOutcome(
+        decider_index=index, answered=answered, decided_by=decided_by, value=value
+    )
+
+
+def test_input_gate_no_outcomes_yet_needs_the_first_decider_which_is_policy():
+    decision = resolve_input_gate(_input_gate(), [], person_required=False)
+    assert decision.resolution is GateResolution.NEEDS_POLICY
+    assert decision.next_decider_index == 0
+
+
+def test_input_gate_an_answer_from_the_first_decider_decides_immediately():
+    outcomes = [_answer(0, True, "POLICY:sign-off-policy@1", value="2026-01-01")]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=False)
+    assert decision.resolution is GateResolution.DECIDED
+    assert decision.decided_by.value == "2026-01-01"
+
+
+def test_input_gate_not_answered_first_decider_moves_on_to_the_next_kind():
+    outcomes = [_answer(0, False, "POLICY:sign-off-policy@1")]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=False)
+    assert decision.resolution is GateResolution.NEEDS_AGENT
+    assert decision.next_decider_index == 1
+
+
+def test_input_gate_every_decider_unanswered_and_none_left_pauses():
+    outcomes = [
+        _answer(0, False, "POLICY:sign-off-policy@1"),
+        _answer(1, False, "AGENT:review-recommendations@1:session-1"),
+        _answer(2, False, "PERSON:nobody-answered"),
+    ]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=False)
+    assert decision.resolution is GateResolution.PAUSED
+
+
+def test_input_gate_no_deciders_declared_at_all_pauses_immediately():
+    decision = resolve_input_gate(_input_gate(deciders=()), [], person_required=False)
+    assert decision.resolution is GateResolution.PAUSED
+
+
+def test_input_gate_person_required_ignores_an_earlier_non_person_answer():
+    # An earlier decider claiming `answered=True` should never happen in
+    # practice (only a person decider can), but person_required's own
+    # filter is decider-identity-based, not answered-based — this proves
+    # the filter itself, mirroring resolve_gate's own equivalent test.
+    outcomes = [_answer(0, True, "POLICY:sign-off-policy@1", value="not-a-real-answer")]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=True)
+    assert decision.resolution is GateResolution.NEEDS_AGENT
+    assert decision.next_decider_index == 1
+
+
+def test_input_gate_person_required_and_person_has_answered_counts_it():
+    outcomes = [
+        _answer(0, False, "POLICY:sign-off-policy@1"),
+        _answer(1, False, "AGENT:review-recommendations@1:s1"),
+        _answer(2, True, "PERSON:user-42", value="2026-01-01"),
+    ]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=True)
+    assert decision.resolution is GateResolution.DECIDED
+    assert decision.decided_by.value == "2026-01-01"
+
+
+def test_input_gate_first_of_several_answers_wins_not_a_later_one():
+    outcomes = [
+        _answer(0, True, "POLICY:sign-off-policy@1", value="first"),
+        _answer(1, True, "AGENT:review-recommendations@1:s1", value="second"),
+    ]
+    decision = resolve_input_gate(_input_gate(), outcomes, person_required=False)
+    assert decision.decided_by.value == "first"
     assert decision.decided_by.decider_index == 0
 
 

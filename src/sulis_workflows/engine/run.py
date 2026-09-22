@@ -61,7 +61,21 @@ from enum import Enum
 from typing import Any
 
 from sulis_workflows.definition import defaults as fmt_defaults
-from sulis_workflows.definition.expressions import evaluate, parse
+from sulis_workflows.definition.expressions import (
+    TAny,
+    TBoolean,
+    TEnum,
+    TInteger,
+    TList,
+    TMap,
+    TNumber,
+    TProfile,
+    TString,
+    Type,
+    evaluate,
+    parse,
+    parse_type,
+)
 from sulis_workflows.definition.model import (
     Decider,
     Ending,
@@ -86,11 +100,13 @@ from sulis_workflows.domain.ports.records import (
     RecordsPort,
 )
 from sulis_workflows.engine.gates import (
+    AnswerOutcome,
     DeciderOutcome,
     GateResolution,
     check_agent_decision,
     evaluate_policy_decider,
     resolve_gate,
+    resolve_input_gate,
 )
 from sulis_workflows.engine.routes import (
     LoopBudgetOutcome,
@@ -397,6 +413,43 @@ async def _report_gate_decision(
     return result.answer
 
 
+def _value_matches_answer_type(value: Any, answer_type: str) -> bool:
+    """`decide(..., value=...)`'s own runtime check that a submitted
+    answer is shaped like `kind: INPUT`'s own `answer_type` declares
+    (§7.6) — the same §2.1 type vocabulary `parse_type` already
+    structures for a declared path's static type, applied here to one
+    live value instead.
+
+    Best-effort for `map<*>`/`profile:*` (accepts any mapping — this
+    format has no runtime JSON Schema validator for a profile's own
+    shape, and building one is out of scope for this work package); every
+    other primitive is checked exactly, failing closed on anything else.
+    """
+    return _value_matches_type(value, parse_type(answer_type))
+
+
+def _value_matches_type(value: Any, type_: Type) -> bool:
+    if isinstance(type_, TString):
+        return isinstance(value, str)
+    if isinstance(type_, TInteger):
+        return isinstance(value, int) and not isinstance(value, bool)
+    if isinstance(type_, TNumber):
+        return isinstance(value, int | float) and not isinstance(value, bool)
+    if isinstance(type_, TBoolean):
+        return isinstance(value, bool)
+    if isinstance(type_, TAny):
+        return True
+    if isinstance(type_, TEnum):
+        return value in type_.members
+    if isinstance(type_, TList):
+        return isinstance(value, list) and all(
+            _value_matches_type(item, type_.item) for item in value
+        )
+    if isinstance(type_, TMap | TProfile):
+        return isinstance(value, Mapping)
+    return False
+
+
 async def decide(
     process: Process,
     run_id: str,
@@ -406,8 +459,9 @@ async def decide(
     *,
     inputs: Mapping[str, Any],
     host_inputs: Mapping[str, Any],
-    verdict: Verdict,
-    note: str | None,
+    verdict: Verdict | None = None,
+    value: Any = None,
+    note: str | None = None,
     subject: str,
 ) -> NextAnswer:
     """§12.1: `decide(run, scope, gate, verdict, note)` — records a
@@ -442,6 +496,16 @@ async def decide(
     and lets `_advance_gate` apply it at the point its own already-correct
     replay actually reaches it, rather than recomputing that position here
     a second, differently-shaped, and wrong way.
+
+    `kind: INPUT` (D26/D41, WP-05 Part 1): a person decider answers with
+    `value` instead of `verdict` — `decide(..., value=<matching
+    answer_type>)`. `value` is checked against the gate's own
+    `answer_type` (§7.6) before being handed to `_drive_scope`, the same
+    "checked before recording" discipline §10.1 already applies to a
+    verdict's own permission check. Which of `verdict`/`value` is
+    required is decided by this gate's own `kind`, not by caller choice —
+    the wrong one for this gate's `kind` is refused outright rather than
+    silently ignored or silently accepted alongside the right one.
     """
     scope_def = _resolve_scope(process, scope, ctx.registry)
     node = scope_def.nodes[gate_id]
@@ -449,6 +513,37 @@ async def decide(
         raise EngineRefusal(
             f"decide() called for {gate_id!r}, which is not a GATE node"
         )
+
+    payload: Mapping[str, Any]
+    if node.kind == "INPUT":
+        if verdict is not None:
+            raise EngineRefusal(
+                f"decide() called for {gate_id!r} (kind INPUT) with a "
+                "`verdict` — INPUT gates are answered with `value`, not "
+                "decided with a Verdict (§7.6)"
+            )
+        if value is None:
+            raise EngineRefusal(
+                f"decide() called for {gate_id!r} (kind INPUT) with no `value`"
+            )
+        assert node.answer_type is not None  # V9 requires it for kind: INPUT
+        if not _value_matches_answer_type(value, node.answer_type):
+            raise EngineRefusal(
+                f"decide() called for {gate_id!r}: value {value!r} does not "
+                f"match this gate's own answer_type {node.answer_type!r}"
+            )
+        payload = {"value": value, "subject": subject}
+    else:
+        if verdict is None:
+            raise EngineRefusal(
+                f"decide() called for {gate_id!r} (kind {node.kind}) with no `verdict`"
+            )
+        if value is not None:
+            raise EngineRefusal(
+                f"decide() called for {gate_id!r} (kind {node.kind}) with a "
+                "`value` — only an INPUT gate is answered that way (§7.6)"
+            )
+        payload = {"verdict": verdict, "note": note, "subject": subject}
 
     top_scope = scope.split("/")[0]
     result = await _drive_scope(
@@ -459,11 +554,7 @@ async def decide(
         ctx,
         inputs,
         host_inputs,
-        pending_decision=(
-            gate_id,
-            "person",
-            {"verdict": verdict, "note": note, "subject": subject},
-        ),
+        pending_decision=(gate_id, "person", payload),
     )
     return result.answer
 
@@ -1890,16 +1981,25 @@ def _gate_visit_prefix(
     resolution (matches the existing NEEDS_*/PAUSED handling) and is
     returned unchanged.
 
-    `resolve_gate` is pure, so replaying it here costs nothing beyond a
-    few extra calls over a small, bounded list (at most `len(node.deciders)`
-    attempts belong to any one resolution)."""
+    `resolve_gate`/`resolve_input_gate` are pure, so replaying either here
+    costs nothing beyond a few extra calls over a small, bounded list (at
+    most `len(node.deciders)` attempts belong to any one resolution).
+    `kind: INPUT` (D26/D41) replays `resolve_input_gate` over
+    `AnswerOutcome`s instead — the same prefix-search shape, a different
+    outcome type."""
     for index in range(1, len(attempts) + 1):
         prefix = attempts[:index]
-        outcomes = [_outcome_from_record(i, rec) for i, rec in enumerate(prefix)]
-        if (
-            resolve_gate(node, outcomes, person_required=person_required).resolution
-            is GateResolution.DECIDED
-        ):
+        if node.kind == "INPUT":
+            answer_outcomes = [
+                _answer_from_record(i, rec) for i, rec in enumerate(prefix)
+            ]
+            decision = resolve_input_gate(
+                node, answer_outcomes, person_required=person_required
+            )
+        else:
+            outcomes = [_outcome_from_record(i, rec) for i, rec in enumerate(prefix)]
+            decision = resolve_gate(node, outcomes, person_required=person_required)
+        if decision.resolution is GateResolution.DECIDED:
             return prefix
     return attempts
 
@@ -1924,30 +2024,20 @@ async def _advance_gate(
     `"agent"` (a `report()`-completed `DECISION_STEP`, `payload` shaped
     like a Tool's own output: `verdict`/`evidence`/`rationale`) or
     `"person"` (a `decide()` call, `payload` shaped `verdict`/`note`/
-    `subject`). The two are never interchangeable — a gate that turns out
-    to actually be awaiting the OTHER kind must never misread one
-    payload's fields as the other's — so each consuming branch below
-    checks its own `kind` before touching `payload` at all; a mismatched
-    `pending_decision` is simply never consumed here, same as the
-    established node-id mismatch case (`_report_gate_decision`'s own
-    docstring)."""
-    if node.kind == "INPUT":
-        # WP-03a Fault 2 (D26): spec-legal (§7.6), schema- and
-        # model-accepted, but never implemented — nothing below reads
-        # `node.kind`/`answer_type`/`answer_into`/`ANSWERED` at all, so a
-        # policy/agent/person decider's PERMIT/DENY was evaluated as an
-        # APPROVAL verdict against an `on` map that only ever declares
-        # `ANSWERED`, raising a confusing "no route declared for verdict
-        # 'PERMIT'" for a definition the author never wrote that verdict
-        # into. V9 already refuses this at validation time; this is the
-        # same defence PARALLEL/JOIN/FOR_EACH already have against a
-        # caller that bypasses `sulis-workflows validate` and hands the
-        # engine a Process directly.
-        raise EngineRefusal(
-            f"gate {node_id!r}: kind INPUT is not yet executed by this "
-            "engine (spec §7.6, D26) — refused rather than misreading a "
-            "decider's verdict against the wrong route"
-        )
+    `subject` for an `APPROVAL` gate, or `value`/`subject` for a `kind:
+    INPUT` one, per that gate's own `node.kind` — D26/D41). The two top-
+    level kinds are never interchangeable — a gate that turns out to
+    actually be awaiting the OTHER kind must never misread one payload's
+    fields as the other's — so each consuming branch below checks its own
+    `kind` before touching `payload` at all; a mismatched `pending_decision`
+    is simply never consumed here, same as the established node-id
+    mismatch case (`_report_gate_decision`'s own docstring)."""
+    # D26/D41 (WP-05 Part 1): `kind: INPUT` is now executed — resolved via
+    # `resolve_input_gate` (an `AnswerOutcome` sequence, `{ANSWERED,
+    # INDETERMINATE}`) rather than `resolve_gate` (a `Verdict` sequence),
+    # branched on below wherever the two kinds' own decision vocabulary
+    # actually differs; everything else (deciders asked in order,
+    # `person_required_when`, provenance recording) is shared.
     person_required = node.person_required_when is not None and bool(
         _evaluate(node.person_required_when, run_state)
     )
@@ -1961,22 +2051,50 @@ async def _advance_gate(
     # each resolution as its own. Narrow to the earliest resolution's own
     # prefix first.
     attempts = _gate_visit_prefix(node, attempts, person_required=person_required)
-    outcomes = [_outcome_from_record(index, rec) for index, rec in enumerate(attempts)]
-    gate_decision = resolve_gate(node, outcomes, person_required=person_required)
+    if node.kind == "INPUT":
+        answer_outcomes = [
+            _answer_from_record(index, rec) for index, rec in enumerate(attempts)
+        ]
+        gate_decision = resolve_input_gate(
+            node, answer_outcomes, person_required=person_required
+        )
+    else:
+        outcomes = [
+            _outcome_from_record(index, rec) for index, rec in enumerate(attempts)
+        ]
+        gate_decision = resolve_gate(node, outcomes, person_required=person_required)
 
     if gate_decision.resolution is GateResolution.DECIDED:
-        assert gate_decision.verdict is not None  # DECIDED always carries a verdict
         # §7.6's `note_into`: what the decider wrote is the whole point of a
         # send-back — it is the instruction for the next attempt. Written into
         # state here, on the decision's own replay, so the step the run loops
         # back to reads it exactly like any other input (declared and unwritten,
         # a DENY sent work back with the reason silently dropped).
         decided_state = _state_with_note(scope_def, node, attempts, run_state)
-        target = node.on.get(gate_decision.verdict.value)
+        if node.kind == "INPUT":
+            # D26/D41: `kind: INPUT` has no ADR-028 verdict at all — its
+            # own decision vocabulary is `{ANSWERED, INDETERMINATE}`
+            # (`resolve_input_gate`'s own), so the route key is always
+            # `ANSWERED` and the decided value (not a `Verdict`) is
+            # written to `answer_into` rather than `note_into`.
+            answer_outcome = gate_decision.decided_by
+            assert isinstance(
+                answer_outcome, AnswerOutcome
+            )  # DECIDED always carries one
+            decided_state = _state_with_answer(
+                scope_def,
+                node,
+                answer_outcome.value,
+                decided_state if decided_state is not None else run_state["state"],
+            )
+            route_key = "ANSWERED"
+        else:
+            assert gate_decision.verdict is not None  # DECIDED always carries a verdict
+            route_key = gate_decision.verdict.value
+        target = node.on.get(route_key)
         if target is None:
             raise EngineRefusal(
-                f"gate {node_id!r}: no route declared for verdict "
-                f"{gate_decision.verdict.value!r}"
+                f"gate {node_id!r}: no route declared for verdict {route_key!r}"
             )
         if target.invalidates:
             # D38: same refusal as `_advance_route`'s — see that comment.
@@ -2050,19 +2168,42 @@ async def _advance_gate(
             node=node_id,
             attempt=baseline + gate_decision.next_decider_index + 1,
         )
-        record = AttemptRecord(
-            key=key,
-            inputs={},
-            output={
-                "evidence": list(outcome.evidence),
-                "rationale": outcome.rationale,
-            },
-            control_results=[],
-            verdict=outcome.verdict.value,
-            performed_by=outcome.decided_by,
-            started_at=_now(),
-            ended_at=_now(),
-        )
+        if node.kind == "INPUT":
+            # D26/D41: `PolicyPort.evaluate_policy` returns ADR-028's own
+            # `Verdict` — nowhere to carry an `answer_type`-typed value.
+            # A policy decider asked on an INPUT gate can therefore never
+            # actually answer it; its own PERMIT/DENY/INDETERMINATE
+            # verdict is recorded here for provenance only and always
+            # treated as "did not answer" (WP-05 design, A2) — the next
+            # decider is always asked next, exactly as an ordinary
+            # INDETERMINATE outcome already is.
+            record = AttemptRecord(
+                key=key,
+                inputs={},
+                output={
+                    "rationale": outcome.rationale,
+                    "policy_verdict": outcome.verdict.value,
+                },
+                control_results=[],
+                verdict="INDETERMINATE",
+                performed_by=outcome.decided_by,
+                started_at=_now(),
+                ended_at=_now(),
+            )
+        else:
+            record = AttemptRecord(
+                key=key,
+                inputs={},
+                output={
+                    "evidence": list(outcome.evidence),
+                    "rationale": outcome.rationale,
+                },
+                control_results=[],
+                verdict=outcome.verdict.value,
+                performed_by=outcome.decided_by,
+                started_at=_now(),
+                ended_at=_now(),
+            )
         await _record_attempt(ctx, record, run_id=run_id)
         return await _advance_gate(
             process,
@@ -2139,19 +2280,40 @@ async def _advance_gate(
                 node=node_id,
                 attempt=baseline + decider_index + 1,
             )
-            record = AttemptRecord(
-                key=key,
-                inputs={},
-                output={
-                    "evidence": list(outcome.evidence),
-                    "rationale": outcome.rationale,
-                },
-                control_results=[],
-                verdict=outcome.verdict.value,
-                performed_by=outcome.decided_by,
-                started_at=_now(),
-                ended_at=_now(),
-            )
+            if node.kind == "INPUT":
+                # D26/D41: `decision@1`'s own profile (verdict/rationale/
+                # evidence, checked by V9 for every gate regardless of
+                # kind) has nowhere to carry an `answer_type`-typed value
+                # either — the same gap named for policy deciders above.
+                # Recorded for provenance, always "did not answer".
+                record = AttemptRecord(
+                    key=key,
+                    inputs={},
+                    output={
+                        "evidence": list(outcome.evidence),
+                        "rationale": outcome.rationale,
+                        "agent_verdict": outcome.verdict.value,
+                    },
+                    control_results=[],
+                    verdict="INDETERMINATE",
+                    performed_by=outcome.decided_by,
+                    started_at=_now(),
+                    ended_at=_now(),
+                )
+            else:
+                record = AttemptRecord(
+                    key=key,
+                    inputs={},
+                    output={
+                        "evidence": list(outcome.evidence),
+                        "rationale": outcome.rationale,
+                    },
+                    control_results=[],
+                    verdict=outcome.verdict.value,
+                    performed_by=outcome.decided_by,
+                    started_at=_now(),
+                    ended_at=_now(),
+                )
             await _record_attempt(ctx, record, run_id=run_id)
             return await _advance_gate(
                 process,
@@ -2218,12 +2380,22 @@ async def _advance_gate(
                         permission_decision.rationale or "decision permission refused",
                     )
                 )
-            record = _person_decision_record(
-                run_id,
-                scope,
-                node_id,
-                baseline + decider_index + 1,
-                pending_decision[1],
+            record = (
+                _person_answer_record(
+                    run_id,
+                    scope,
+                    node_id,
+                    baseline + decider_index + 1,
+                    pending_decision[1],
+                )
+                if node.kind == "INPUT"
+                else _person_decision_record(
+                    run_id,
+                    scope,
+                    node_id,
+                    baseline + decider_index + 1,
+                    pending_decision[1],
+                )
             )
             await _record_attempt(ctx, record, run_id=run_id)
             return await _advance_gate(
@@ -2276,8 +2448,22 @@ async def _advance_gate(
                     permission_decision.rationale or "decision permission refused",
                 )
             )
-        record = _person_decision_record(
-            run_id, scope, node_id, baseline + len(attempts) + 1, pending_decision[1]
+        record = (
+            _person_answer_record(
+                run_id,
+                scope,
+                node_id,
+                baseline + len(attempts) + 1,
+                pending_decision[1],
+            )
+            if node.kind == "INPUT"
+            else _person_decision_record(
+                run_id,
+                scope,
+                node_id,
+                baseline + len(attempts) + 1,
+                pending_decision[1],
+            )
         )
         await _record_attempt(ctx, record, run_id=run_id)
         return await _advance_gate(
@@ -2348,6 +2534,32 @@ def _person_decision_record(
     )
 
 
+def _person_answer_record(
+    run_id: str, scope: str, node_id: str, attempt: int, payload: Mapping[str, Any]
+) -> AttemptRecord:
+    """`kind: INPUT`'s own person-decider record (D26/D41) — parallel to
+    `_person_decision_record`, but the payload's own shape has a `value`
+    (already checked against `answer_type` in `decide()`, before this is
+    ever called) where APPROVAL's has a `verdict`. There is deliberately
+    no `on.INDETERMINATE`-equivalent "declines to answer" path for a
+    person decider here — §7.6 only ever describes a person giving an
+    answer, never withholding one; a gate simply stays `AWAITING_DECISION`
+    until `decide(..., value=...)` is actually called.
+    """
+    subject: str = payload["subject"]
+    value = payload["value"]
+    return AttemptRecord(
+        key=AttemptKey(run=run_id, scope=scope, node=node_id, attempt=attempt),
+        inputs={},
+        output={"value": value},
+        control_results=[],
+        verdict="ANSWERED",
+        performed_by=f"PERSON:{subject}",
+        started_at=_now(),
+        ended_at=_now(),
+    )
+
+
 def _state_with_note(
     scope_def: _ScopeDef,
     node: GateNode,
@@ -2411,12 +2623,62 @@ def _state_with_note(
     )
 
 
+def _state_with_answer(
+    scope_def: _ScopeDef,
+    node: GateNode,
+    value: Any,
+    base_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """`kind: INPUT`'s own `answer_into` (§7.6, D26/D41) — the decider's
+    answer, written to state at the point of decision. Mirrors
+    `_state_with_note`'s own REPLACE-only restriction and D27's reasoning
+    exactly: this recomputes and reapplies the SAME value on every replay
+    pass that reaches this already-DECIDED gate, safe only for a REPLACE
+    channel (APPEND/MERGE/UPSERT_BY_ID would accumulate or re-key it
+    again on every replay rather than writing it once)."""
+    assert node.answer_into is not None  # V9 requires it for kind: INPUT
+    channel_name = (
+        node.answer_into[len("state.") :]
+        if node.answer_into.startswith("state.")
+        else None
+    )
+    channel = scope_def.state.get(channel_name) if channel_name is not None else None
+    reducer = channel.reducer if channel is not None else "REPLACE"
+    if reducer != "REPLACE":
+        raise EngineRefusal(
+            f"gate {node.id!r}: answer_into targets {node.answer_into!r}, a "
+            f"{reducer} channel — only a REPLACE channel is supported, "
+            "mirroring note_into's own restriction (D27) for the same reason"
+        )
+    return apply_output(
+        scope_def.state, base_state, {"value": node.answer_into}, {"value": value}
+    )
+
+
 def _outcome_from_record(index: int, record: AttemptRecord) -> DeciderOutcome:
     return DeciderOutcome(
         decider_index=index,
         verdict=Verdict(record.verdict),
         decided_by=record.performed_by,
         evidence=tuple((record.output or {}).get("evidence", ())),
+    )
+
+
+def _answer_from_record(index: int, record: AttemptRecord) -> AnswerOutcome:
+    """`kind: INPUT`'s own counterpart to `_outcome_from_record` (D26/D41)
+    — replays one durable attempt back into an `AnswerOutcome`. `answered`
+    is keyed off `record.verdict == "ANSWERED"` (the only value this
+    engine ever writes there for an INPUT gate's attempt — see
+    `_person_answer_record`, and the `NEEDS_POLICY`/`NEEDS_AGENT` branches
+    of `_advance_gate`, which always write `"INDETERMINATE"` instead)."""
+    answered = record.verdict == "ANSWERED"
+    output = record.output or {}
+    return AnswerOutcome(
+        decider_index=index,
+        answered=answered,
+        decided_by=record.performed_by,
+        value=output.get("value") if answered else None,
+        rationale=output.get("rationale"),
     )
 
 
