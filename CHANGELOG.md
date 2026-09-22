@@ -5,7 +5,9 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
-### Added
+## [0.13.0] — 2026-09-22
+
+### Added — WP-03/WP-04/WP-05 complete: PARALLEL/JOIN, FOR_EACH, EXTERNAL/TOOL-composite dispatch, GATE kind: INPUT, ClaimsPort.renew/heartbeat, fuller ending-routing
 - **D48 (WP-03 Part 3):** closes WP-03's own last part — the eighth and final originally planned
   PR across WP-03/WP-04/WP-05 is now built, tested and merged. `V11` refuses a `PARALLEL`'s
   `branches`/`join` naming no real node, and a `JOIN` reachable from other than exactly one
