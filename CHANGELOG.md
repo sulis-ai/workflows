@@ -6,6 +6,21 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D47 (WP-03 Part 2):** `FOR_EACH` is now dispatched by the engine, closing both node kinds
+  WP-03 set out to dispatch (validator checks remain, a separately-scoped third part). An item is
+  an isolated nested scope — unlike a `PARALLEL` branch (D46), its own state and provenance never
+  fold back to the parent or thread to the next item, only through `collect`. The current element
+  is bound into a real, declared `state.<as>` channel — not the design document's own originally
+  proposed `item.*`-only resolution, which building it against the already-committed
+  `examples/recursive-refinement/` fixture found would have broken that fixture — plus
+  `item.value`/`item.index` as a bonus convenience needing no extra channel. `collect`'s own
+  `output: "ending"` is a reserved name reading the item's own terminal ending id, the same
+  synthesised-key convention a `PROCESS` call's own `result.outputs` already uses (D40); any other
+  `output` reads the item's own final state. `examples/recursive-refinement/`'s own real
+  `refine-each-child`/`refine-each-recommendation` nodes now run genuinely end to end for the
+  first time, not merely validated — two masked-would-have-been-silent gaps (the reserved-`ending`
+  reading, and wrapping a non-list contribution before an `APPEND` target) were found and fixed
+  while proving that.
 - **D46 (WP-03 Part 1):** `PARALLEL`/`JOIN` are now dispatched by the engine. A branch is a
   nested scope one level down from a `PROCESS` call's own child, sharing the parent's node map and
   its process-wide `state` (not isolated, unlike a `FOR_EACH` item), terminating via an ordinary

@@ -79,9 +79,11 @@ from sulis_workflows.definition.expressions import (
     parse_type,
 )
 from sulis_workflows.definition.model import (
+    CollectSpec,
     ComposeItem,
     Decider,
     Ending,
+    ForEachNode,
     GateNode,
     JoinNode,
     Mechanism,
@@ -794,6 +796,7 @@ async def _drive_scope(
     initial_state: Mapping[str, Any] | None = None,
     initial_produced_by: Mapping[str, str] | None = None,
     require_permission: bool = True,
+    extra_namespaces: Mapping[str, Any] | None = None,
 ) -> _DriveResult:
     """Drives one scope level — the top-level run (`depth == 0`) or a
     nested `PROCESS`-mechanism call (§9, delegated from
@@ -819,6 +822,18 @@ async def _drive_scope(
     `depth == 0` permission gate below, since a branch has no `permission`
     of its own to check separately (it shares the parent run's own, already
     checked once at the true top level).
+
+    A `FOR_EACH` item (WP-03 Part 2, D47) is driven through this SAME
+    function too, the same way — but §7.5's own "isolated scope" wording
+    means its `initial_state`/`initial_produced_by` are READ-ONLY seeds
+    (nothing about an item's OWN writes threads to the NEXT item or folds
+    back into the parent automatically the way a `PARALLEL` branch's do —
+    `_advance_for_each` never reads `drive_result.produced_by`, and only
+    `collect`'s own explicit mapping reaches the parent's real state).
+    `extra_namespaces` (`{"item": {"value": ..., "index": ...}}`) exposes
+    the current element to every node inside the item's own scope, the
+    same generic top-level-namespace mechanism `compose.*` (D45) already
+    proved works with zero special-casing in `evaluate()`.
     """
     if depth == 0 and require_permission:
         if process.permission is None:
@@ -894,6 +909,7 @@ async def _drive_scope(
                 "host": host_inputs,
                 "state": state,
                 "steps": steps,
+                **(extra_namespaces or {}),
             }
 
             if isinstance(node, StepNode):
@@ -973,10 +989,25 @@ async def _drive_scope(
                     depth,
                     produced_by,
                 )
+            elif isinstance(node, ForEachNode):
+                advance = await _advance_for_each(
+                    process,
+                    scope_def,
+                    node,
+                    node_id,
+                    visit_attempts,
+                    baseline,
+                    run_state,
+                    run_id,
+                    scope,
+                    ctx,
+                    depth,
+                    produced_by,
+                )
             else:
                 raise EngineRefusal(
-                    f"node {node_id!r} is a {type(node).__name__} node — FOR_EACH is "
-                    "not supported by this engine yet (WP-03 Part 2)."
+                    f"node {node_id!r} is a {type(node).__name__} node — unrecognised "
+                    "by this engine's dispatch table."
                 )
 
             if advance.answer is not None:
@@ -1127,7 +1158,11 @@ def _resolve_scope(process: Process, scope: str, registry: Registry) -> _ScopeDe
     never a real key in `scope_def.nodes` — a branch shares the PARENT
     level's own node map (not a separately-versioned Process the way a
     `PROCESS` call's child is, §9 vs this), so descending into one only
-    ever changes `start`, never `nodes`/`state`/`endings`."""
+    ever changes `start`, never `nodes`/`state`/`endings`. WP-03 Part 2
+    (D47): a `FOR_EACH` item's own segment (`<for-each-node-id>.item[<index>]`)
+    is the same shape — `index` selects nothing structural here (every
+    item shares the SAME `do` node id), it only distinguishes the scope
+    STRING for addressing."""
     scope_def = _scope_def_for_process(process)
     for segment in scope.split("/")[1:]:
         branch_match = _BRANCH_SCOPE_SEGMENT_RE.match(segment)
@@ -1144,6 +1179,16 @@ def _resolve_scope(process: Process, scope: str, registry: Registry) -> _ScopeDe
                     f"scope segment {segment!r}: branch index out of range"
                 )
             scope_def = replace(scope_def, start=parallel_node.branches[index])
+            continue
+        item_match = _FOR_EACH_ITEM_SCOPE_SEGMENT_RE.match(segment)
+        if item_match is not None:
+            for_each_node = scope_def.nodes.get(item_match.group("node"))
+            if not isinstance(for_each_node, ForEachNode):
+                raise EngineRefusal(
+                    f"scope segment {segment!r} does not name a FOR_EACH node "
+                    "in its own level"
+                )
+            scope_def = replace(scope_def, start=for_each_node.do)
             continue
         node = scope_def.nodes.get(segment)
         if not isinstance(node, StepNode):
@@ -2748,6 +2793,241 @@ async def _advance_join(
         next_node_id=next_id,
         state=folded_state,
         produced_by=folded_produced_by,
+        visit_attempts_used=1,
+    )
+
+
+# ------------------------------------------------------------------------------ for each --
+
+_FOR_EACH_ITEM_SCOPE_SEGMENT_RE = re.compile(r"^(?P<node>.+)\.item\[(?P<index>\d+)\]$")
+
+
+def _for_each_success_target(node: ForEachNode) -> str:
+    if node.next is not None:
+        return node.next
+    if node.end is not None:
+        return node.end
+    raise EngineRefusal(
+        f"for_each {node.id!r} satisfied with no `next` or `end` declared (V7 gap)"
+    )
+
+
+def _apply_collect(
+    state_channels: Mapping[str, StateChannel],
+    current_state: Mapping[str, Any],
+    collect: CollectSpec,
+    drive_result: _DriveResult,
+    node_id: str,
+    index: int,
+) -> dict[str, Any]:
+    """`collect: { output, into }` gathers ONE item's own contribution
+    into the parent's real state (the only channel back to the parent for
+    an isolated `FOR_EACH` item, D47). `output: "ending"` is a reserved
+    name — the item's own terminal ending id (`drive_result.answer.ending`),
+    the same synthesised-under-the-literal-key convention `mechanism.
+    result.outputs`'s own "ending" key already uses for a `PROCESS` call
+    (§9.1, D40) — reused here rather than invented fresh, matching the
+    real `examples/recursive-refinement/` fixture's own
+    `collect: { output: ending, into: state.recurse_endings }`, which
+    predates this decision and names no `state.ending` channel anywhere
+    (confirmed: `output` is schema-typed as a bare string, not a
+    `path_expr` the way `into` is — never meant to be a general path).
+    Any other `output` name reads the item's own final `state.<output>`.
+
+    Applied for EVERY item that reaches `ENDED`, regardless of its own
+    outcome — the real fixture's own `join: ALL_COMPLETE` pairs `collect`
+    with counting every item as done whether it succeeded or not, and a
+    collected trail of what each item actually ended with is exactly the
+    diagnostic value `ALL_COMPLETE` exists for.
+
+    Reuses `apply_output` (the same reducer-application code a STEP's own
+    `out:` mapping already uses) via a throwaway single-field mapping,
+    rather than duplicating `_reduce`'s own reducer logic — but pre-wraps
+    a non-list value in `[value]` before handing it to an `APPEND` target,
+    since `apply_output`'s own `_reduce` extends a list (`base + value`)
+    rather than appending one new element; collect's own job (accumulate
+    ONE contribution per item into a growing list) needs the latter
+    unless an item's own contribution is already a list of several values
+    (spec §7.4's own worked example, `output: insights` — already
+    `list<profile:insight@1>`-typed — concatenates as-is, unwrapped)."""
+    value: Any
+    if collect.output == "ending":
+        value = drive_result.answer.ending
+    else:
+        value = (drive_result.final_state or {}).get(collect.output)
+
+    if not collect.into.startswith("state."):
+        return dict(current_state)  # V4-equivalent restriction: a future
+        # validator pass (WP-03 Part 3) should refuse this at validation
+        # time; silently skipped here, the same defence-in-depth leniency
+        # `_apply_compose_output` (D45) already has for its own compose.*
+        # restriction.
+    channel_name = collect.into[len("state.") :]
+    channel = state_channels.get(channel_name)
+    if (
+        channel is not None
+        and channel.reducer == "APPEND"
+        and not isinstance(value, list)
+    ):
+        value = [value]
+
+    try:
+        return apply_output(
+            state_channels,
+            current_state,
+            {"__collect__": collect.into},
+            {"__collect__": value},
+        )
+    except ReducerMismatch as exc:
+        raise EngineRefusal(
+            f"for_each {node_id!r}: item {index} collect write refused ({exc})"
+        ) from exc
+
+
+async def _advance_for_each(
+    process: Process,
+    scope_def: _ScopeDef,
+    node: ForEachNode,
+    node_id: str,
+    attempts: list[AttemptRecord],
+    baseline: int,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+    outer_produced_by: Mapping[str, str],
+) -> _Advance:
+    """§7.5: each element of `over` runs `do` in its own ISOLATED scope
+    (`{scope}/{node_id}.item[{index}]`) — unlike a `PARALLEL` branch
+    (D46), an item's own `state`/`produced_by` writes do NOT thread to the
+    next item or fold back into the parent; `initial_state`/
+    `initial_produced_by` are READ-ONLY seeds (real use needs to read
+    prior process context, the same reason a branch does) and
+    `drive_result.produced_by` is deliberately never read here (D47).
+    `collect` is the ONLY channel back to the parent: reuses `apply_output`
+    verbatim (the same reducer-application code a STEP's own `out:`
+    mapping already uses) against the item's own final `state`, keeping
+    `collect.output`'s bare-string shape (schema: `type: string`, not a
+    `path_expr` the way `into` is) consistent with reading a bare channel
+    name out of the item's own isolated state, not a general path.
+
+    The current element is exposed two ways (D47): seeded into the item's
+    own isolated `state.<as>` (`node.as_`'s target — a REAL, already-
+    declared state channel, per the already-committed
+    `examples/recursive-refinement/` fixture's own `state.child`/
+    `state.recommendation` usage, predating this decision), and ALSO as
+    `item.value`/`item.index` via `extra_namespaces` — a bonus convenience
+    an author can use INSTEAD OF declaring an `as:` channel, e.g. for the
+    index. Both read the exact SAME underlying value; neither is required
+    over the other.
+
+    `max_concurrency` (default 1, spec §15) throttles only what THIS visit
+    is willing to newly open — never a concurrency primitive the engine
+    itself enforces (there is nothing here to enforce it against): an
+    item with ANY durable attempt at its own `do` node is always
+    (re-)driven regardless of budget; an item with none is opened only
+    while `open_count` is under budget. `join` (a bare policy string, no
+    separate node the way `PARALLEL`'s `join` is) is evaluated the same
+    way `_advance_join` evaluates `policy` — but `ForEachNode` has no
+    `on_join_failed` field at all (schema-confirmed): an unsatisfied
+    policy always falls through to the engine's own default (`end:
+    FAILED`, spec §15), with no per-node override possible."""
+    over_value = _evaluate(node.over, run_state)
+    if not isinstance(over_value, list):
+        raise EngineRefusal(
+            f"for_each {node_id!r}: `over` ({node.over!r}) did not resolve to a "
+            "list (V12 should have refused this at validation time)"
+        )
+
+    max_concurrency = node.max_concurrency or fmt_defaults.FOR_EACH_CONCURRENCY
+    parent_state = run_state["state"]
+    collected_state = dict(parent_state)
+    endings: list[tuple[str, str]] = []
+    pending: NextAnswer | None = None
+    open_count = 0
+
+    for index, item_value in enumerate(over_value):
+        item_scope = f"{scope}/{node_id}.item[{index}]"
+        item_do_attempts = await ctx.records.get_attempts(
+            run_id, item_scope, node.do, platform_id=ctx.platform_id, run_id=run_id
+        )
+        if not item_do_attempts and open_count >= max_concurrency:
+            continue  # held back by max_concurrency -- never touched this call
+
+        item_scope_def = replace(scope_def, start=node.do)
+        drive_result = await _drive_scope(
+            process,
+            item_scope_def,
+            run_id,
+            item_scope,
+            ctx,
+            run_state["inputs"],
+            run_state["host"],
+            depth=depth,
+            initial_state={**parent_state, node.as_: item_value},
+            initial_produced_by=outer_produced_by,
+            require_permission=False,
+            extra_namespaces={"item": {"value": item_value, "index": index}},
+        )
+        if drive_result.answer.kind is not AnswerKind.ENDED:
+            open_count += 1
+            if pending is None:
+                pending = drive_result.answer
+            continue
+
+        assert drive_result.answer.ending is not None
+        assert drive_result.answer.outcome is not None
+        endings.append((drive_result.answer.ending, drive_result.answer.outcome))
+        if node.collect is not None:
+            collected_state = _apply_collect(
+                scope_def.state,
+                collected_state,
+                node.collect,
+                drive_result,
+                node_id,
+                index,
+            )
+
+    if pending is not None:
+        return _Advance(answer=pending)
+
+    policy = node.join or fmt_defaults.JOIN_POLICY
+    outcomes = [outcome for _, outcome in endings]
+    if policy == "ALL_SUCCESS":
+        satisfied = all(outcome == "SUCCESS" for outcome in outcomes)
+    elif policy == "ANY_SUCCESS":
+        satisfied = any(outcome == "SUCCESS" for outcome in outcomes)
+    else:  # ALL_COMPLETE -- every item reached SOME ending, already guaranteed
+        satisfied = True
+
+    if not attempts:
+        key = AttemptKey(run=run_id, scope=scope, node=node_id, attempt=baseline + 1)
+        record = AttemptRecord(
+            key=key,
+            inputs={},
+            output={
+                "policy": policy,
+                "item_endings": [ending for ending, _ in endings],
+                "item_outcomes": outcomes,
+                "satisfied": satisfied,
+            },
+            control_results=[],
+            verdict="SATISFIED" if satisfied else "NOT_SATISFIED",
+            performed_by="ENGINE:for_each",
+            started_at=_now(),
+            ended_at=_now(),
+        )
+        await _record_attempt(ctx, record, run_id=run_id)
+
+    if satisfied:
+        next_id = _for_each_success_target(node)
+    else:
+        next_id = fmt_defaults.ON_JOIN_FAILED
+
+    return _Advance(
+        next_node_id=next_id,
+        state=collected_state,
         visit_attempts_used=1,
     )
 

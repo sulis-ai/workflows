@@ -1,0 +1,150 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M34AFBZWYJ17AV7YJ7JPZ461",
+  "started_at": "2026-09-22T11:50:00Z",
+  "completed_at": "2026-09-22T13:40:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-03 Part 2 (FOR_EACH) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/for-each",
+  "summary_for_principal": "Processes can now iterate over a list — refine every item on a work breakdown, gather insights from every recommendation — running one item at a time (or several at once, if allowed), continuing once every item is done.\n\nBuilding this against a real process already checked into this repository (not a made-up test) found two gaps before either shipped: one field the plan proposed inventing wasn't needed, since the existing example already used a simpler, working approach — kept that instead of rewriting real content to match an untested plan. The second was more serious: one instruction in that same example (\"collect what each item ended with\") would have silently collected nothing at all under the plan's first reading — caught only because this run drove the real example to completion and watched it misbehave, not just synthetic tests.\n\nFull test suite: 461 passed. Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when green.\n2. Finishes both runnable pieces of the last planned build track. One follow-up remains: rules catching specific authoring mistakes for this feature, not required for it to work.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Two new tests: A4 (max_concurrency throttles how many items open at once, proven via durable attempt records rather than next()'s own single-hand-off return) and A5 (collect accumulates every item's own terminal ending, in completion order)."
+      },
+      {
+        "coordinate": "tests/examples/test_recursive_refinement.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Replaced the now-obsolete FOR_EACH-refusal regression test with one driving the REAL recursive-refinement fixture through two genuinely recursive FOR_EACH items to WORK_TREE_COMPLETE — the first time this corpus process has run to completion through a FOR_EACH fan-out, not merely validated."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D47 added to §18; §7.5 gains the engine-executed operational paragraph; §12.1/§12.2 note FOR_EACH dispatch and its own audit record."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D47."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-03-concurrent-execution.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 2's own design (isolated item scope, item.* namespace as the proposed as: resolution, collect via the channel's reducer, max_concurrency as an offer-throttle not an enforcement primitive) is what this PR implements -- except the as:/item.* resolution itself, explicitly left open there for the implementing PR to decide against a real fixture, resolved here in the opposite direction from the document's own stated leaning (see D47's own filled_in gaps below)."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code, in the priority order previously agreed. This run covers WP-03 Part 2, the seventh PR toward that instruction, and the second of WP-03's own three parts.",
+    "read_as": "Implement WP-03 Part 2 (FOR_EACH, acceptance criteria A4-A5) largely as designed, resolving the design document's own explicitly-flagged as:/item.* gap by testing BOTH candidate readings against the real, already-committed examples/recursive-refinement/ fixture rather than deciding on paper -- and, in doing so, finding and fixing a second, more serious masked-failure gap in the collect mechanism the design document had not anticipated at all.",
+    "filled_in": [
+      {
+        "gap": "The WP-03 design document itself named a genuine, unresolved spec gap: §7.5 requires an `as:` field but the current engine model gives it no operational meaning beyond documentation, and proposed (but explicitly did not adopt) a NEW item.value/item.index namespace as the resolution, deferring the actual decision to whichever PR implements it, against a working test.",
+        "assumed": "Seed the current element into state.<as> -- a real, already-declared state channel -- as the PRIMARY mechanism (matching what examples/recursive-refinement/'s own already-committed refine-each-child/refine-each-recommendation nodes already assume, via state.child/state.recommendation), with item.value/item.index added as a free, zero-cost bonus convenience alongside it, not instead of it.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'measure, don't author' -- the real fixture's own already-committed, already-tested usage is measured evidence of what actually works; the design document's own item.*-only proposal was never built or tested against real content before this decision.",
+        "reversal_cost": "Low -- item.* is additive and already present regardless; a future pass could still migrate the real fixture off state.<as> without removing either mechanism.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "The real fixture's own collect: { output: ending, into: state.recurse_endings } names an output field ('ending') that is never written to any state.ending channel anywhere in either FOR_EACH's own do: chain -- the design document said nothing about a reserved output name, and this session's own first design (read output as a bare state-channel name) would have silently found nothing and never populated the collect target at all, discovered only by actually driving the real fixture past classify unexpectedly instead of reaching its own ending.",
+        "assumed": "Reserve 'ending' to mean the item's own terminal ending id (drive_result.answer.ending), reusing the exact same synthesised-key convention D40 already established for a PROCESS call's own mechanism.result.outputs (§9.1) -- not invented fresh, read off an existing precedent in this same codebase.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'hold conventions once' -- reusing D40's own already-established 'ending' synthesis convention rather than inventing a second, differently-shaped one that would mean the same thing.",
+        "reversal_cost": "Low -- additive; a future pass adding a real state.ending channel to a fixture would simply shadow this reserved reading only if it also renamed collect.output away from the literal string 'ending', which no existing fixture does.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D47 — FOR_EACH is now dispatched by the engine: an item is an isolated nested scope whose state/provenance never fold back except through collect; the current element is bound into a real, declared state.<as> channel (not the design document's own proposed item.*-only resolution, which the already-committed recursive-refinement fixture would have broken); collect's own output: \"ending\" reads the item's own terminal ending id.",
+      "problem": "The design document left as:'s own operational meaning as a named, unresolved gap, proposing item.* but explicitly deferring the real decision to a working implementation. Building it against the real, already-committed recursive-refinement fixture (predating this decision) found it already assumes state.<as>, not item.* -- and, while confirming that fix by actually driving the fixture end to end, found a SECOND, more serious gap in collect that the design document had not anticipated at all: a masked failure (collect silently finding nothing, never raising an error) rather than a clean refusal.",
+      "options_rejected": [
+        "Adopt item.* only, migrating the real fixture off state.<as> and dropping as:'s operational meaning (the design document's own stated leaning): rejected -- the real fixture already works and is already tested end to end elsewhere in this corpus; migrating it would be pure churn against a proposed-but-never-built alternative, the opposite of 'measure, don't author'.",
+        "Drop item.* entirely, as:-only: rejected -- item.index has no state.<as>-shaped equivalent worth its own channel declaration most of the time, so item.* still closes a real, separate gap; keeping both costs nothing since extra_namespaces (D45's own compose.* precedent) is already a zero-cost generic mechanism.",
+        "Require every collect.output value to already be list-shaped, avoiding the need for any wrapping heuristic: rejected -- this would have made the real fixture's own already-committed, otherwise well-formed collect: { output: ending, ... } usage impossible to satisfy at all, since a single ending id is inherently a scalar, not a list."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — _advance_for_each/_apply_collect/_for_each_success_target are additive, reached only for FOR_EACH nodes; _drive_scope's extra_namespaces parameter is additive with a default preserving every existing call site; no schema or durable-record shape change.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, all three new/replaced tests failed with the pre-existing EngineRefusal naming FOR_EACH as unsupported by this engine.",
+          "source": "git stash push -- src/sulis_workflows/engine/run.py, then running the three tests against the stashed (pre-fix) code; all three failed as expected before popping the stash back."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Before settling on the reserved-'ending' reading, an intermediate build (state.<as> seeding correct, collect.output read as a bare state-channel name) drove the real recursive-refinement fixture to an UNEXPECTED classify hand-off instead of reaching WORK_TREE_COMPLETE -- direct evidence the masked collect gap was real, not hypothetical, caught by testing against real content rather than only synthetic fixtures.",
+          "source": "Observed directly during development: running the real fixture's own test against the intermediate build produced a TOOL_STEP/classify answer where AnswerKind.ENDED was expected, tracked back to collect silently finding nothing at state.ending."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix: a 5-item FOR_EACH with max_concurrency: 2 opens exactly 2 items on the first call (each one's own record-step -- a CODE tool -- has a durable attempt) while item 2 remains untouched until one of the first 2 is reported complete (A4); collect gathers all 5 items' own terminal endings, in completion order, into an APPEND-reducer channel (A5); the real recursive-refinement fixture now runs two genuinely recursive FOR_EACH items to WORK_TREE_COMPLETE end to end.",
+          "source": "tests/engine/test_run.py's two new FOR_EACH tests and tests/examples/test_recursive_refinement.py's rewritten end-to-end test, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 461 tests (459 pre-existing + 2 new, after replacing 1 now-obsolete test); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "A future author wants a FOR_EACH item's own state to thread sequentially between items the way a PARALLEL branch's does (D46) rather than stay isolated -- this decision deliberately keeps the two node kinds' own isolation semantics distinct, per spec §7.5's own explicit wording; revisiting that would be a new, separately-scoped decision, not an extension of this one."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the CI-scoped path lists already in .github/workflows/ci.yml (unchanged this PR — no new top-level module was added).",
+      "location": "repository root",
+      "result": "461 passed, 0 failed (459 pre-existing + 2 new). ruff check found 2 findings (an undefined name, an unused variable in the new tests, both fixed), ruff format found 2 files needing reformatting (auto-fixed, 0 remaining after), mypy found 1 real type error (a str | None reassigned to list[str | None], fixed with an explicit Any annotation) then clean (\"Success: no issues found in 22 source files\")."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "When a design document proposes a new mechanism to close a gap it names, check whether a REAL, already-committed artifact already closes that same gap a different way before building the proposal as designed -- an untested proposal loses to measured, working precedent even when the proposal is the document's own stated preference.",
+      "incident": "The WP-03 design document proposed item.* as the as: resolution, explicitly as a preference, but the already-committed recursive-refinement fixture had already committed to state.<as> instead; building the document's own preferred option first would have required rewriting real, working, already-tested content to match an unbuilt idea, backwards from CLAUDE.md's own 'measure, don't author' principle.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "The WP-03 design document itself (docs/work-packages/WP-03-concurrent-execution.md) already flagged this exact gap as undecided -- worth citing this incident there or in a future design document as precedent for checking real committed content before adopting a document's own stated leaning.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A validated Process containing FOR_EACH now runs through the same next()/report() contract as every other node kind, isolated per item, collecting back through an explicit channel. Both runnable node kinds WP-03 set out to dispatch (PARALLEL/JOIN, D46; FOR_EACH, this decision) are done."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-03 Part 3 (validator checks: a JOIN not reachable from exactly one PARALLEL's own join field; a PARALLEL branch or FOR_EACH's do naming a node id that does not exist) -- the last of the eight originally planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "PARALLEL/JOIN/FOR_EACH are already engine-executed and correctly-behaved on every well-formed definition; the remaining validator checks catch specific AUTHORING mistakes at validation time rather than enabling new runtime capability, so no risk accrues to any already-working definition by waiting."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-03 Part 3 (validator checks) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions. This is the LAST of the eight originally planned PRs.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

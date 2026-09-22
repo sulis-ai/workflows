@@ -230,13 +230,16 @@ def test_a_clear_node_mints_a_work_package_end_to_end() -> None:
     assert answer.outcome == "SUCCESS"
 
 
-def test_a_complicated_node_is_refused_cleanly_at_the_for_each_fan_out() -> None:
-    """Confirms, by actually running it, that the documented engine limit
-    (FOR_EACH is validator-legal but not yet engine-executed) is real and
-    not just a claim in this translation's own comments: the run gets all
-    the way through classify and wbs-decompose, then refuses exactly at
-    the FOR_EACH node, with the same message engine/run.py's own module
-    docstring promises."""
+def test_a_complicated_node_recurses_through_for_each_over_two_wbs_children() -> None:
+    """WP-03 Part 2 (D47): FOR_EACH is now engine-executed — the documented
+    limit this test used to prove (a clean refusal at the fan-out) no
+    longer holds, replaced by driving the real thing: the run reaches
+    classify and wbs-decompose, then genuinely recurses into TWO wbs
+    children (one at a time, `refine-each-child` declares no
+    `max_concurrency`, default 1, spec §15), each child's own recursive
+    call itself reaching a CLEAR leaf and minting a work package, before
+    `completeness-gate` and `route-completeness` carry the run the rest of
+    the way to `WORK_TREE_COMPLETE`."""
 
     registry = _full_registry()
     process = _load_process()
@@ -286,10 +289,98 @@ def test_a_complicated_node_is_refused_cleanly_at_the_for_each_fan_out() -> None
             },
         )
     )
+    # Item 0's own recursive call reaches CLEAR -> classify -> mint, in a
+    # NESTED scope bubbled up untouched (§9.3, the same rule a PARALLEL
+    # branch's own hand-off already followed, D46, one level further in).
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "classify"
+    item0_recursion_scope = answer.scope
+    assert item0_recursion_scope is not None
+    assert "refine-each-child.item[0]" in item0_recursion_scope
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            item0_recursion_scope,
+            "classify",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"cynefin_domain": "CLEAR"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "mint-work-package"
+    assert answer.scope == item0_recursion_scope
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            item0_recursion_scope,
+            "mint-work-package",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "work_package": {
+                    "id": "wp-c1",
+                    "title": "Design the billing schema",
+                    "executing_process": "conformance-convergence@1.0.0",
+                }
+            },
+        )
+    )
+    # Item 0 is now ENDED -- max_concurrency's own default (1) only opens
+    # item 1 once item 0 is done, never both at once.
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "classify"
+    item1_recursion_scope = answer.scope
+    assert item1_recursion_scope is not None
+    assert "refine-each-child.item[1]" in item1_recursion_scope
+    assert item1_recursion_scope != item0_recursion_scope
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            item1_recursion_scope,
+            "classify",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"cynefin_domain": "CLEAR"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "mint-work-package"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            item1_recursion_scope,
+            "mint-work-package",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "work_package": {
+                    "id": "wp-c2",
+                    "title": "Build the billing API",
+                    "executing_process": "conformance-convergence@1.0.0",
+                }
+            },
+        )
+    )
+    # Both items ENDED -> refine-each-child's own ALL_COMPLETE policy is
+    # satisfied -> completeness-gate (a CODE tool, dispatched inline, the
+    # stub registry's own _CODE_RESPONSES already answers `passed: True`)
+    # -> route-completeness -> WORK_TREE_COMPLETE.
     assert answer.kind is AnswerKind.ENDED
-    assert answer.ending == "FAILED"
-    assert "refine-each-child" in answer.says
-    assert "FOR_EACH" in answer.says
+    assert answer.ending == "WORK_TREE_COMPLETE"
+    assert answer.outcome == "SUCCESS"
 
 
 def test_a_complex_node_dispatches_the_real_grounded_inquiry_process_and_resumes_its_hand_off() -> (

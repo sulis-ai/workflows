@@ -11,14 +11,17 @@ across the whole run.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
 from sulis_workflows.definition.model import (
+    CollectSpec,
     ControlRef,
     Decider,
     Ending,
     ErrorSpec,
+    ForEachNode,
     GateNode,
     Header,
     InputSpec,
@@ -4968,3 +4971,235 @@ def test_parallel_branch_produced_value_cannot_be_self_reviewed_after_the_join()
     )
     assert attempts[-1].verdict == Verdict.INDETERMINATE.value
     assert "own work" in (attempts[-1].output or {}).get("rationale", "")
+
+
+# ----------------------------------------------------------------------- FOR_EACH --
+
+
+def _record_tool() -> Tool:
+    return Tool(
+        header=_header("record-tool", "TOOL"),
+        output={"marker": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:record"),
+        effect="QUERY",
+        inputs={"value": InputSpec(type="any")},
+        permission="workflows.record-tool.dispatch",
+    )
+
+
+def _wait_tool() -> Tool:
+    return Tool(
+        header=_header("wait-tool", "TOOL"),
+        output={"note": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/wait"),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.wait-tool.dispatch",
+    )
+
+
+def _verify_tool() -> Tool:
+    return Tool(
+        header=_header("verify-tool", "TOOL"),
+        output={"captured": OutputSpec(type="any")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:verify"),
+        effect="QUERY",
+        inputs={"endings": InputSpec(type="any")},
+        permission="workflows.verify-tool.dispatch",
+    )
+
+
+def _for_each_process(max_concurrency: int | None = None) -> Process:
+    return Process(
+        header=_header("for-each-process", "PROCESS"),
+        start="fan-out",
+        permission="workflows.for-each-process.start",
+        nodes={
+            "fan-out": ForEachNode(
+                id="fan-out",
+                over="state.items",
+                as_="current",
+                do="record-step",
+                max_concurrency=max_concurrency,
+                join="ALL_COMPLETE",
+                collect=CollectSpec(output="ending", into="state.item_endings"),
+                next="verify-step",
+            ),
+            "record-step": StepNode(
+                id="record-step",
+                tool="record-tool@1",
+                in_={"value": "state.current"},
+                out={"marker": "state.marker"},
+                next="wait-step",
+            ),
+            "wait-step": StepNode(
+                id="wait-step",
+                tool="wait-tool@1",
+                in_={},
+                out={"note": "state.note"},
+                end="ITEM_DONE",
+            ),
+            "verify-step": StepNode(
+                id="verify-step",
+                tool="verify-tool@1",
+                in_={"endings": "state.item_endings"},
+                out={"captured": "state.captured"},
+                end="ALL_DONE",
+            ),
+        },
+        endings={
+            "ITEM_DONE": Ending(outcome="SUCCESS", says="Item done."),
+            "ALL_DONE": Ending(outcome="SUCCESS", says="All done."),
+        },
+        state={
+            "items": StateChannel(
+                type="list<any>", reducer="REPLACE", default=[1, 2, 3, 4, 5]
+            ),
+            "current": StateChannel(type="any", reducer="REPLACE"),
+            "marker": StateChannel(type="any", reducer="REPLACE"),
+            "note": StateChannel(type="any", reducer="REPLACE"),
+            "item_endings": StateChannel(
+                type="list<any>", reducer="APPEND", default=[]
+            ),
+            "captured": StateChannel(type="any", reducer="REPLACE"),
+        },
+    )
+
+
+class _RecordVerifyCodeToolAdapter:
+    def __init__(self):
+        self.identity = StubCodeToolAdapter().identity
+        self.verify_calls: list[Any] = []
+
+    async def call(self, ref, inputs, *, platform_id, run_id):
+        if ref == "mod:record":
+            return {"marker": f"recorded-{inputs.get('value')}"}
+        if ref == "mod:verify":
+            self.verify_calls.append(inputs.get("endings"))
+            return {"captured": inputs.get("endings")}
+        raise AssertionError(f"unexpected ref {ref!r}")
+
+
+def _for_each_ctx(code_tool) -> tuple[EngineContext, StubRecordsAdapter]:
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=code_tool,
+        external_tool=StubExternalToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([_record_tool(), _wait_tool(), _verify_tool()]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    return ctx, records
+
+
+def test_for_each_max_concurrency_throttles_how_many_items_open_at_once():
+    """A4: a FOR_EACH over a 5-item list with max_concurrency: 2 opens
+    exactly 2 items on the first next() call (each one's own `record-step`
+    — a CODE tool, dispatched inline — has a durable attempt), and only
+    opens a 3rd once one of the first 2 is reported complete. Also proves
+    `as:` binding works for real: record-step reads `state.current`,
+    seeded per item from `over`'s own element."""
+    process = _for_each_process(max_concurrency=2)
+    code_tool = _RecordVerifyCodeToolAdapter()
+    ctx, records = _for_each_ctx(code_tool)
+    run_id = "run-for-each-1"
+
+    answer = _run(next_(process, run_id, "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "wait-step"
+    assert answer.scope == "root/fan-out.item[0]"
+
+    item1_attempts = _run(
+        records.get_attempts(
+            run_id,
+            "root/fan-out.item[1]",
+            "record-step",
+            platform_id="tenant-1",
+            run_id=run_id,
+        )
+    )
+    assert len(item1_attempts) == 1  # item 1 was ALSO opened, within budget
+
+    item2_attempts = _run(
+        records.get_attempts(
+            run_id,
+            "root/fan-out.item[2]",
+            "record-step",
+            platform_id="tenant-1",
+            run_id=run_id,
+        )
+    )
+    assert item2_attempts == []  # item 2 held back by the throttle
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            "root/fan-out.item[0]",
+            "wait-step",
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"note": "done-0"},
+        )
+    )
+    # Item 0 is now ENDED -- item 1 (already open) is next reported on,
+    # but item 2 should now ALSO have been opened, freed by item 0's own
+    # completion.
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "wait-step"
+    assert answer.scope == "root/fan-out.item[1]"
+
+    item2_attempts_after = _run(
+        records.get_attempts(
+            run_id,
+            "root/fan-out.item[2]",
+            "record-step",
+            platform_id="tenant-1",
+            run_id=run_id,
+        )
+    )
+    assert len(item2_attempts_after) == 1
+
+
+def test_for_each_collect_accumulates_each_items_own_ending_in_order():
+    """A5: collect: { output: ending, into: state.item_endings } gathers
+    each item's own terminal ending id — not a state channel named
+    'ending' (none exists on this fixture), the same reserved-name
+    convention `mechanism.result.outputs`'s own 'ending' key already uses
+    for a PROCESS call (D40) — into an APPEND channel, in completion
+    order, with each item's own single string wrapped into a one-element
+    list before the reducer applies (D47)."""
+    process = _for_each_process()  # default max_concurrency: 1 (spec S15)
+    code_tool = _RecordVerifyCodeToolAdapter()
+    ctx, _records = _for_each_ctx(code_tool)
+    run_id = "run-for-each-2"
+
+    answer = _run(next_(process, run_id, "root", ctx, inputs={}, host_inputs={}))
+    for index in range(5):
+        assert answer.kind is AnswerKind.TOOL_STEP
+        assert answer.node_id == "wait-step"
+        assert answer.scope == f"root/fan-out.item[{index}]"
+        answer = _run(
+            report(
+                process,
+                run_id,
+                answer.scope,
+                "wait-step",
+                ctx,
+                inputs={},
+                host_inputs={},
+                output={"note": f"done-{index}"},
+            )
+        )
+
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "ALL_DONE"
+    assert answer.outcome == "SUCCESS"
+    assert code_tool.verify_calls == [["ITEM_DONE"] * 5]
