@@ -57,7 +57,7 @@ import asyncio
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -83,8 +83,10 @@ from sulis_workflows.definition.model import (
     Decider,
     Ending,
     GateNode,
+    JoinNode,
     Mechanism,
     Node,
+    ParallelNode,
     Process,
     RouteNode,
     RouteTarget,
@@ -789,6 +791,9 @@ async def _drive_scope(
     *,
     depth: int = 0,
     pending_decision: tuple[str, str, Mapping[str, Any]] | None = None,
+    initial_state: Mapping[str, Any] | None = None,
+    initial_produced_by: Mapping[str, str] | None = None,
+    require_permission: bool = True,
 ) -> _DriveResult:
     """Drives one scope level — the top-level run (`depth == 0`) or a
     nested `PROCESS`-mechanism call (§9, delegated from
@@ -804,8 +809,18 @@ async def _drive_scope(
     into a child scope and "the child already finished, keep going" are
     the same code, read from the same already-durable attempt records
     (§12.1: "nothing is held in memory between calls").
+
+    A `PARALLEL` branch (WP-03 Part 1, D46) is driven through this SAME
+    function too, but it is not a fresh scope's own beginning the way a
+    `PROCESS` call's child is: `initial_state`/`initial_produced_by` seed
+    it from the parent's own CURRENT values (spec §2.2's `state.<channel>`
+    is one process-wide namespace — a branch is not isolated the way a
+    `FOR_EACH` item is, §7.5), and `require_permission=False` skips the
+    `depth == 0` permission gate below, since a branch has no `permission`
+    of its own to check separately (it shares the parent run's own, already
+    checked once at the true top level).
     """
-    if depth == 0:
+    if depth == 0 and require_permission:
         if process.permission is None:
             return _DriveResult(
                 answer=_forbidden(
@@ -824,10 +839,14 @@ async def _drive_scope(
                 answer=_forbidden(process, decision.rationale or "permission refused")
             )
 
-    state: dict[str, Any] = {
-        name: (channel.default if channel.has_default else None)
-        for name, channel in scope_def.state.items()
-    }
+    state: dict[str, Any] = (
+        dict(initial_state)
+        if initial_state is not None
+        else {
+            name: (channel.default if channel.has_default else None)
+            for name, channel in scope_def.state.items()
+        }
+    )
     steps: dict[str, Any] = {}
     node_id = scope_def.start
 
@@ -851,13 +870,17 @@ async def _drive_scope(
     # each STEP that wrote state, from that attempt's own durable
     # `performed_by` (so it is correct on a pure replay too, not only on
     # the call where the step first ran).
-    produced_by: dict[str, str] = {}
+    produced_by: dict[str, str] = (
+        dict(initial_produced_by) if initial_produced_by is not None else {}
+    )
 
     try:
         while True:
             if node_id not in scope_def.nodes:
                 return _DriveResult(
-                    answer=_ending_answer(scope_def.endings, node_id), final_state=state
+                    answer=_ending_answer(scope_def.endings, node_id),
+                    final_state=state,
+                    produced_by=dict(produced_by),
                 )
 
             node = scope_def.nodes[node_id]
@@ -922,10 +945,38 @@ async def _drive_scope(
                 )
                 if advance.took_loop:
                     gate_loop_taken[node_id] = gate_loop_taken.get(node_id, 0) + 1
+            elif isinstance(node, ParallelNode):
+                advance = await _advance_parallel(
+                    process,
+                    scope_def,
+                    node,
+                    node_id,
+                    run_state,
+                    run_id,
+                    scope,
+                    ctx,
+                    depth,
+                    produced_by,
+                )
+            elif isinstance(node, JoinNode):
+                advance = await _advance_join(
+                    process,
+                    scope_def,
+                    node,
+                    node_id,
+                    visit_attempts,
+                    baseline,
+                    run_state,
+                    run_id,
+                    scope,
+                    ctx,
+                    depth,
+                    produced_by,
+                )
             else:
                 raise EngineRefusal(
-                    f"node {node_id!r} is a {type(node).__name__} node — PARALLEL/JOIN/"
-                    "FOR_EACH are not supported by this engine yet (WP-03)."
+                    f"node {node_id!r} is a {type(node).__name__} node — FOR_EACH is "
+                    "not supported by this engine yet (WP-03 Part 2)."
                 )
 
             if advance.answer is not None:
@@ -937,6 +988,8 @@ async def _drive_scope(
                 if identity is not None:
                     for path in node.out.values():
                         produced_by[path] = identity
+            if advance.produced_by:
+                produced_by.update(advance.produced_by)
             steps[node_id] = (
                 advance.step_record
                 if advance.step_record is not None
@@ -990,6 +1043,13 @@ class _Advance:
     keeps the old "however many attempts now exist" behaviour, which is
     exactly right there: a ROUTE's own visit is always exactly one
     attempt, and a hand-off records nothing yet to bump past."""
+    produced_by: Mapping[str, str] | None = None
+    """WP-03 Part 1 (D46): a `PARALLEL`/`JOIN` resolution's own folded
+    `produced_by` (from `_drive_parallel_branches`, itself folded from each
+    branch's own `_DriveResult.produced_by`) — merged into `_drive_scope`'s
+    OWN tracking regardless of node type, unlike `performed_by` above
+    (STEP-only, since only a STEP's own `out:` mapping names which paths
+    it wrote)."""
 
 
 def _resolve_tool(ref: str, registry: Registry) -> Tool:
@@ -1060,18 +1120,40 @@ def _resolve_scope(process: Process, scope: str, registry: Registry) -> _ScopeDe
     resolve a (possibly nested) target node before recording an attempt;
     `_drive_scope`'s own descent needs run-state as well, so it computes
     each child's `_ScopeDef` inline via `_scope_def_for_mechanism` rather
-    than calling this."""
+    than calling this.
+
+    WP-03 Part 1 (D46): a `PARALLEL` branch's own segment
+    (`<parallel-node-id>.branch[<index>]`) is checked first, since it is
+    never a real key in `scope_def.nodes` — a branch shares the PARENT
+    level's own node map (not a separately-versioned Process the way a
+    `PROCESS` call's child is, §9 vs this), so descending into one only
+    ever changes `start`, never `nodes`/`state`/`endings`."""
     scope_def = _scope_def_for_process(process)
-    for node_id in scope.split("/")[1:]:
-        node = scope_def.nodes.get(node_id)
+    for segment in scope.split("/")[1:]:
+        branch_match = _BRANCH_SCOPE_SEGMENT_RE.match(segment)
+        if branch_match is not None:
+            parallel_node = scope_def.nodes.get(branch_match.group("node"))
+            if not isinstance(parallel_node, ParallelNode):
+                raise EngineRefusal(
+                    f"scope segment {segment!r} does not name a PARALLEL node "
+                    "in its own level"
+                )
+            index = int(branch_match.group("index"))
+            if index >= len(parallel_node.branches):
+                raise EngineRefusal(
+                    f"scope segment {segment!r}: branch index out of range"
+                )
+            scope_def = replace(scope_def, start=parallel_node.branches[index])
+            continue
+        node = scope_def.nodes.get(segment)
         if not isinstance(node, StepNode):
             raise EngineRefusal(
-                f"scope segment {node_id!r} is not a STEP node in its own level"
+                f"scope segment {segment!r} is not a STEP node in its own level"
             )
         tool = _resolve_tool(node.tool, registry)
         if tool.mechanism.kind != "PROCESS":
             raise EngineRefusal(
-                f"scope segment {node_id!r} does not call a process (§9)"
+                f"scope segment {segment!r} does not call a process (§9)"
             )
         scope_def, _ = _scope_def_for_mechanism(tool.mechanism, scope_def, registry)
     return scope_def
@@ -1098,10 +1180,21 @@ class _DriveResult:
     """`_drive_scope`'s own return — one layer richer than a bare
     `NextAnswer`: `_advance_process_call` needs a completed child scope's
     final accumulated state to evaluate `mechanism.result.outputs` paths
-    (§9.1), which `NextAnswer` alone has nowhere to carry."""
+    (§9.1), which `NextAnswer` alone has nowhere to carry.
+
+    `produced_by` (WP-03 Part 1, D46) is the same reason: a `PARALLEL`
+    branch's own `_drive_scope` call builds its own local §7.6
+    `produced_by` map for the STEPs it drives, which would otherwise be
+    silently lost the moment that call returns — leaving a GATE reached
+    AFTER the branch's own join with no way to tell it was reviewing a
+    value THAT SAME identity had just produced inside the branch (a
+    "no deciding on your own work" bypass, not merely a lost provenance
+    detail). `_drive_parallel_branches` folds this back into the
+    OUTER scope's own tracking exactly as it does `final_state`."""
 
     answer: NextAnswer
     final_state: Mapping[str, Any] | None = None
+    produced_by: Mapping[str, str] | None = None
 
 
 def _producer_identity(performed_by: str | None) -> str | None:
@@ -2414,6 +2507,249 @@ async def _report_compose_child(
         host_inputs,
     )
     return result.answer
+
+
+# ---------------------------------------------------------------------- parallel and join --
+
+_BRANCH_SCOPE_SEGMENT_RE = re.compile(r"^(?P<node>.+)\.branch\[(?P<index>\d+)\]$")
+
+
+async def _drive_parallel_branches(
+    process: Process,
+    scope_def: _ScopeDef,
+    parallel_node: ParallelNode,
+    parallel_node_id: str,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+    outer_produced_by: Mapping[str, str],
+) -> tuple[NextAnswer | None, dict[str, Any], list[tuple[str, str]], dict[str, str]]:
+    """Drives every one of `parallel_node.branches`, in declared order,
+    each as its own nested scope (`{scope}/{parallel_node_id}.branch[{i}]`)
+    — the same §9.3 nested-scope pattern a `PROCESS` call's child already
+    uses, applied one level down, but sharing `scope_def.nodes` (not a
+    separate node map: a branch is not an independently-versioned Process,
+    just `branches`'s own node ids inside THIS process's `nodes:`).
+
+    Shared by `_advance_parallel` (reached first, on every replay, since
+    the walk always passes through the `PARALLEL` node before its own
+    `JOIN`) and `_advance_join` (which independently re-derives the same
+    result to get each branch's own final `outcome` — cheap, since every
+    branch's own attempts are already durable; `_drive_scope` itself does
+    no new work on a branch already replayed to its own ending).
+
+    Returns `(pending, folded_state, endings, folded_produced_by)`:
+      - `pending`: the first branch's own not-yet-`ENDED` answer, the
+        moment one is found, bubbled up untouched — `None` once every
+        branch has reached `ENDED`. Never short-circuited early even once
+        a policy is ALREADY decided by fewer than every branch finishing
+        (D46: this engine has no primitive to cancel a still-open branch's
+        own pending hand-off, so "wait for all of them, always" is the
+        only construct built from what already exists — see D46 for the
+        spec's own ambiguous "or can no longer be met" wording, §7.4).
+      - `folded_state`: each branch's own state writes, threaded through
+        SEQUENTIALLY in branch order — spec §2.2 has ONE process-wide
+        `state` namespace (a branch is not isolated the way a `FOR_EACH`
+        item is, §7.5's own explicit "isolated scope" wording, absent
+        from §7.4) — so a later branch's own STEPs, and everything after
+        the `JOIN`, read whatever an earlier branch already wrote.
+      - `endings`: `(ending_id, outcome)` per branch, in declared order —
+        `_advance_join`'s own input to `policy`.
+      - `folded_produced_by`: §7.6's own "no deciding on your own work"
+        provenance, threaded and folded the same way `folded_state` is —
+        without this, a GATE reached after the join could not tell it was
+        reviewing a value the SAME identity had just produced inside a
+        branch (D46).
+    """
+    state = dict(run_state["state"])
+    produced_by = dict(outer_produced_by)
+    endings: list[tuple[str, str]] = []
+    for index, branch_start in enumerate(parallel_node.branches):
+        branch_scope_def = replace(scope_def, start=branch_start)
+        branch_scope = f"{scope}/{parallel_node_id}.branch[{index}]"
+        drive_result = await _drive_scope(
+            process,
+            branch_scope_def,
+            run_id,
+            branch_scope,
+            ctx,
+            run_state["inputs"],
+            run_state["host"],
+            depth=depth,
+            initial_state=state,
+            initial_produced_by=produced_by,
+            require_permission=False,
+        )
+        if drive_result.answer.kind is not AnswerKind.ENDED:
+            return drive_result.answer, state, endings, produced_by
+        state = (
+            dict(drive_result.final_state)
+            if drive_result.final_state is not None
+            else state
+        )
+        if drive_result.produced_by:
+            produced_by.update(drive_result.produced_by)
+        assert drive_result.answer.ending is not None
+        assert drive_result.answer.outcome is not None
+        endings.append((drive_result.answer.ending, drive_result.answer.outcome))
+    return None, state, endings, produced_by
+
+
+async def _advance_parallel(
+    process: Process,
+    scope_def: _ScopeDef,
+    node: ParallelNode,
+    node_id: str,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+    outer_produced_by: Mapping[str, str],
+) -> _Advance:
+    """§7.4: "every branch start is handed out." A `PARALLEL` node has no
+    `next`/`end` of its own — it always routes to `node.join` once every
+    branch has reached `ENDED`; `_advance_join`, reached next in this SAME
+    walk (the walk always passes through here first), evaluates the
+    policy and does the actual routing. Nothing is durably recorded at
+    THIS node's own key — like `ROUTE`'s non-looping case, it is a pure,
+    replay-cheap fan-out with nothing of its own worth an attempt record
+    (unlike `ROUTE`, it has no loop-budget count to make durable either)."""
+    (
+        pending,
+        folded_state,
+        _endings,
+        folded_produced_by,
+    ) = await _drive_parallel_branches(
+        process,
+        scope_def,
+        node,
+        node_id,
+        run_state,
+        run_id,
+        scope,
+        ctx,
+        depth,
+        outer_produced_by,
+    )
+    if pending is not None:
+        return _Advance(answer=pending)
+    return _Advance(
+        next_node_id=node.join,
+        state=folded_state,
+        produced_by=folded_produced_by,
+        visit_attempts_used=0,
+    )
+
+
+def _find_parallel_for_join(
+    scope_def: _ScopeDef, join_node_id: str
+) -> tuple[str, ParallelNode]:
+    for candidate_id, candidate in scope_def.nodes.items():
+        if isinstance(candidate, ParallelNode) and candidate.join == join_node_id:
+            return candidate_id, candidate
+    raise EngineRefusal(
+        f"join {join_node_id!r} is not reachable from exactly one PARALLEL's own "
+        "`join` field (V11 should have refused this at validation time)"
+    )
+
+
+def _join_success_target(node: JoinNode) -> str:
+    if node.next is not None:
+        return node.next
+    if node.end is not None:
+        return node.end
+    raise EngineRefusal(
+        f"join {node.id!r} satisfied with no `next` or `end` declared (V7 gap)"
+    )
+
+
+async def _advance_join(
+    process: Process,
+    scope_def: _ScopeDef,
+    node: JoinNode,
+    node_id: str,
+    attempts: list[AttemptRecord],
+    baseline: int,
+    run_state: Mapping[str, Any],
+    run_id: str,
+    scope: str,
+    ctx: EngineContext,
+    depth: int,
+    outer_produced_by: Mapping[str, str],
+) -> _Advance:
+    """§7.4: "the join runs exactly once, when its policy is met" —
+    evaluated only once `_drive_parallel_branches` confirms every one of
+    the corresponding `PARALLEL`'s own branches has reached `ENDED`
+    (structurally guaranteed by the time this node is ever reached, since
+    `_advance_parallel` gates on exactly that before ever routing here —
+    the `pending` branch below is defensive only, for a hand-built,
+    validation-bypassed `Process`). `policy` (default `ALL_SUCCESS`, spec
+    §15) is evaluated fresh on every visit — deterministic, from
+    already-durable branch endings, so recomputing costs nothing and needs
+    no replay-branch reconstruction the way `ROUTE`'s own loop-budget
+    count does; the durable attempt written here (once, D46) is for
+    §12.2's own "every attempt of every node" auditability, not because
+    a later replay needs to read it back to resolve anything."""
+    parallel_node_id, parallel_node = _find_parallel_for_join(scope_def, node_id)
+    pending, folded_state, endings, folded_produced_by = await _drive_parallel_branches(
+        process,
+        scope_def,
+        parallel_node,
+        parallel_node_id,
+        run_state,
+        run_id,
+        scope,
+        ctx,
+        depth,
+        outer_produced_by,
+    )
+    if pending is not None:
+        return _Advance(answer=pending)
+
+    policy = node.policy or fmt_defaults.JOIN_POLICY
+    outcomes = [outcome for _, outcome in endings]
+    if policy == "ALL_SUCCESS":
+        satisfied = all(outcome == "SUCCESS" for outcome in outcomes)
+    elif policy == "ANY_SUCCESS":
+        satisfied = any(outcome == "SUCCESS" for outcome in outcomes)
+    else:  # ALL_COMPLETE — every branch reached SOME ending, already guaranteed
+        satisfied = True
+
+    if not attempts:
+        key = AttemptKey(run=run_id, scope=scope, node=node_id, attempt=baseline + 1)
+        record = AttemptRecord(
+            key=key,
+            inputs={},
+            output={
+                "policy": policy,
+                "branch_endings": [ending for ending, _ in endings],
+                "branch_outcomes": outcomes,
+                "satisfied": satisfied,
+            },
+            control_results=[],
+            verdict="SATISFIED" if satisfied else "NOT_SATISFIED",
+            performed_by="ENGINE:join",
+            started_at=_now(),
+            ended_at=_now(),
+        )
+        await _record_attempt(ctx, record, run_id=run_id)
+
+    if satisfied:
+        next_id = _join_success_target(node)
+    elif node.on_join_failed is not None:
+        next_id = _resolve_route_target(node.on_join_failed)
+    else:
+        next_id = fmt_defaults.ON_JOIN_FAILED
+
+    return _Advance(
+        next_node_id=next_id,
+        state=folded_state,
+        produced_by=folded_produced_by,
+        visit_attempts_used=1,
+    )
 
 
 # ----------------------------------------------------------------------------- ROUTE --

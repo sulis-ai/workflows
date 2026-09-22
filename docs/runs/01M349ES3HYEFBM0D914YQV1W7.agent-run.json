@@ -1,0 +1,144 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M349ES3HYEFBM0D914YQV1W7",
+  "started_at": "2026-09-22T10:00:00Z",
+  "completed_at": "2026-09-22T11:45:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-03 Part 1 (PARALLEL + JOIN) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/parallel-join",
+  "summary_for_principal": "Processes can now run several tracks of work side by side — checking a proposal from three angles at once, say — continuing only once every track finishes, per a rule the author picks (all must succeed, any one is enough, or just that all finished regardless).\n\nWhile building this I found and closed a real security gap the design would otherwise have introduced: an approval step after this parallel work could, in one layout, end up approving work it had just done itself — the exact self-approval this format exists to prevent. Fixed before shipping, not merely noted.\n\nI also read one design-spec sentence as ambiguous — whether a decision can be reached the moment it's certain, before every track finishes — and chose the safer reading: always wait for every track, since nothing here can yet abandon work partway through. Flagged for the spec to state this explicitly.\n\nFull test suite: 459 passed. Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when green.\n2. First of three planned parts for parallel work. Next: iterating over lists of items the same way.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/run.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Five new tests: A1 (all-success join), A2 (an early branch failure does not short-circuit the join), A3 (ANY_SUCCESS does not short-circuit on the first success), A6 (a branch's own process call hits the same depth limit an un-nested call would), and a regression proving a branch-produced value cannot be self-reviewed by a GATE reached after the join."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D46 added to §18; §7.4 gains the engine-executed operational paragraph; §9.2 notes a branch shares its parent's depth; §12.1/§12.2 note PARALLEL/JOIN dispatch and the join's own audit record."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D46."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-03-concurrent-execution.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 1's own design (reuse _drive_scope for a branch, evaluate policy against each branch's own outcome, A1-A3/A6 acceptance criteria) is what this PR implements — except for the branch/parent state relationship and the join's own early-exit question, both left unstated there and resolved here (see D46's own filled_in gaps below)."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code, in the priority order previously agreed (WP-05, then WP-04, then WP-03 last). This run covers WP-03 Part 1, the sixth of the now-extended PR sequence, and the first of WP-03's own three parts.",
+    "read_as": "Implement WP-03 Part 1 (PARALLEL + JOIN, acceptance criteria A1-A3 and A6) largely as designed, resolving two genuine gaps the design document itself left open rather than guessing silently: how a branch's own state relates to the parent's (one shared, process-wide namespace, per spec §2.2 and the absence of §7.5's own explicit \"isolated\" wording for PARALLEL), and whether the join can short-circuit once its policy is already decidable before every branch finishes (no — this engine has no cancellation primitive for a still-open branch).",
+    "filled_in": [
+      {
+        "gap": "The design document says a branch is driven through _drive_scope \"the same shape one level down\" as a PROCESS call's own child, but does not say whether a branch's own state is isolated (like a FOR_EACH item's, spec §7.5) or shared with the parent and its sibling branches.",
+        "assumed": "One shared, process-wide state namespace (spec §2.2 declares exactly one), seeded into each branch from the parent's current state and threaded sequentially branch-to-branch, then folded back into the parent once every branch ends. This is the only reading consistent with §7.4's own \"two branches writing one REPLACE channel is refused\" sentence, which is only a meaningful risk under a SHARED namespace — an isolated one could never have two branches contending for the same channel at all.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "Spec §2.2's single state.<channel> namespace, cross-checked against §7.4's own REPLACE-conflict sentence and §7.5's explicit isolation language (present for FOR_EACH, absent for PARALLEL) as textual evidence the difference is deliberate.",
+        "reversal_cost": "Medium — switching to isolated branch state later would need a new merge-back rule for whatever a branch's own output should still reach the parent with (this pass's threading approach reuses zero new machinery, an isolation model would need to invent some).",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "Spec §7.4 says \"the join runs exactly once, when its policy is met or can no longer be [met]\" — read literally, this could license an early exit the moment a policy's outcome is already decidable (e.g. ANY_SUCCESS satisfied by the first branch to succeed, while two remain open).",
+        "assumed": "Never short-circuit — always wait for every branch to reach its own ending before evaluating the join, regardless of whether the policy's answer is already knowable sooner. This engine has no primitive to cancel a still-open branch's own pending hand-off; an early exit would either abandon that branch's scope permanently unresolved (breaking §12.2's own write-once-per-node promise) or require inventing a new cancellation primitive this pass does not build.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'refuse rather than guess' precedent (D26/D34/D38/D45) applied to a genuinely ambiguous spec sentence — chose the reading buildable from what already exists rather than inventing a new primitive to support the other reading.",
+        "reversal_cost": "Low — an early-exit optimisation is additive on top of this pass's own \"wait for all\" baseline, addable later once a cancellation primitive exists, without changing anything this pass built.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D46 — PARALLEL/JOIN are now dispatched by the engine: a branch is a nested scope sharing the parent's node map and process-wide state, terminating via an ordinary declared ending; the join always waits for every branch; a latent self-review bypass this shape would otherwise reopen is closed by threading produced_by provenance out of a branch.",
+      "problem": "The design document's own reuse-_drive_scope approach left two things unstated (branch/parent state relationship, whether the join can short-circuit) and, while implementing the shared-state design those gaps forced, a third, more serious issue surfaced unprompted: a GATE's own 'no deciding on your own work' check (§7.6) depends on produced_by, a purely local dict inside _drive_scope's own call — never returned, so a value a BRANCH's own step wrote would be invisible to a GATE reached after the join, silently defeating that separation-of-duty control for exactly the case PARALLEL makes newly reachable.",
+      "options_rejected": [
+        "Isolate branch state entirely, each branch getting its own private state dict never folded back: rejected — contradicts spec §2.2's single-namespace model directly and would make the spec's own §7.4 worked example (a join feeding a step that reads what each lens branch computed) impossible to express.",
+        "Ship the produced_by gap as a documented, accepted limitation (the same treatment D45 gave the inherited backoff-sleep gap): rejected — that precedent fits a minor, bounded operational nuance; this gap is a security-relevant control silently regressing for a genuinely reachable, easily-authored shape, precisely the 'bad-but-conformant attack' CLAUDE.md's own principles ask this format to survive rather than narrate.",
+        "Let _advance_join short-circuit once its policy is already decidable: rejected — no primitive exists in this engine to cleanly abandon a still-open branch's own pending hand-off; building one is a materially bigger, separately-scoped feature."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — every new field (_DriveResult.produced_by, _Advance.produced_by, _drive_scope's three new keyword parameters) is additive with a default preserving prior behaviour at every existing call site; _advance_parallel/_advance_join/_drive_parallel_branches are reached only for PARALLEL/JOIN nodes.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, all five new tests failed with the pre-existing D34-era EngineRefusal naming PARALLEL/JOIN as unsupported by this engine.",
+          "source": "git stash push -- src/sulis_workflows/engine/run.py, then running the five new tests against the stashed (pre-fix) code; all five failed as expected before popping the stash back."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix: three branches driven one report() at a time correctly reach an ALL_SUCCESS join only once every branch has independently succeeded (A1); an early branch failure does not short-circuit the join while the other two remain pending, only routing via on_join_failed once they also finish (A2); ANY_SUCCESS does not short-circuit on the first success either (A3); a branch's own PROCESS call hits the identical max_depth=0 exhaustion an un-nested call already hits, proving depth is neither reset nor double-counted by PARALLEL nesting (A6).",
+          "source": "tests/engine/test_run.py's four new PARALLEL/JOIN acceptance tests, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "A GATE reached after a PARALLEL's own join, reviewing a value a branch's own SKILL step had just written under the SAME identity as the gate's own agent decider, is correctly refused as self-review (INDETERMINATE, 'own work' in the rationale) — the exact separation-of-duty property the existing top-level test already proves for an un-nested STEP, now proven to hold across a branch boundary too.",
+          "source": "tests/engine/test_run.py::test_parallel_branch_produced_value_cannot_be_self_reviewed_after_the_join, passing; mirrors the pre-existing test_gate_agent_decider_cannot_decide_on_its_own_work's own assertion shape exactly."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 459 tests (454 pre-existing + 5 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path (no new top-level module, so no ci.yml path-list change was needed).",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "A future pass builds a genuine cancellation primitive for a still-open branch's own pending hand-off — the 'wait for every branch, always' choice here could then be relaxed to an early exit once a policy is already decidable, the option explicitly rejected above for lack of that primitive."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the CI-scoped path lists already in .github/workflows/ci.yml (unchanged this PR — no new top-level module was added).",
+      "location": "repository root",
+      "result": "459 passed, 0 failed (454 pre-existing + 5 new). ruff check 0 findings, ruff format found 2 files needing reformatting (auto-fixed, 0 remaining after), mypy clean (\"Success: no issues found in 22 source files\")."
+    }
+  ],
+  "untouched": [],
+  "lessons": [
+    {
+      "maxim": "A shared-state design's own second-order effects (here: provenance tracking, not just the state values themselves) need the same threading discipline as the primary value being threaded — checking only 'does the state value survive' misses a control that depends on WHO wrote it, not just what was written.",
+      "incident": "Seeding and folding a PARALLEL branch's own state writes back into the parent was the obvious, necessary fix for branch reads/writes to work at all; produced_by (the identity that wrote each path) is a SEPARATE piece of bookkeeping _drive_scope already builds for STEPs, and it would have been silently dropped at exactly the same fold-back point had this pass not traced through what a GATE's own self-review check actually depends on before considering the state-threading work complete.",
+      "applies_to": "AGENT_INSTRUCTIONS",
+      "destination": "CLAUDE.md's 'Survive the bad-but-conformant attack' principle — this incident is a concrete instance of that principle catching a real gap during design, worth citing as precedent the next time a new execution shape threads state through an existing security-relevant check.",
+      "confidence": "HIGH"
+    }
+  ],
+  "where_next": {
+    "ready_now": [
+      "A validated Process containing PARALLEL and JOIN nodes now runs through the same next()/report() contract as every other node kind. The sixth PR toward the principal's 'Build all' instruction, and the first of WP-03's own three parts."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-03 Part 2 (FOR_EACH: item.* namespace, max_concurrency throttling, collect) and Part 3 (depth interaction + validator checks) — the remaining two of eight planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "FOR_EACH remains a clean, honest EngineRefusal (naming FOR_EACH specifically now, not PARALLEL/JOIN/FOR_EACH together) until WP-03 Part 2 lands — no risk accrues by waiting."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-03 Part 2 (FOR_EACH) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

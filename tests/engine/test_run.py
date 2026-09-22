@@ -22,15 +22,18 @@ from sulis_workflows.definition.model import (
     GateNode,
     Header,
     InputSpec,
+    JoinNode,
     LoopSpec,
     Mechanism,
     OutputSpec,
+    ParallelNode,
     Process,
     ProcessDefaults,
     RetrySpec,
     RouteNode,
     RouteOption,
     RouteTarget,
+    StateChannel,
     StepNode,
     Tool,
 )
@@ -4472,3 +4475,496 @@ def test_step_appending_a_real_list_to_an_append_channel_accumulates() -> None:
     assert answer.kind is AnswerKind.ENDED
     assert answer.ending == "DONE"
     assert captured["findings"] == ["f1", "f2", "f3"]
+
+
+# -------------------------------------------------------------------- PARALLEL/JOIN --
+
+
+def _lens_tool(name: str) -> Tool:
+    return Tool(
+        header=_header(name, "TOOL"),
+        output={"verdict": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref=f"skills/{name}"),
+        effect="QUERY",
+        inputs={},
+        permission=f"workflows.{name}.dispatch",
+    )
+
+
+def _lens_parallel_process(policy: str = "ALL_SUCCESS") -> Process:
+    """§7.4's own worked example, translated into a runnable fixture:
+    three SKILL-mechanism branches, each ending via its own declared
+    checkpoint ending, joined by `policy` (default `ALL_SUCCESS`, spec
+    §15)."""
+    return Process(
+        header=_header("lens-triad-process", "PROCESS"),
+        start="lenses",
+        permission="workflows.lens-triad.start",
+        nodes={
+            "lenses": ParallelNode(
+                id="lenses",
+                branches=("market-lens", "customer-lens", "coherence-lens"),
+                join="lens-join",
+            ),
+            "market-lens": StepNode(
+                id="market-lens",
+                tool="market-lens@1",
+                in_={},
+                out={"verdict": "state.market_verdict"},
+                end="MARKET_DONE",
+                on_error={"BOOM": RouteTarget(end="MARKET_FAILED")},
+            ),
+            "customer-lens": StepNode(
+                id="customer-lens",
+                tool="customer-lens@1",
+                in_={},
+                out={"verdict": "state.customer_verdict"},
+                end="CUSTOMER_DONE",
+                on_error={"BOOM": RouteTarget(end="CUSTOMER_FAILED")},
+            ),
+            "coherence-lens": StepNode(
+                id="coherence-lens",
+                tool="coherence-lens@1",
+                in_={},
+                out={"verdict": "state.coherence_verdict"},
+                end="COHERENCE_DONE",
+                on_error={"BOOM": RouteTarget(end="COHERENCE_FAILED")},
+            ),
+            "lens-join": JoinNode(
+                id="lens-join",
+                policy=policy,
+                end="ALL_LENSES_OK",
+                on_join_failed=RouteTarget(end="LENSES_FAILED"),
+            ),
+        },
+        endings={
+            "MARKET_DONE": Ending(outcome="SUCCESS", says="Market lens done."),
+            "CUSTOMER_DONE": Ending(outcome="SUCCESS", says="Customer lens done."),
+            "COHERENCE_DONE": Ending(outcome="SUCCESS", says="Coherence lens done."),
+            "MARKET_FAILED": Ending(outcome="FAILURE", says="Market lens failed."),
+            "CUSTOMER_FAILED": Ending(outcome="FAILURE", says="Customer lens failed."),
+            "COHERENCE_FAILED": Ending(
+                outcome="FAILURE", says="Coherence lens failed."
+            ),
+            "ALL_LENSES_OK": Ending(outcome="SUCCESS", says="All lenses agree."),
+            "LENSES_FAILED": Ending(outcome="FAILURE", says="A lens failed."),
+        },
+        state={
+            "market_verdict": StateChannel(type="string", reducer="REPLACE"),
+            "customer_verdict": StateChannel(type="string", reducer="REPLACE"),
+            "coherence_verdict": StateChannel(type="string", reducer="REPLACE"),
+        },
+    )
+
+
+def _lens_ctx() -> EngineContext:
+    return EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry(
+            [
+                _lens_tool("market-lens"),
+                _lens_tool("customer-lens"),
+                _lens_tool("coherence-lens"),
+            ]
+        ),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+
+
+def test_parallel_three_branches_all_success_joins_only_once_every_branch_ends():
+    """A1: driven one report() at a time, an intermediate next()/report()
+    call still returns a pending branch's own hand-off — not a premature
+    join result — proven for all three branches; only once every branch
+    has independently reached SUCCESS does the run reach the join's own
+    ALL_SUCCESS ending."""
+    process = _lens_parallel_process()
+    ctx = _lens_ctx()
+    run_id = "run-lenses-1"
+
+    answer = _run(next_(process, run_id, "root", ctx, inputs={}, host_inputs={}))
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "market-lens"
+    assert answer.scope == "root/lenses.branch[0]"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "bullish"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "customer-lens"
+    assert answer.scope == "root/lenses.branch[1]"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "satisfied"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "coherence-lens"
+    assert answer.scope == "root/lenses.branch[2]"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "aligned"},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "ALL_LENSES_OK"
+    assert answer.outcome == "SUCCESS"
+
+
+def test_parallel_early_branch_failure_does_not_short_circuit_the_join():
+    """A2: one branch fails FIRST, while the other two are still pending —
+    the join does not treat that as decided immediately; only once the
+    other two also finish does it route via on_join_failed, never
+    silently treating the failed branch as if it had succeeded."""
+    process = _lens_parallel_process()
+    ctx = _lens_ctx()
+    run_id = "run-lenses-2"
+
+    answer = _run(next_(process, run_id, "root", ctx, inputs={}, host_inputs={}))
+    assert answer.node_id == "market-lens"
+
+    # The FIRST branch to report fails — the join must not short-circuit
+    # to LENSES_FAILED here; the other two branches are still pending.
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            error_code="BOOM",
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "customer-lens"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "satisfied"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "coherence-lens"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "aligned"},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "LENSES_FAILED"
+    assert answer.outcome == "FAILURE"
+
+
+def test_parallel_any_success_waits_for_every_branch_before_joining():
+    """A3: policy: ANY_SUCCESS with one branch already SUCCESS and two
+    still pending returns the pending branches' own hand-offs — it does
+    not short-circuit to the join result the moment one branch succeeds,
+    since this engine has no primitive to cancel a still-open branch's
+    own pending hand-off (D46)."""
+    process = _lens_parallel_process(policy="ANY_SUCCESS")
+    ctx = _lens_ctx()
+    run_id = "run-lenses-3"
+
+    answer = _run(next_(process, run_id, "root", ctx, inputs={}, host_inputs={}))
+    assert answer.node_id == "market-lens"
+
+    # ANY_SUCCESS is already satisfiable by this one branch alone -- must
+    # NOT join early.
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "bullish"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "customer-lens"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "satisfied"},
+        )
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "coherence-lens"
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            ctx,
+            inputs={},
+            host_inputs={},
+            output={"verdict": "aligned"},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "ALL_LENSES_OK"
+    assert answer.outcome == "SUCCESS"
+
+
+def test_parallel_branch_calling_a_process_hits_the_same_depth_limit_an_unnested_call_would():
+    """A6: a PARALLEL branch that itself calls another PROCESS increments
+    depth normally and can hit on_depth_exhausted exactly as an un-nested
+    call would — proving a branch doesn't accidentally reset or
+    double-count depth. Reuses the exact `max_depth=0` shape
+    test_process_call_depth_exhausted_routes_to_on_depth_exhausted already
+    proves for an un-nested call, wrapped in a single-branch PARALLEL."""
+    from sulis_workflows.definition.model import CallResult
+
+    child_work_tool = Tool(
+        header=_header("child-work", "TOOL"),
+        output={"y": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:child_work"),
+        effect="QUERY",
+        permission="workflows.child-work.dispatch",
+    )
+    child_process = Process(
+        header=_header("child-proc", "PROCESS"),
+        start="do-work",
+        permission="workflows.child-proc.start",
+        nodes={
+            "do-work": StepNode(
+                id="do-work", tool="child-work@1", in_={}, out={}, end="CHILD_DONE"
+            ),
+        },
+        endings={"CHILD_DONE": Ending(outcome="SUCCESS", says="Child done.")},
+    )
+    call_child_tool = Tool(
+        header=_header("call-child", "TOOL"),
+        output={"note": OutputSpec(type="string")},
+        controls=(),
+        mechanism=Mechanism(
+            kind="PROCESS",
+            ref="child-proc@1",
+            result=CallResult(endings={"CHILD_DONE": "DONE"}),
+        ),
+        effect="QUERY",
+        permission="workflows.call-child.dispatch",
+    )
+    parent = Process(
+        header=_header("parent-proc-parallel", "PROCESS"),
+        start="fan-out",
+        permission="workflows.parent-proc-parallel.start",
+        defaults=ProcessDefaults(max_depth=0),
+        nodes={
+            "fan-out": ParallelNode(
+                id="fan-out", branches=("call-child",), join="fan-in"
+            ),
+            "call-child": StepNode(
+                id="call-child",
+                tool="call-child@1",
+                in_={},
+                out={},
+                end="DONE",
+                on_depth_exhausted=RouteTarget(end="TOO_DEEP"),
+            ),
+            "fan-in": JoinNode(
+                id="fan-in",
+                policy="ALL_SUCCESS",
+                end="ALL_DONE",
+                on_join_failed=RouteTarget(end="JOIN_FAILED"),
+            ),
+        },
+        endings={
+            "DONE": Ending(outcome="SUCCESS", says="Parent done."),
+            "TOO_DEEP": Ending(outcome="FAILURE", says="Nested too deep."),
+            "ALL_DONE": Ending(outcome="SUCCESS", says="All done."),
+            "JOIN_FAILED": Ending(outcome="FAILURE", says="Join failed."),
+        },
+    )
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(responses={"mod:child_work": {}}),
+        external_tool=StubExternalToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([child_work_tool, child_process, call_child_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(parent, "run-depth-parallel-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    # The branch itself reaches TOO_DEEP (proving depth exhausted at the
+    # SAME threshold the un-nested test hits, not one level deeper or
+    # shallower for being inside a PARALLEL) — its own FAILURE outcome
+    # then correctly fails the outer ALL_SUCCESS join, since a branch's
+    # own ending is a checkpoint for THAT branch, not automatically the
+    # whole run's own final word (D46).
+    assert answer.ending == "JOIN_FAILED"
+    assert answer.outcome == "FAILURE"
+    branch_attempts = _run(
+        records.get_attempts(
+            "run-depth-parallel-1",
+            "root/fan-out.branch[0]",
+            "call-child",
+            platform_id="tenant-1",
+            run_id="run-depth-parallel-1",
+        )
+    )
+    assert branch_attempts[-1].verdict == "DEPTH_EXHAUSTED"
+
+
+def test_parallel_branch_produced_value_cannot_be_self_reviewed_after_the_join():
+    """D46: a GATE reached AFTER a PARALLEL's own join, reviewing a state
+    channel a branch's own SKILL step wrote, still enforces §7.6's "no
+    deciding on your own work" — proving `produced_by` provenance survives
+    the fold back out of the branch's own isolated `_drive_scope` call,
+    not silently lost the moment that call returns (a real self-review
+    bypass this fix closes, not a merely cosmetic gap)."""
+    process = Process(
+        header=_header("parallel-self-review", "PROCESS"),
+        start="fan-out",
+        permission="workflows.parallel-self-review.start",
+        nodes={
+            "fan-out": ParallelNode(id="fan-out", branches=("produce",), join="fan-in"),
+            "produce": StepNode(
+                id="produce",
+                tool="produce@1",
+                in_={},
+                out={"recommendation": "state.recommendation"},
+                end="PRODUCE_DONE",
+            ),
+            "fan-in": JoinNode(id="fan-in", policy="ALL_SUCCESS", next="sign-off"),
+            "sign-off": GateNode(
+                id="sign-off",
+                kind="APPROVAL",
+                asks="Can this proceed?",
+                reviewing=("state.recommendation",),
+                deciders=(Decider(kind="agent", ref="review@1"),),
+                on={
+                    "PERMIT": RouteTarget(end="COMPLETE"),
+                    "DENY": RouteTarget(end="DENIED"),
+                },
+            ),
+        },
+        endings={
+            "PRODUCE_DONE": Ending(outcome="SUCCESS", says="Produced."),
+            "COMPLETE": Ending(outcome="SUCCESS", says="Done."),
+            "DENIED": Ending(outcome="STOPPED", says="Denied."),
+        },
+        state={"recommendation": StateChannel(type="string", reducer="REPLACE")},
+    )
+    records = StubRecordsAdapter()
+    registry = Registry([_produce_tool(), _review_tool()])
+    same_identity_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=registry,
+        identity="agent:same-session",
+        platform_id="tenant-1",
+    )
+    run_id = "run-parallel-self-review-1"
+
+    answer = _run(
+        next_(process, run_id, "root", same_identity_ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.TOOL_STEP
+    assert answer.node_id == "produce"
+    assert answer.scope == "root/fan-out.branch[0]"
+
+    _run(
+        report(
+            process,
+            run_id,
+            answer.scope,
+            answer.node_id,
+            same_identity_ctx,
+            inputs={},
+            host_inputs={},
+            output={"recommendation": "adopt the finding"},
+        )
+    )
+
+    answer = _run(
+        report(
+            process,
+            run_id,
+            "root",
+            "sign-off",
+            same_identity_ctx,
+            inputs={},
+            host_inputs={},
+            output={
+                "verdict": "PERMIT",
+                "rationale": "Looks fine.",
+                "evidence": [{"path": "state.recommendation", "claim": "grounded"}],
+            },
+        )
+    )
+    assert answer.kind is AnswerKind.AWAITING_DECISION
+
+    attempts = _run(
+        records.get_attempts(
+            run_id, "root", "sign-off", platform_id="tenant-1", run_id=run_id
+        )
+    )
+    assert attempts[-1].verdict == Verdict.INDETERMINATE.value
+    assert "own work" in (attempts[-1].output or {}).get("rationale", "")

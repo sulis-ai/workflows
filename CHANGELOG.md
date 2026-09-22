@@ -6,6 +6,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D46 (WP-03 Part 1):** `PARALLEL`/`JOIN` are now dispatched by the engine. A branch is a
+  nested scope one level down from a `PROCESS` call's own child, sharing the parent's node map and
+  its process-wide `state` (not isolated, unlike a `FOR_EACH` item), terminating via an ordinary
+  declared ending that is a checkpoint for that branch, not automatically the whole run. The join
+  always waits for every branch to finish, never short-circuiting once its policy is already
+  decidable — this engine has no primitive to cancel a still-open branch's own pending hand-off.
+  Found and fixed a genuine self-review bypass while building this: a `GATE` reached after a join,
+  reviewing a value a branch's own step had just written, could not previously tell it was
+  reviewing that identity's own work, since `produced_by` provenance was lost the moment a
+  branch's own driving call returned — now threaded and folded back the same way branch state
+  writes already had to be.
 - **D45 (WP-04 Part 2):** `mechanism.kind: TOOL` (composite) is now dispatched by the engine,
   closing the `TOOL` half of D34's own refusal — WP-04 is now complete. `composes[]` children run
   in declared order over a private `compose.*` run-state namespace, addressed in the SAME `scope`
