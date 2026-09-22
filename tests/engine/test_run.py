@@ -4973,6 +4973,62 @@ def test_parallel_branch_produced_value_cannot_be_self_reviewed_after_the_join()
     assert "own work" in (attempts[-1].output or {}).get("rationale", "")
 
 
+def test_join_reachable_from_two_parallel_nodes_is_refused_cleanly_rather_than_misrouted():
+    """WP-03 Part 3 (D48), the validator-bypass case: two `PARALLEL` nodes
+    both naming the same `join` — V11 refuses this at validation time now;
+    this proves `_find_parallel_for_join` itself also refuses cleanly, in
+    case validation is bypassed, rather than silently picking whichever
+    `PARALLEL` happened to be first in `process.nodes`'s own iteration
+    order (a real gap this decision found and closed in the SAME PR that
+    added the validator check for it)."""
+    process = Process(
+        header=_header("ambiguous-join-process", "PROCESS"),
+        start="par1",
+        permission="workflows.ambiguous-join-process.start",
+        nodes={
+            "par1": ParallelNode(id="par1", branches=("a",), join="joined"),
+            "a": StepNode(id="a", tool="echo@1", in_={}, out={}, end="A_DONE"),
+            "par2": ParallelNode(id="par2", branches=("b",), join="joined"),
+            "b": StepNode(id="b", tool="echo@1", in_={}, out={}, end="B_DONE"),
+            "joined": JoinNode(id="joined", policy="ALL_SUCCESS", end="DONE"),
+        },
+        endings={
+            "A_DONE": Ending(outcome="SUCCESS", says="A done."),
+            "B_DONE": Ending(outcome="SUCCESS", says="B done."),
+            "DONE": Ending(outcome="SUCCESS", says="Done."),
+        },
+    )
+    echo_tool = Tool(
+        header=_header("echo", "TOOL"),
+        output={},
+        controls=(),
+        mechanism=Mechanism(kind="CODE", ref="mod:echo"),
+        effect="QUERY",
+        inputs={},
+        permission="workflows.echo.dispatch",
+    )
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(responses={"mod:echo": {}}),
+        external_tool=StubExternalToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([echo_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    # `par1` is reached first (process.start), drives branch "a" to
+    # ENDED, then routes to `joined` -- which is ambiguous (also named by
+    # par2). par2 itself is unreachable from start, so this is a
+    # deliberately hand-built, validation-bypassed shape.
+    answer = _run(
+        next_(process, "run-ambiguous-join-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "FAILED"
+    assert "PARALLEL" in answer.says
+
+
 # ----------------------------------------------------------------------- FOR_EACH --
 
 
