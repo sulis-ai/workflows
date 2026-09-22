@@ -1,0 +1,150 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M343NXNDVS7BCJCFNBWSFZBE",
+  "started_at": "2026-09-22T08:00:00Z",
+  "completed_at": "2026-09-22T08:28:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — design solutions for the five known, deliberately-deferred engine gaps",
+  "branch": "design/wp03-05-remaining-engine-gaps",
+  "summary_for_principal": "This is design only — no code changed, nothing to test or approve for risk. You asked me to design solutions for the remaining known gaps; I have, as three work packages ready to build.\n\nRunning several pieces of work at once: reuses a pattern already built and proven elsewhere in this system, rather than inventing a new one — the biggest and most involved of the three.\n\nCalling an external service, and running several small tools as one unit: two related gaps, closed by the same reasoning applied twice.\n\nThree smaller, independent items: one kind of approval gate, extending a claim's lease while work is still genuinely in progress (the mechanism already exists, unused, cheap to switch on), and closing the remaining half of a check from earlier this week.\n\nEach comes with what to build, how to test it, and in what order — ready to hand to a future pass, or to start now if you want.\n\nNumbered actions:\n1. Say which, if any, you want built now. All three, one, or none — your call on priority and timeline, not a technical one.",
+  "subjects": {
+    "primary": {
+      "coordinate": "docs/work-packages/WP-03-concurrent-execution.md",
+      "kind": "PROCESS",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "docs/work-packages/WP-04-external-and-composite-dispatch.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Design for the EXTERNAL and TOOL (composite) mechanism kinds, both refused since D34 pending exactly this decision."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-05-gate-input-lease-renewal-and-ending-routing.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "Design for the three smallest remaining gaps: GATE kind: INPUT (D26), ClaimsPort.renew (D37), and the fuller half of the ending-routing check (D36/D40)."
+      },
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "_drive_scope/_ScopeDef/_advance_step/_advance_process_call read directly to ground WP-03's nested-scope reuse and WP-04's dispatch-branch designs in the engine's actual, current shape, not assumed."
+      },
+      {
+        "coordinate": "src/sulis_workflows/domain/ports/claims.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Found ClaimsPort.renew already fully implemented and unit-tested at the adapter level — changed WP-05's own recommendation from 'consider building it' to 'build it now', since the marginal cost is a thin public call, not new port work."
+      },
+      {
+        "coordinate": "src/sulis_workflows/domain/ports/policy.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "Verdict's own docstring ('No fourth value, no boolean stand-in') read directly — settled the GATE kind: INPUT design toward a separate outcome type rather than extending Verdict with ANSWERED."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "READ",
+        "reason": "_route_is_exhaustive (backing V6) read directly — found it directly reusable for the fuller ending-routing check D40 had judged too large to attempt, changing WP-05's own scoping of that item from 'undecided' to 'closeable, designed'."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Please analyze and design solutions for those please\" — the five known, deliberately-deferred gaps named in the prior status report (running several pieces of work at once; calling an external service directly; one kind of approval gate; renewing a long-running claim; the fuller ending-routing check), with the ethos reaffirmed: own every technical decision completely, never hand the principal a choice they cannot evaluate.",
+    "read_as": "Produce real, implementation-ready designs — not a survey of options left for the principal to pick between. Every design decision below (nested-scope reuse over new concurrency machinery; a distinct ExternalToolPort over a per-adapter-id table; a composed child's hand-off surfacing transparently; a separate AnswerOutcome type over extending Verdict; building the claim-renewal call now rather than deferring) is made and justified in this run, grounded in code actually read this session, not left open for the principal to weigh in on since none of them are choices they could evaluate.",
+    "filled_in": [
+      {
+        "gap": "The spec's own §7.4/§7.5 vocabulary (branches, join policies, max_concurrency) never states how PARALLEL/FOR_EACH map onto an engine with no background execution, or how a FOR_EACH item's own `as:` binding is exposed to its isolated scope.",
+        "assumed": "Reuse §9.3's own already-built, already-tested nested-scope pattern directly (a branch/item is a nested scope, not a new execution primitive); resolve `as:` via a new, fixed `item.value`/`item.index` namespace rather than requiring a new top-level state channel per binding (the awkward shape found firsthand while building examples/recursive-refinement/).",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now' and 'could a competent developer who wasn't here pick this up' — reusing a proven, tested mechanism is both cheaper and more maintainable than a second execution model; the as:/item.* gap is a genuine first-hand finding, not inherited from anyone else's report.",
+        "reversal_cost": "Low — both are additive; the implementing PR is where either becomes real, tested spec text with its own Dn entry, not decided as final here.",
+        "confidence": "MEDIUM"
+      },
+      {
+        "gap": "D34 left two questions open for EXTERNAL/TOOL-composite: EXTERNAL's own port shape ('per adapter' names no operational contract), and whether a TOOL-composite's non-deterministic child hand-off surfaces transparently or stays opaque.",
+        "assumed": "EXTERNAL: one ExternalToolPort, shaped exactly like the already-built CodeToolPort, with the host's own adapter free to route internally however it likes — mirroring CodeToolPort's own settled precedent rather than inventing a second shape. TOOL-composite: a child's hand-off surfaces transparently, matching every other multi-step construct this engine already runs (PROCESS calls, and this same design's own PARALLEL/FOR_EACH) — staying opaque would be new, unprecedented behaviour invented for one mechanism kind alone.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'do not invent a rule in code' read together with 'prefer conventional... approaches' — where this codebase already has a settled, tested answer to a structurally identical question, reusing it is grounded; inventing a second, inconsistent answer for one mechanism kind is not.",
+        "reversal_cost": "Low — both are additive port/dispatch-branch work with no schema changes to existing, shipped mechanism kinds.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "D37 named two options for ClaimsPort.renew (build a public call, or rely on lease_seconds being generous) without choosing between them.",
+        "assumed": "Build the public call now — found, by reading domain/ports/claims.py directly, that the lower layer (renew itself) is already fully built and unit-tested, so the marginal cost of exposing it is a thin new public function, not new port work; the 'rely on generous lease_seconds' alternative directly weakens the at-most-once guarantee §12.3 exists to provide, a real ongoing cost the 'do nothing' option does not avoid, it just defers who pays it.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'do the hard work so they don't have to' and 'measure, don't assert' — this decision changed once the actual code was read (the port layer already exists), exactly the kind of cheap-to-test constraint CLAUDE.md asks to verify before escalating rather than assuming.",
+        "reversal_cost": "Low — one new public call, additive, no change to any existing one.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "D36/D40 left the fuller 'every ending value is provably routed on' requirement open, reasoning it needed exhaustiveness-proof machinery this codebase did not yet have.",
+        "assumed": "That machinery already exists (_route_is_exhaustive, backing V6) and is directly reusable against the known, closed set of a specific call's own mapped ending values — re-scoped from 'undecided, needs new machinery' to 'closeable, designed, ready to build', the one open sub-question (require the captured channel be enum-typed, or accept an unprovable string type) named explicitly as worth revisiting after real use, not silently decided.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'test it cheaply before escalating' — D36's own 'genuinely unimplemented, left that way' framing was re-examined against the actual validator code before being accepted as still true for the fuller requirement, and found not to be.",
+        "reversal_cost": "None avoided — a documentation-only re-scoping; no code changed by this finding alone.",
+        "confidence": "MEDIUM"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "NOT_ASSESSED",
+  "decisions": [],
+  "flags": [],
+  "measured": [],
+  "untouched": [
+    {
+      "id": "wp03-05-not-yet-built",
+      "location": "docs/work-packages/WP-03-concurrent-execution.md, WP-04-external-and-composite-dispatch.md, WP-05-gate-input-lease-renewal-and-ending-routing.md",
+      "divergence": "None of the five gaps are actually implemented by this run — only designed, to the same standard WP-01/WP-02 were written to before their own code existed.",
+      "governed_exception": true,
+      "why_not_now": "The request was explicitly to analyze and design, not build; each work package's own acceptance criteria are the trigger for a future implementing pass, one PR at a time, per this repository's own established convention (a proposed design becomes adopted spec text/a Dn entry only once a working implementation backs it)."
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "Three work-package documents, each written to the same standard (Why this shape / Outcome / Scope / Out of scope / Acceptance criteria / Suggested PR sequence / If the spec is wrong or silent) WP-01 and WP-02 already established, ready to hand to an implementing pass without further design work."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-03 (concurrent execution: PARALLEL, JOIN, FOR_EACH) — the largest and most architecturally significant of the three, but built on a pattern (nested-scope reuse) already proven in this codebase for §9.",
+        "trigger": "The principal wants this built.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Remains a clean refusal (EngineRefusal, WP-02's own existing behaviour) until built — no risk accrues by waiting."
+      },
+      {
+        "item": "WP-04 (EXTERNAL and TOOL-composite dispatch).",
+        "trigger": "The principal wants this built.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Same clean-refusal state as WP-03 while it waits."
+      },
+      {
+        "item": "WP-05 (GATE kind: INPUT, claim renewal, ending-routing exhaustiveness) — three small, independent PRs.",
+        "trigger": "The principal wants any or all of these built.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Each part is independently gated (kind: INPUT stays refused; renew stays unused but harmless; the fuller ending-routing check stays unbuilt, a narrower residual risk than the already-closed 'never captured at all' case)."
+      }
+    ],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Pick which of the three work packages (if any) to build now.",
+        "action": "Each is independently startable — WP-03 is the largest lift, WP-05 the smallest per-part. None blocks the others.",
+        "source_kind": "PARKED",
+        "source_id": "wp03-05-not-yet-built",
+        "effort": "LARGE"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "If forced to sequence: WP-05's three parts first (smallest, most independent, quickest to land), then WP-04 (EXTERNAL/TOOL-composite), then WP-03 (the largest, most involved of the three).",
+      "reason": "Smaller, independent wins first reduces the number of known gaps fastest and lowest-risk; WP-03's own size and the nested-scope pattern it depends on benefit from WP-04 already having exercised that same reuse pattern once (composite dispatch) at smaller scale first.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}
