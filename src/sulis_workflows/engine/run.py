@@ -54,6 +54,7 @@ honest, tested slice over a guessed-at complete one):
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -90,7 +91,7 @@ from sulis_workflows.definition.model import (
     Tool,
 )
 from sulis_workflows.definition.registry import Registry
-from sulis_workflows.domain.ports.claims import ClaimsPort, ClaimStatus
+from sulis_workflows.domain.ports.claims import Claim, ClaimsPort, ClaimStatus
 from sulis_workflows.domain.ports.code_tool import CodeToolPort
 from sulis_workflows.domain.ports.policy import PolicyPort, Verdict
 from sulis_workflows.domain.ports.records import (
@@ -120,8 +121,10 @@ from sulis_workflows.engine.steps import StepAttemptResult, StepOutcome, attempt
 __all__ = [
     "AnswerKind",
     "EngineContext",
+    "HeartbeatAnswer",
     "NextAnswer",
     "decide",
+    "heartbeat",
     "next_",
     "report",
     "skip",
@@ -657,6 +660,91 @@ async def skip(
         host_inputs,
     )
     return result.answer
+
+
+@dataclass(frozen=True)
+class HeartbeatAnswer:
+    """§12.3's `ClaimsPort.renew` exposed as a public call (D37, D42;
+    WP-05 Part 2) — deliberately not a `NextAnswer`: nothing about the
+    run's own position changes, only a claim's own lease, so there is no
+    `kind`/`scope`/`ending` to report, only whether the renewal itself
+    succeeded."""
+
+    status: ClaimStatus
+    says: str
+
+
+async def heartbeat(
+    process: Process,
+    run_id: str,
+    scope: str,
+    node_id: str,
+    ctx: EngineContext,
+) -> HeartbeatAnswer:
+    """§12.3: "A running step renews its lease" — the public call that
+    was missing (D37, WP-03a): `ClaimsPort.renew` has been fully built and
+    unit-tested since WP-02, but nothing in `next`/`report`/`decide`/
+    `skip` (§12.1) ever let an in-flight caller invoke it, so a claim's
+    lease could only ever grow as long as a host set `lease_seconds` up
+    front — no way for a genuinely still-running `MUTATION`/`SIDE_EFFECT`
+    step to extend it while real work is still in progress.
+
+    Resolves the SAME `AttemptKey` `_claim_if_effectful` would use to
+    claim this exact dispatch — mirroring `report()`'s own `len(attempts)
+    + 1` shape (not `_advance_step`'s baseline-relative one; the two are
+    always equal, since `len(all attempts) == baseline + len(this visit's
+    own attempts)` by construction) — without replaying the whole run via
+    `_drive_scope` first, the same "trust the caller's own (scope, node)"
+    discipline `report()` already uses. The `Claim` passed to `renew` is
+    necessarily a fresh, best-effort description (`claimed_by:
+    ctx.identity`, a current `claimed_at`/`expires_at`) — this engine
+    holds nothing in memory between calls (§12.1) and has no `get` on
+    `ClaimsPort` to read one back, so it cannot know the TRUE original
+    claim's own timestamps; a conforming `ClaimsPort.renew` implementation
+    is authoritative on its own stored claim and only reads `key`/
+    `claimed_by` off the argument to decide whether this caller still
+    holds it (see `StubClaimsAdapter.renew`'s own docstring, D42).
+
+    Refuses (`EngineRefusal`, propagating as a bare exception — the same
+    "checked before doing anything" shape `skip()`'s own early checks
+    already use) for a node that is not a `STEP`, or whose Tool's own
+    `effect` is `QUERY` — §12.3's claim/lease guard exists only for
+    `MUTATION`/`SIDE_EFFECT` steps, so there is nothing to renew for
+    anything else.
+    """
+    scope_def = _resolve_scope(process, scope, ctx.registry)
+    node = scope_def.nodes[node_id]
+    if not isinstance(node, StepNode):
+        raise EngineRefusal(
+            f"heartbeat() called for {node_id!r}, which is not a STEP node"
+        )
+    tool = _resolve_tool(node.tool, ctx.registry)
+    if tool.effect not in ("MUTATION", "SIDE_EFFECT"):
+        raise EngineRefusal(
+            f"heartbeat() called for {node_id!r}, whose tool "
+            f"{tool.header.id!r} declares effect: {tool.effect} — §12.3's "
+            "claim/lease guard only applies to MUTATION/SIDE_EFFECT steps, "
+            "so there is no claim to renew"
+        )
+    attempts = await ctx.records.get_attempts(
+        run_id, scope, node_id, platform_id=ctx.platform_id, run_id=run_id
+    )
+    key = AttemptKey(run=run_id, scope=scope, node=node_id, attempt=len(attempts) + 1)
+    now = time.time()
+    claim = Claim(key=key, claimed_by=ctx.identity, claimed_at=now, expires_at=now)
+    result = await ctx.claims.renew(
+        claim,
+        lease_seconds=ctx.lease_seconds,
+        platform_id=ctx.platform_id,
+        run_id=run_id,
+    )
+    if result.status is not ClaimStatus.GRANTED:
+        return HeartbeatAnswer(
+            status=result.status,
+            says=result.note
+            or f"heartbeat() for {node_id!r} could not renew its claim.",
+        )
+    return HeartbeatAnswer(status=result.status, says=f"Lease for {node_id!r} renewed.")
 
 
 # --------------------------------------------------------------------------- driving --

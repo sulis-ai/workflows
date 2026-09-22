@@ -35,7 +35,7 @@ from sulis_workflows.definition.model import (
     Tool,
 )
 from sulis_workflows.definition.registry import Registry
-from sulis_workflows.domain.ports.claims import StubClaimsAdapter
+from sulis_workflows.domain.ports.claims import ClaimStatus, StubClaimsAdapter
 from sulis_workflows.domain.ports.code_tool import (
     StubCodeToolAdapter,
     ToolTransientError,
@@ -55,6 +55,7 @@ from sulis_workflows.engine.run import (
     EngineContext,
     EngineRefusal,
     decide,
+    heartbeat,
     next_,
     report,
     skip,
@@ -1620,6 +1621,159 @@ def test_hand_off_mutation_step_acquires_a_claim_so_a_second_caller_is_told_step
         next_(process, "run-hand-off-1", "root", ctx, inputs={}, host_inputs={})
     )
     assert second.kind is AnswerKind.STEP_RUNNING
+
+
+def _mutation_process() -> tuple[Process, Registry]:
+    mutating_tool = Tool(
+        header=_header("send", "TOOL"),
+        output={"sent": OutputSpec(type="boolean")},
+        controls=(),
+        mechanism=Mechanism(kind="SKILL", ref="skills/send"),
+        effect="SIDE_EFFECT",
+        permission="workflows.send.dispatch",
+    )
+    process = _process(
+        start="send-step",
+        nodes={
+            "send-step": StepNode(
+                id="send-step", tool="send@1", in_={}, out={}, end="COMPLETE"
+            ),
+        },
+    )
+    return process, Registry([mutating_tool])
+
+
+def test_heartbeat_renews_a_hand_off_steps_claim():
+    """A1 (WP-05 Part 2): a still-in-progress MUTATION/SIDE_EFFECT step's
+    hand-off claim, extended via heartbeat(), stays GRANTED to the same
+    caller — proving the public call actually reaches the same claim
+    _claim_if_effectful acquired at dispatch time, not a fresh, unrelated
+    one."""
+    process, registry = _mutation_process()
+    claims = StubClaimsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=claims,
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    first = _run(
+        next_(process, "run-heartbeat-1", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+
+    beat = _run(heartbeat(process, "run-heartbeat-1", "root", "send-step", ctx))
+    assert beat.status is ClaimStatus.GRANTED
+
+
+def test_heartbeat_extends_the_deadline_so_a_later_caller_sees_step_running_not_a_takeover():
+    """A1 (WP-05 Part 2), the fuller end-to-end shape: heartbeat()'s own
+    renewal genuinely extends the claim's real deadline — a second
+    next() call racing in afterwards is told STEP_RUNNING against the
+    RENEWED expiry, not allowed to take over as if nothing had renewed
+    it."""
+    process, registry = _mutation_process()
+    claims = StubClaimsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=claims,
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+        lease_seconds=30,
+    )
+    first = _run(
+        next_(process, "run-heartbeat-2", "root", ctx, inputs={}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+
+    beat = _run(heartbeat(process, "run-heartbeat-2", "root", "send-step", ctx))
+    assert beat.status is ClaimStatus.GRANTED
+
+    second_caller_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=claims,
+        registry=registry,
+        identity="user:someone-else",
+        platform_id="tenant-1",
+        lease_seconds=30,
+    )
+    second = _run(
+        next_(
+            process,
+            "run-heartbeat-2",
+            "root",
+            second_caller_ctx,
+            inputs={},
+            host_inputs={},
+        )
+    )
+    assert second.kind is AnswerKind.STEP_RUNNING
+
+
+def test_heartbeat_against_an_already_taken_over_claim_fails_cleanly():
+    """A2 (WP-05 Part 2): a caller whose claim already expired and was
+    taken over by a second caller's own dispatch cannot heartbeat its way
+    back into holding it — the same TAKEN_OVER signal acquire() already
+    surfaces, never a silent re-grant."""
+    process, registry = _mutation_process()
+    claims = StubClaimsAdapter()
+    first_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=claims,
+        registry=registry,
+        identity="user:iain",
+        platform_id="tenant-1",
+        lease_seconds=-1,  # already expired the instant it's acquired
+    )
+    first = _run(
+        next_(process, "run-heartbeat-3", "root", first_ctx, inputs={}, host_inputs={})
+    )
+    assert first.kind is AnswerKind.TOOL_STEP
+
+    second_ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        records=StubRecordsAdapter(),
+        claims=claims,
+        registry=registry,
+        identity="user:someone-else",
+        platform_id="tenant-1",
+        lease_seconds=30,
+    )
+    takeover = _run(
+        next_(process, "run-heartbeat-3", "root", second_ctx, inputs={}, host_inputs={})
+    )
+    assert takeover.kind is AnswerKind.TOOL_STEP  # someone else now holds it
+
+    beat = _run(heartbeat(process, "run-heartbeat-3", "root", "send-step", first_ctx))
+    assert beat.status is ClaimStatus.TAKEN_OVER
+    assert "may already have run" in beat.says
+
+
+def test_heartbeat_on_a_query_tool_is_refused_cleanly():
+    """§12.3's claim/lease guard is only for MUTATION/SIDE_EFFECT steps —
+    heartbeat() on a QUERY step (no claim was ever acquired for it) is
+    refused rather than silently no-op-ing or inventing a claim."""
+    ctx = _fresh_ctx()
+    _run(next_(_process(), "run-heartbeat-4", "root", ctx, inputs={}, host_inputs={}))
+    with pytest.raises(EngineRefusal, match="effect"):
+        _run(heartbeat(_process(), "run-heartbeat-4", "root", "classify", ctx))
+
+
+def test_heartbeat_on_a_non_step_node_is_refused_cleanly():
+    ctx = _fresh_ctx()
+    with pytest.raises(EngineRefusal, match="not a STEP node"):
+        _run(heartbeat(_process(), "run-heartbeat-5", "root", "after-classify", ctx))
 
 
 def test_route_loop_budget_is_enforced_across_revisits():
