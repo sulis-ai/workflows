@@ -5,6 +5,17 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+### Added
+- **D41 (WP-05 Part 1):** `kind: INPUT` gates (spec §7.6) are now implemented, closing D26's
+  outright refusal. A `person` decider answers via a new `decide(..., value=...)` parameter
+  (checked against the gate's own `answer_type` before being recorded); `policy`/`agent` deciders
+  are still asked (their own vote recorded for provenance) but can never actually answer one —
+  neither `PolicyPort.evaluate_policy` nor an agent's own `decision@1` profile has anywhere to
+  carry a typed value — and always pass on to the next decider, exactly as an ordinary
+  `INDETERMINATE` outcome already does. V9 drops D26's blanket refusal for real shape checks
+  (`answer_type`, `answer_into`, an `ANSWERED` route present; `answer_into` targeting a
+  non-`REPLACE` channel refused, mirroring `note_into`'s own D27 check).
+
 ### Fixed
 - **D40:** a `PROCESS`-mechanism call whose calling STEP never captured the synthesised `ending`
   output into state could have its child's own `FAILED`/`STOPPED` ending silently masked as the

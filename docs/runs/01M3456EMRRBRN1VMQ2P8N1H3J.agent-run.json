@@ -1,0 +1,167 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M3456EMRRBRN1VMQ2P8N1H3J",
+  "started_at": "2026-09-22T09:00:00Z",
+  "completed_at": "2026-09-22T10:20:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-05 Part 1 (GATE kind: INPUT) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/gate-kind-input",
+  "summary_for_principal": "One kind of approval gate now actually works — the one where a person types in an answer (a date, a region, a number) rather than just saying yes or no.\n\nThis was previously refused outright: the shape was allowed in a definition but the system would crash confusingly the moment anyone tried to run one, so it was blocked at the door instead. It's now built for real, following the design from the last round.\n\nTwo smaller technical decisions were mine to make, both conservative: an automated or policy-based reviewer can still be asked first on this kind of gate, but can never actually supply the answer itself (nothing in this system today gives it a way to), so it's skipped over in favour of asking a person, without erroring. And a submitted answer is checked against its declared type (text, number, one of a fixed list, etc.) before being accepted, so a wrong-shaped answer is rejected rather than silently stored.\n\nFull test suite: 432 passed (16 new). Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when CI is green.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/engine/gates.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "src/sulis_workflows/engine/run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "_advance_gate branches on node.kind == \"INPUT\" wherever the two decision vocabularies differ; decide() gains a value parameter; new _value_matches_answer_type/_state_with_answer/_person_answer_record/_answer_from_record helpers."
+      },
+      {
+        "coordinate": "src/sulis_workflows/definition/validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "V9 drops D26's outright refusal of kind: INPUT for real shape checks (answer_type, answer_into, an ANSWERED route, answer_into targeting a REPLACE channel)."
+      },
+      {
+        "coordinate": "tests/engine/test_gates.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "New resolve_input_gate pure-function sequencing tests, mirroring resolve_gate's own existing coverage one for one."
+      },
+      {
+        "coordinate": "tests/engine/test_run.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Replaced the now-outdated D26 refusal regression test with real engine-level coverage: person-decider hand-off and decide(value=...) resolution (A1), a policy decider falling through without misrouting (A2, and the direct regression check that the old confusing message is gone), decide() rejecting the wrong parameter for this gate's kind, and answer_type checking (string, enum, and a mismatch)."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Replaced the now-outdated D26 refusal fixture with accepted/refused fixtures for the new V9 shape checks."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D41 added to §18; §7.6 and §12.1 clarified with the new decide(value=...) shape and which decider kinds can actually answer; §14's V9 row updated."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D41."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-05-gate-input-lease-renewal-and-ending-routing.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 1's own design (AnswerOutcome, resolve_input_gate, decide()'s new value parameter, V9's real shape checks) is what this PR implements, largely as drafted."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code, following the CPTO ethos (own every technical decision, report in plain language plus a structured record, numbered actions for the principal only).",
+    "read_as": "This run covers WP-05 Part 1 specifically — the first of eight planned PRs, in the priority order recorded in the prior design-only run (WP-05's three independent parts first, being smallest and most self-contained, then WP-04, then WP-03 last as the largest). GATE kind: INPUT was chosen first within WP-05 as the most urgent of its three parts (an unresolvable open gate blocks a whole class of process, where the other two parts are narrower correctness/completeness gaps).",
+    "filled_in": [
+      {
+        "gap": "WP-05's own design named A2 (a policy/agent decider on an INPUT gate always resolves INDETERMINATE-equivalent) but did not specify exactly how that decider's own PERMIT/DENY/INDETERMINATE verdict (from evaluate_policy_decider/check_agent_decision, both unchanged, both still returning ADR-028's Verdict) gets translated into an AnswerOutcome's own answered: bool.",
+        "assumed": "Always record answered=False for a policy/agent decider on an INPUT gate, regardless of what Verdict it actually returned — the underlying verdict is kept in the attempt's own output (policy_verdict/agent_verdict) for provenance, but never drives routing, since neither PolicyPort nor decision@1 has anywhere to carry a real typed answer. This is the conservative reading: a policy decider that happens to return PERMIT is not silently treated as if it had somehow answered.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'do not invent a rule in code' — D26's own decision log already named this exact gap (no port/profile shape exists for a policy/agent decider to carry a typed value) as spec-silent; treating any of its existing Verdict values as an answer would be inventing meaning §7.6 does not state.",
+        "reversal_cost": "Low — a future pass that adds a real answer-carrying shape to PolicyPort/decision@1 can change this single translation point without touching resolve_input_gate's own sequencing logic.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "decide()'s existing signature required verdict as a plain positional-shaped keyword argument; WP-05's design said 'value alongside (or instead of) a verdict' without specifying whether both could ever be given together, or what happens if the wrong one is given for a gate's own kind.",
+        "assumed": "Made verdict and value mutually exclusive and required-by-kind: an APPROVAL gate must get verdict and must not get value; an INPUT gate must get value and must not get verdict. Both wrong-shaped cases are refused outright (EngineRefusal, raised directly from decide() before ever calling _drive_scope — the same shape skip()'s own early checks already use), not silently accepted or silently ignored.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'fail closed' and 'survive the bad-but-conformant attack' — a caller passing both, or the wrong one, is exactly the kind of malformed-but-plausible call this format's own principles ask to refuse rather than guess at.",
+        "reversal_cost": "None avoided — the refusal is a pure validation addition; nothing about the existing APPROVAL path's own required verdict changed.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D41 — kind: INPUT gates (§7.6) are now implemented, closing D26: a person decider answers via a new decide(..., value=...) parameter; policy/agent deciders are asked but can never actually answer one, and always pass on.",
+      "problem": "D26 refused every INPUT gate outright, at both validation and engine runtime, because §7.6's own one-sentence description left three questions genuinely open: which decider kinds may answer at all, what shape an agent decider's own answer takes, and what public call a person uses to submit one.",
+      "options_rejected": [
+        "Invent a new PolicyPort method and a new/extended agent profile so all three decider kinds could genuinely answer an INPUT gate: rejected — unstated by §7.6, and a materially bigger port/profile change for a want nothing in the corpus or the 65 cataloged use cases actually asks for; every real INPUT gate use case reviewed wants a person's own typed answer.",
+        "Add a fourth answer() call to §12.1 instead of extending decide(): rejected — decide() already means 'a person resolves this gate's own open decision'; a separate call would duplicate decide()'s own replay/permission-check plumbing for no structural difference from a single new, kind-gated optional parameter."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — AnswerOutcome/resolve_input_gate are additive alongside DeciderOutcome/resolve_gate; decide()'s new parameters are additive with a backwards-compatible default; every _advance_gate branch point is an if node.kind == \"INPUT\" alongside the existing APPROVAL path, not a replacement of it.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, an INPUT gate with a single person decider raised EngineRefusal naming D26 on the very first next() call, and V9 refused even a fully well-formed INPUT gate outright.",
+          "source": "Every new/changed test in tests/engine/test_run.py, tests/engine/test_gates.py and tests/definition/test_validate.py confirmed failing against the pre-fix code (git stash of engine/run.py, engine/gates.py, definition/validate.py) before the fix — an import error for AnswerOutcome, a wrong AnswerKind (ENDED/FAILED instead of AWAITING_DECISION), or a TypeError on the old decide() signature."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After the fix: a person decider hands off AWAITING_DECISION and decide(value=...) resolves it, routes via ANSWERED, and writes the value to answer_into (A1); a policy decider asked first is recorded for provenance but never answers, and the gate correctly falls through to its person decider without misrouting — the exact D26 failure shape, now proven gone (A2); decide() with the wrong parameter for a gate's own kind, or a value failing its answer_type check (a plain string, and an enum member), is refused cleanly.",
+          "source": "tests/engine/test_run.py's eight new INPUT-gate tests, and tests/engine/test_gates.py's nine new resolve_input_gate sequencing tests, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "V9 accepts a well-formed INPUT gate and refuses one missing answer_type, answer_into, or an ANSWERED route, or one whose answer_into targets a non-REPLACE channel.",
+          "source": "tests/definition/test_validate.py's five new/changed V9 tests, all passing."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 432 tests (416 pre-existing + 16 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "The principal wants a policy or agent decider to actually be able to answer an INPUT gate for real — needs a new PolicyPort method or agent profile shape, named as an open question in D26 and D41 and deliberately not built here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists this repository's own CI workflow uses.",
+      "location": "repository root",
+      "result": "432 passed, 0 failed (416 pre-existing + 16 new). ruff check 0 findings, ruff format 0 reformats needed after one auto-format pass, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "input-gate-policy-agent-decider-never-usefully-answers",
+      "location": "engine/gates.py (resolve_input_gate), engine/run.py (_advance_gate's NEEDS_POLICY/NEEDS_AGENT branches)",
+      "divergence": "A policy or agent decider declared on an INPUT gate is accepted by V9 (nothing refuses it) but can never actually decide one — it is always recorded as \"did not answer\" and the gate falls through to the next decider, however it voted.",
+      "governed_exception": true,
+      "why_not_now": "Closing this for real needs a new PolicyPort method or a new/extended agent profile carrying an answer_type-typed value — spec-silent (§7.6 does not name either shape), and a materially bigger port/profile change than this pass's own scope. A future V9 check could at least warn (not refuse) on this authoring shape, since the gate still behaves correctly, just always skips such a decider; not built here since it is a usability concern, not a correctness one."
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "A well-formed kind: INPUT gate now runs end to end — a person's own decide(..., value=...) resolves it, routes via ANSWERED, and writes the answer to state. The first of eight planned PRs (WP-05 Part 1) toward the principal's 'Build all' instruction."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-05 Part 2 (ClaimsPort.renew / heartbeat()) and Part 3 (ending-routing exhaustiveness), then WP-04 (EXTERNAL/TOOL-composite dispatch), then WP-03 (PARALLEL/JOIN/FOR_EACH) — the remaining seven of eight planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Each remaining part is independently scoped in its own work-package document; none blocks any other."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-05 Part 2 (ClaimsPort.renew / heartbeat()) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

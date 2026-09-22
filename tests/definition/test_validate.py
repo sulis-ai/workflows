@@ -551,19 +551,69 @@ def test_v9_refused_unknown_gate_kind() -> None:
     assert "V9" in _rules(findings)
 
 
-def test_v9_refused_input_gate_not_yet_supported() -> None:
-    """WP-03a Fault 2: `kind: INPUT` is spec-legal (§7.6) but this engine
-    does not implement it yet — `_advance_gate` never reads `node.kind`,
-    `answer_type`, `answer_into` or the `ANSWERED` verdict, so a validated
-    INPUT gate crashed at runtime instead ("no route declared for verdict
-    'PERMIT'"). Refused at validation time instead of only failing when
-    someone actually runs it — even a fully well-formed INPUT gate (a
-    real `answer_type`/`answer_into`, an `ANSWERED` route) is refused,
-    since the refusal is about engine support, not gate shape."""
+def test_v9_accepted_well_formed_input_gate() -> None:
+    """D26/D41 (WP-05 Part 1): `kind: INPUT` is now executed
+    (`engine/run.py`'s `_advance_gate`/`resolve_input_gate`) — the outright
+    refusal WP-03a's D26 put here for every INPUT gate, well-formed or not,
+    is gone; a real, complete one (`answer_type`, `answer_into`, an
+    `ANSWERED` route) is accepted."""
     doc = _gate_process(
         '    { type: GATE, kind: INPUT, asks: "What is the target date?", '
         "answer_type: string, answer_into: state.target_date, on: { ANSWERED: { end: COMPLETE } } }"
     )
+    findings = validate(doc, registry=Registry())
+    assert "V9" not in _rules(findings)
+
+
+def test_v9_refused_input_gate_with_no_answer_type() -> None:
+    doc = _gate_process(
+        '    { type: GATE, kind: INPUT, asks: "What is the target date?", '
+        "answer_into: state.target_date, on: { ANSWERED: { end: COMPLETE } } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V9" in _rules(findings)
+
+
+def test_v9_refused_input_gate_with_no_answer_into() -> None:
+    doc = _gate_process(
+        '    { type: GATE, kind: INPUT, asks: "What is the target date?", '
+        "answer_type: string, on: { ANSWERED: { end: COMPLETE } } }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V9" in _rules(findings)
+
+
+def test_v9_refused_input_gate_with_no_answered_route() -> None:
+    doc = _gate_process(
+        '    { type: GATE, kind: INPUT, asks: "What is the target date?", '
+        "answer_type: string, answer_into: state.target_date, on: {} }"
+    )
+    findings = validate(doc, registry=Registry())
+    assert "V9" in _rules(findings)
+
+
+def test_v9_refused_input_gate_answer_into_an_append_channel() -> None:
+    """D26/D41, mirroring `test_v9_refused_note_into_an_append_channel`
+    (D27): the engine's own `_state_with_answer` recomputes and re-applies
+    the decided answer on every replay pass — safe only for REPLACE."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: p
+version: 1.0.0
+title: P
+state:
+  dates: { type: "list<string>", reducer: APPEND, default: [] }
+start: gate
+nodes:
+  gate:
+    { type: GATE, kind: INPUT, asks: "What is the target date?",
+      answer_type: string, answer_into: state.dates,
+      on: { ANSWERED: { end: COMPLETE } } }
+endings:
+  COMPLETE: { outcome: SUCCESS, says: "Done." }
+  DENIED: { outcome: STOPPED, says: "Refused." }
+"""
     findings = validate(doc, registry=Registry())
     assert "V9" in _rules(findings)
 

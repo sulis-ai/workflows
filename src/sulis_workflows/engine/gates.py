@@ -35,12 +35,14 @@ from sulis_workflows.definition.model import Decider, GateNode
 from sulis_workflows.domain.ports.policy import PolicyPort, Verdict
 
 __all__ = [
+    "AnswerOutcome",
     "DeciderOutcome",
     "GateDecision",
     "GateResolution",
     "check_agent_decision",
     "evaluate_policy_decider",
     "resolve_gate",
+    "resolve_input_gate",
 ]
 
 
@@ -60,6 +62,29 @@ class DeciderOutcome:
     evidence: tuple[Mapping[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class AnswerOutcome:
+    """`kind: INPUT`'s own counterpart to `DeciderOutcome` (D26/D41, WP-05
+    Part 1) — parallel, not a variant: an `INPUT` gate is not deciding
+    whether something may proceed (ADR-028's `Verdict`), it is collecting
+    a value, so this carries `{answered, value}` instead of a `Verdict`.
+
+    Only a `person` decider can ever set `answered=True` here —
+    `PolicyPort.evaluate_policy` returns a `Verdict`, and an agent
+    decider's own `decision@1` profile has no `answer_type`-typed field,
+    so neither has anywhere to carry a real answer (a genuinely open
+    spec question, D26's own decision log; not decided here). Both kinds
+    are still asked (so their own vote is recorded for provenance, same
+    as any other gate), but always resolve `answered=False`.
+    """
+
+    decider_index: int
+    answered: bool
+    decided_by: str  # "POLICY:<id>" | "AGENT:<tool>@<v>:<session>" | "PERSON:<subject>"
+    value: Any = None
+    rationale: str | None = None
+
+
 class GateResolution(str, Enum):
     DECIDED = "DECIDED"
     NEEDS_POLICY = "NEEDS_POLICY"
@@ -72,8 +97,8 @@ class GateResolution(str, Enum):
 class GateDecision:
     resolution: GateResolution
     verdict: Verdict | None = None
-    decided_by: DeciderOutcome | None = None
-    outcomes: tuple[DeciderOutcome, ...] = ()
+    decided_by: DeciderOutcome | AnswerOutcome | None = None
+    outcomes: tuple[DeciderOutcome | AnswerOutcome, ...] = ()
     next_decider_index: int | None = None
 
 
@@ -128,6 +153,55 @@ def resolve_gate(
     # Every declared decider has answered (or none were declared at all)
     # and none decided — §7.6: "the gate stays open for a person with the
     # gate's permission" (pause).
+    return GateDecision(resolution=GateResolution.PAUSED, outcomes=tuple(outcomes))
+
+
+def resolve_input_gate(
+    node: GateNode,
+    outcomes: Sequence[AnswerOutcome],
+    *,
+    person_required: bool,
+) -> GateDecision:
+    """`kind: INPUT`'s own counterpart to `resolve_gate` (D26/D41, WP-05
+    Part 1) — the same "first decider that actually decides, decides"
+    shape (§7.6), applied to `{ANSWERED, INDETERMINATE}` instead of
+    ADR-028's `Verdict`. Kept as its own function rather than folded into
+    `resolve_gate`: the control flow is genuinely the same shape, but the
+    per-decider outcome type differs enough (a value, not a verdict) that
+    threading an `Optional[value]` through every branch of the existing,
+    already-tested `resolve_gate` for a kind it does not otherwise touch
+    was judged not worth it (WP-05 design's own reasoning).
+
+    `GateDecision.verdict` stays `None` for a `DECIDED` result here —
+    ADR-028's vocabulary genuinely does not apply to "was this
+    answered"; the answer's own value travels on `decided_by`, which is
+    an `AnswerOutcome` here rather than a `DeciderOutcome`.
+    """
+    countable = (
+        outcomes
+        if not person_required
+        else tuple(o for o in outcomes if o.decided_by.startswith("PERSON:"))
+    )
+    for outcome in countable:
+        if outcome.answered:
+            return GateDecision(
+                resolution=GateResolution.DECIDED,
+                decided_by=outcome,
+                outcomes=tuple(outcomes),
+            )
+
+    deciders = node.deciders
+    if len(outcomes) < len(deciders):
+        next_decider = deciders[len(outcomes)]
+        return GateDecision(
+            resolution=_RESOLUTION_FOR_KIND[next_decider.kind],
+            outcomes=tuple(outcomes),
+            next_decider_index=len(outcomes),
+        )
+
+    # Every declared decider has been asked (or none were declared at
+    # all) and none produced an answer — §7.6's own "the gate stays open
+    # for a person with the gate's permission" applies identically here.
     return GateDecision(resolution=GateResolution.PAUSED, outcomes=tuple(outcomes))
 
 
