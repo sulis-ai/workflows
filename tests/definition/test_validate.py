@@ -858,6 +858,185 @@ endings:
     assert "V10" in _rules(findings)
 
 
+# ------------------------------------------------------------------------------ V19 --
+# D43 (WP-05 Part 3): the fuller half of §9.1's "the calling step MUST route
+# every value of `ending`" — not just captured (V10/D40, above), but actually
+# routed on exhaustively. Reuses _CHILD_PROCESS/_CALL_CHILD_TOOL_FULLY_MAPPED
+# (endings CHILD_DONE/ESCALATED/FAILED/FORBIDDEN/CANCELLED).
+
+
+def test_v19_accepted_enum_typed_exhaustive_route_over_every_call_ending() -> None:
+    """A1: an enum-typed captured channel, routed on exhaustively (every
+    value `mechanism.result.endings` can produce has its own `when`
+    option), is accepted."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, next: route-ending }
+  route-ending:
+    type: ROUTE
+    when:
+      - { if: 'state.ending == "CHILD_DONE"', end: DONE }
+      - { if: 'state.ending == "ESCALATED"', end: ESCALATED }
+      - { if: 'state.ending == "FAILED"', end: FAILED }
+      - { if: 'state.ending == "FORBIDDEN"', end: FORBIDDEN }
+      - { if: 'state.ending == "CANCELLED"', end: CANCELLED }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" not in _rules(findings)
+
+
+def test_v19_accepted_route_with_otherwise_covering_the_rest() -> None:
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, next: route-ending }
+  route-ending:
+    type: ROUTE
+    when:
+      - { if: 'state.ending == "CHILD_DONE"', end: DONE }
+    otherwise: { end: DROPPED }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+  DROPPED: { outcome: SUCCESS, says: "Dropped." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" not in _rules(findings)
+
+
+def test_v19_refused_route_missing_one_mapped_ending_value() -> None:
+    """A2 bad-but-conformant: FORBIDDEN's own value is never tested, and
+    there is no `otherwise` to catch it."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, next: route-ending }
+  route-ending:
+    type: ROUTE
+    when:
+      - { if: 'state.ending == "CHILD_DONE"', end: DONE }
+      - { if: 'state.ending == "ESCALATED"', end: ESCALATED }
+      - { if: 'state.ending == "FAILED"', end: FAILED }
+      - { if: 'state.ending == "CANCELLED"', end: CANCELLED }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" in _rules(findings)
+
+
+def test_v19_refused_no_reachable_route_ever_tests_the_captured_value() -> None:
+    """A3: the captured value is never read at all — the exact shape
+    D39's own minimal reproduction used, now closed for real (one hop
+    further out than D40's own "never captured at all" check)."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" in _rules(findings)
+
+
+def test_v19_refused_captured_channel_not_enum_typed() -> None:
+    """D43's own decision: a plain `string` channel can hold any value at
+    all, so exhaustiveness can never be proven for it."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: string, reducer: REPLACE }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, next: route-ending }
+  route-ending:
+    type: ROUTE
+    when:
+      - { if: 'state.ending == "CHILD_DONE"', end: DONE }
+    otherwise: { end: DROPPED }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+  DROPPED: { outcome: SUCCESS, says: "Dropped." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" in _rules(findings)
+
+
+def test_v19_refused_route_reached_tests_a_different_path_entirely() -> None:
+    """The first ROUTE reached does not test the captured path at all —
+    the walk's own deliberately narrow scope (D43): it does not look
+    past this ROUTE's own other branches for one that does."""
+    doc = """
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: parent
+version: 1.0.0
+title: Parent
+state:
+  ending: { type: "enum[CHILD_DONE, ESCALATED, FAILED, FORBIDDEN, CANCELLED]", reducer: REPLACE }
+  other: { type: "enum[X, Y]", reducer: REPLACE, default: X }
+start: call
+nodes:
+  call: { type: STEP, tool: call-child@1, in: { x: inputs.x }, out: { ending: state.ending }, next: route-other }
+  route-other:
+    type: ROUTE
+    when:
+      - { if: 'state.other == "X"', end: DONE }
+      - { if: 'state.other == "Y"', end: DONE }
+inputs: { x: { type: string } }
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }
+"""
+    registry = _base_registry(_CHILD_PROCESS, _CALL_CHILD_TOOL_FULLY_MAPPED)
+    findings = validate(doc, registry=registry)
+    assert "V19" in _rules(findings)
+
+
 _SELF_CALL_TOOL = """
 api_version: sulis.workflows/v1
 kind: TOOL

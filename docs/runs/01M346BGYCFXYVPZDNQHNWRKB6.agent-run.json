@@ -1,0 +1,149 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M346BGYCFXYVPZDNQHNWRKB6",
+  "started_at": "2026-09-22T11:20:00Z",
+  "completed_at": "2026-09-22T12:30:00Z",
+  "agent": "Claude Code (CLAUDE.md, this repository) — build WP-05 Part 3 (ending-routing exhaustiveness, the fuller half) per the principal's instruction to build all three designed work packages",
+  "branch": "feat/ending-routing-exhaustiveness",
+  "summary_for_principal": "The last of the three smallest gaps is closed, and it caught a real bug on the way in.\n\nWhen one governed process calls another, capturing what happened (succeeded, failed, was denied...) is only half the job — something has to actually look at it and decide what to do next. A previous fix made sure the outcome is always captured. This one proves it's always actually read, for every possible outcome, not just some of them.\n\nRunning the new check against the one large, realistic example this system has found exactly the bug it exists to catch: two places where a recursive step's own outcome was captured but never checked — meaning a denied or failed recursive branch would have silently been reported as the whole thing succeeding. Fixed, in the same change.\n\nFull test suite: 446 passed (6 new). Lint, formatting and type checks all clean.\n\nNumbered actions:\n1. Nothing needs deciding — built, tested, ready to merge when CI is green.\n2. This closes the three-part smaller work package. Next up is the larger work: calling external services and composing tools, then concurrent execution — continuing in the order already agreed.",
+  "subjects": {
+    "primary": {
+      "coordinate": "src/sulis_workflows/definition/validate.py",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON"
+    },
+    "also": [
+      {
+        "coordinate": "examples/recursive-refinement/recursive-refinement.process.yaml",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "The new V19 check found two real, previously-undetected instances of the exact bug it exists to catch (recurse-on-recommendation, recurse-on-child both captured a recursive call's own ending but never routed on it) — fixed by adding a ROUTE after each, mirroring the existing route-inquiry-outcome precedent one level up."
+      },
+      {
+        "coordinate": "tests/definition/test_validate.py",
+        "kind": "COMPONENT",
+        "role": "ACTED_ON",
+        "reason": "Six new V19 fixtures: accepted (exhaustive route, and otherwise-covered), refused (missing one mapped value, no reachable route, non-enum channel, first-reached route testing an unrelated path)."
+      },
+      {
+        "coordinate": "docs/spec/process-definition.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "D43 added to §18; §9.1 and §14's rule table updated to name V19."
+      },
+      {
+        "coordinate": "CHANGELOG.md",
+        "kind": "PROCESS",
+        "role": "ACTED_ON",
+        "reason": "New [Unreleased] Added entry for D43."
+      },
+      {
+        "coordinate": "docs/work-packages/WP-05-gate-input-lease-renewal-and-ending-routing.md",
+        "kind": "PROCESS",
+        "role": "READ",
+        "reason": "Part 3's own design (reuse _route_is_exhaustive's discipline against a known closed value set, walk forward from node.next to find the reading ROUTE, require enum[...]) is what this PR implements, resolving its own genuinely-open design question (require enum[...]) as recommended there."
+      }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "\"Build all\" — build all three designed work packages (WP-03, WP-04, WP-05) as real, tested, merged code. This run covers WP-05 Part 3, the third and last of WP-05's own three independent parts, and the third of the eight planned PRs overall.",
+    "read_as": "Implement WP-05 Part 3 as designed: a new validator rule proving every value a PROCESS-mechanism call can produce is actually routed on downstream, for a capturing channel declared enum[...]-typed. The design document's own genuinely open question (require enum[...], or accept a plain string and always refuse absent otherwise) was mine to resolve, and I resolved it as the design's own recommendation already argued for (require enum[...], matching V6's own precedent) — a technical call, not one for the principal.",
+    "filled_in": [
+      {
+        "gap": "The design named 'a narrower purpose-built walk' as one option for finding which ROUTE (if any) reads the captured value, without specifying its exact scope — in particular, what happens when the very next node is a decision point (a ROUTE or GATE) that does NOT itself test the captured path.",
+        "assumed": "The walk follows only a plain chain of STEP.next links and stops at the FIRST branching node it reaches, whatever it is — if that node is not the ROUTE that reads the target path, the value is treated as provably unrouted (refused), rather than the walk trying to follow every branch of that OTHER decision point looking for a match somewhere downstream. This is the narrower, cheaper option, matching D36's own reasoning that a fuller graph-reachability proof is a materially bigger undertaking than this pass's own scope.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "CLAUDE.md's 'adopt the cheap seam now; defer the expensive guess' and this session's own repeated precedent (D36, D40) of choosing the narrower, provable check over the harder general one and documenting the scope limit explicitly rather than silently.",
+        "reversal_cost": "Low — the walk function (_find_capturing_route) is a single, isolated helper; widening it to follow multiple branches later does not require touching the rule's own calling code.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "WP-05 Part 3's own design document named the enum[...]-required question as 'a genuinely open design choice, not resolved here' — flagged explicitly as mine to decide during implementation, once tested against a real fixture.",
+        "assumed": "Require enum[...] (the design document's own stated recommendation), now actually decided rather than left open, since this pass is the one building and testing it against a real fixture.",
+        "basis": "GOVERNED_DECISION",
+        "grounded_in": "The design document's own reasoning, now confirmed: examples/recursive-refinement/'s own two capturing channels (inquiry_ending, recurse_ending) already ARE enum[...]-typed in practice, so requiring it costs nothing against the one large real corpus example available, and matches V6's own existing precedent for a plain ROUTE.",
+        "reversal_cost": "Low — a documented, single design decision (D43); loosening it to accept a plain string later is additive, not a breaking change to what's already refused.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D43 — V19 now proves the fuller half of §9.1's \"the calling step MUST route every value of ending\" — not just captured (V10/D40), but actually routed on exhaustively, for a captured channel enum[...]-typed — closing D36's own \"genuinely unimplemented\" finding for real; a real, previously-invisible bug in examples/recursive-refinement/ was found and fixed while building this.",
+      "problem": "D36 found the fuller ending-routing requirement unimplemented, reasoning it needed exhaustiveness-proof machinery this codebase did not have. D40 later closed only the narrower half (captured at all). The fuller half — provably routed on, for every value — remained open.",
+      "options_rejected": [
+        "Attempt a fuller reachability proof that follows every branch of an intervening decision node (not just a plain STEP.next chain) to find a matching ROUTE however deep: rejected — materially bigger (multiple diverging paths, cycle handling across branches), and D36's own 'materially bigger, more careful undertaking' reasoning still applies to it specifically.",
+        "Accept a plain string-typed captured channel, always refusing absent an otherwise: rejected — the design document's own recommendation was to require enum[...], matching V6's own precedent; a plain string channel can hold any value at all, so exhaustiveness genuinely cannot be proven for it."
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low — v19_call_ending_routed is a new, additive rule; the examples/recursive-refinement/ fixture fix is a local, two-node addition per call site with no change to anything upstream or downstream of it.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Before the fix, examples/recursive-refinement/'s own recurse-on-recommendation and recurse-on-child steps both captured a recursive call's own ending into an enum-typed channel but never routed on it (end: WORK_TREE_COMPLETE unconditionally) — a real, previously-undetected masked-failure shape.",
+          "source": "tests/examples/test_recursive_refinement.py's full suite (20 tests), run against the new checker before the fixture fix: 2 tests failed, naming both steps' own V19 findings."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "After adding a ROUTE mapping every one of recurse_ending's 9 possible values to this process's own identically-named endings (mirroring the existing route-inquiry-outcome precedent one level up), both findings are gone and the full 446-test suite passes.",
+          "source": "python -m pytest tests/, run after the fixture fix, 446 passed."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The new rule accepts an exhaustive, enum-typed route (with or without otherwise) and refuses: a route missing one mapped value with no otherwise, no reachable route at all, a captured channel that is not enum-typed, and a first-reached route that tests an unrelated path.",
+          "source": "tests/definition/test_validate.py's six new V19 tests, all passing; four of the six (the refused-side ones) confirmed failing against the pre-fix code before the fix (the other two, acceptance-side, are vacuously true either way, per V19 not existing pre-fix)."
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "Full suite passes after the fix: 446 tests (440 pre-existing + 6 new); ruff check, ruff format --check and mypy all pass clean on every CI-scoped path.",
+          "source": "python -m pytest -q; the exact ruff/mypy invocations this repository's own CI workflow uses, run locally."
+        }
+      ],
+      "revisit_if": "An author needs a captured ending routed by something other than a plain STEP.next chain to a single matching ROUTE (an intervening GATE or unrelated ROUTE) — needs the fuller, multi-branch reachability proof this decision's own rejected option names, not attempted here."
+    }
+  ],
+  "flags": [],
+  "measured": [
+    {
+      "subject": "Full test suite and CI-scoped lint/format/mypy.",
+      "method": "python -m pytest -q; python -m ruff check / ruff format --check / mypy with the exact path lists this repository's own CI workflow uses.",
+      "location": "repository root",
+      "result": "446 passed, 0 failed (440 pre-existing + 6 new). ruff check 0 findings, ruff format 0 reformats needed, mypy clean (\"Success: no issues found in 21 source files\")."
+    }
+  ],
+  "untouched": [
+    {
+      "id": "ending-routing-walk-stops-at-first-non-matching-branch",
+      "location": "definition/validate.py (_find_capturing_route)",
+      "divergence": "The forward walk from a capturing step's own next: stops the moment it reaches ANY branching node (a ROUTE that tests a different path, a GATE, a PARALLEL/FOR_EACH) — it does not follow every branch of that OTHER decision point looking for a matching ROUTE further downstream. A capturing step whose value genuinely IS read, but only after passing through an unrelated decision point first, would be refused as 'never read' by this check even though it is.",
+      "governed_exception": true,
+      "why_not_now": "A fuller proof needs to follow every branch of an intervening decision node, with its own cycle handling across branches — the same 'materially bigger, more careful undertaking' D36 already named and declined to build in its own pass; this narrower walk closes the concrete real bug this pass found without inventing that larger machinery."
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "A PROCESS-mechanism call's own captured ending, when the capturing channel is enum[...]-typed, is now provably routed on for every value it can produce (or explicitly refused if it isn't) — closing D36's own long-standing finding for the case this pass covers. This closes WP-05 (all three parts now built and merged)."
+    ],
+    "waiting_on": [],
+    "parked": [
+      {
+        "item": "WP-04 (EXTERNAL/TOOL-composite dispatch), then WP-03 (PARALLEL/JOIN/FOR_EACH) — the remaining five of eight planned PRs.",
+        "trigger": "None — already authorized by \"Build all\"; proceeding to the next item in priority order without further confirmation.",
+        "if_nothing_happens": "HOLDS_STEADY",
+        "detail": "Each remaining part is independently scoped in its own work-package document; none blocks any other. WP-04's own EXTERNAL/TOOL-composite dispatch is next, per the priority order recorded in the original design run."
+      }
+    ],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge this PR once CI is green, then proceed directly to WP-04 Part 1 (ExternalToolPort + EXTERNAL dispatch) — no principal decision needed, per the standing 'Build all' and 'merge when green' instructions.",
+      "reason": "Self-contained, fully-tested, no open questions requiring the principal's own judgement. Closes out WP-05 entirely.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

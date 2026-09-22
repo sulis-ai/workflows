@@ -6,6 +6,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 ## [Unreleased]
 
 ### Added
+- **D43 (WP-05 Part 3), new rule `V19`:** the fuller half of spec §9.1's "the calling step MUST
+  route every value of `ending`" is now provable, not just documented as unimplemented (D36).
+  A `PROCESS`-mechanism call's own captured ending must be written to an `enum[...]`-typed
+  channel, and a reachable `ROUTE` must test every value the call can produce (or cover the rest
+  with `otherwise`) — closing the gap D40 left open one hop further out. Found and fixed a real,
+  previously-undetected bug in `examples/recursive-refinement/` while building this: two steps
+  captured a recursive call's own ending but never routed on it, silently reporting a denied or
+  failed recursive branch as the whole work tree completing successfully.
 - **D42 (WP-05 Part 2):** `ClaimsPort.renew` is now reachable through a new public call,
   `heartbeat(run, scope, node)` — a still-in-progress `MUTATION`/`SIDE_EFFECT` step's hand-off
   can have its lease genuinely extended, closing the "no renewal for a hand-off slower than the

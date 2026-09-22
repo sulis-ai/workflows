@@ -127,7 +127,24 @@ nodes:
   recurse-on-recommendation:
     { type: STEP, tool: recurse-into-node@1.0.0, in: { node_brief: state.current_node_brief },
       out: { ending: state.recurse_ending }, on_depth_exhausted: { end: DEPTH_LIMIT_REACHED },
-      end: WORK_TREE_COMPLETE }
+      next: route-recommendation-recursion-outcome }
+  # §9.1's own "the calling step MUST route every value of `ending`"
+  # (V19, D43) — recurse_ending's own enum members are named identically
+  # to this process's own endings (plus the four engine-synthesised
+  # ones, always valid `end:` targets, V14), so each value's own route is
+  # a direct, mechanical 1:1 mapping, not a guess.
+  route-recommendation-recursion-outcome:
+    type: ROUTE
+    when:
+      - { if: 'state.recurse_ending == "WORK_TREE_COMPLETE"', end: WORK_TREE_COMPLETE }
+      - { if: 'state.recurse_ending == "INSUFFICIENT"', end: INSUFFICIENT }
+      - { if: 'state.recurse_ending == "DROPPED"', end: DROPPED }
+      - { if: 'state.recurse_ending == "DENIED"', end: DENIED }
+      - { if: 'state.recurse_ending == "DEPTH_LIMIT_REACHED"', end: DEPTH_LIMIT_REACHED }
+      - { if: 'state.recurse_ending == "ESCALATED"', end: ESCALATED }
+      - { if: 'state.recurse_ending == "FAILED"', end: FAILED }
+      - { if: 'state.recurse_ending == "FORBIDDEN"', end: FORBIDDEN }
+      - { if: 'state.recurse_ending == "CANCELLED"', end: CANCELLED }
 
   # --- decompose path (COMPLICATED): a PMI/PMBOK WBS under the 100% rule,
   # recurse on each child, then gate completeness before minting. ---
@@ -148,7 +165,20 @@ nodes:
   recurse-on-child:
     { type: STEP, tool: recurse-into-node@1.0.0, in: { node_brief: state.current_node_brief },
       out: { ending: state.recurse_ending }, on_depth_exhausted: { end: DEPTH_LIMIT_REACHED },
-      end: WORK_TREE_COMPLETE }
+      next: route-child-recursion-outcome }
+  # See route-recommendation-recursion-outcome's own comment above (V19, D43).
+  route-child-recursion-outcome:
+    type: ROUTE
+    when:
+      - { if: 'state.recurse_ending == "WORK_TREE_COMPLETE"', end: WORK_TREE_COMPLETE }
+      - { if: 'state.recurse_ending == "INSUFFICIENT"', end: INSUFFICIENT }
+      - { if: 'state.recurse_ending == "DROPPED"', end: DROPPED }
+      - { if: 'state.recurse_ending == "DENIED"', end: DENIED }
+      - { if: 'state.recurse_ending == "DEPTH_LIMIT_REACHED"', end: DEPTH_LIMIT_REACHED }
+      - { if: 'state.recurse_ending == "ESCALATED"', end: ESCALATED }
+      - { if: 'state.recurse_ending == "FAILED"', end: FAILED }
+      - { if: 'state.recurse_ending == "FORBIDDEN"', end: FORBIDDEN }
+      - { if: 'state.recurse_ending == "CANCELLED"', end: CANCELLED }
   completeness-gate:
     { type: STEP, tool: check-completeness@1.0.0, in: { wbs_children: state.wbs_children },
       out: { completeness_report: state.completeness_report }, next: route-completeness }

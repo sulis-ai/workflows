@@ -422,6 +422,7 @@ def validate_process(process: model.Process, registry: Registry) -> list[Finding
     findings.extend(v14_endings(process))
     findings.extend(v16_state_channels(process))
     findings.extend(v18_invalidates(process))
+    findings.extend(v19_call_ending_routed(process, registry))
     return findings
 
 
@@ -1433,3 +1434,185 @@ def v18_invalidates(process: model.Process) -> list[Finding]:
                     )
                 )
     return findings
+
+
+# ------------------------------------------------------------------------ V19 --
+
+
+def v19_call_ending_routed(process: model.Process, registry: Registry) -> list[Finding]:
+    """§9.1's own "the calling step MUST route every value of `ending`" —
+    the fuller half of the requirement D40 (`V10`, closing the narrower
+    "captured at all" half) left open, closeable after all (D43): not
+    just that `"ending"` is captured into state, but that a reachable
+    `ROUTE` actually branches on every value the call can produce.
+
+    Reuses `_route_is_exhaustive`'s own discipline (every `when` option a
+    simple `path == "LITERAL"` equality test against the SAME path,
+    `otherwise` covering whatever the `when` options don't) — applied
+    here against the call's own known, CLOSED value set
+    (`mechanism.result.endings.values()`, not a generically-declared
+    enum's members) and reached by walking FORWARD from the calling
+    step's own `next:` (`_find_capturing_route`), rather than assuming
+    the very next node is the one that reads it.
+
+    Requires the captured channel be `enum[...]`-typed (D43's own
+    decision, following V6's own precedent): a plain `string` channel can
+    hold any value at all, so exhaustiveness can never be proven for it —
+    refused rather than silently treated as "nothing to check".
+
+    Deliberately narrow, matching D36/D40's own established scope: the
+    walk follows only a plain chain of `STEP.next` links, stopping (and
+    refusing) at the first branching node it meets that is not itself the
+    testing `ROUTE` — it does not attempt to prove every branch of an
+    intervening decision eventually reaches one, which would be the
+    "materially bigger, more careful undertaking" D36 and D40 both
+    already declined to build in this pass.
+    """
+    findings: list[Finding] = []
+    for node_id, node in process.nodes.items():
+        if not isinstance(node, model.StepNode):
+            continue
+        tool, err = _resolve(registry, "TOOL", node.tool)
+        if err or tool is None or tool.mechanism.kind != "PROCESS":
+            continue
+        if tool.mechanism.result is None:
+            continue
+        target_path = node.out.get("ending")
+        if target_path is None:
+            # V10's own D40 check already refuses this shape outright —
+            # nothing further to prove about routing a value that was
+            # never captured in the first place.
+            continue
+        closed_values = set(tool.mechanism.result.endings.values())
+        if not closed_values:
+            continue
+
+        channel_name = (
+            target_path[len("state.") :] if target_path.startswith("state.") else None
+        )
+        channel = process.state.get(channel_name) if channel_name is not None else None
+        channel_type = (
+            _parse_type_or_none(channel.type) if channel is not None else None
+        )
+        if not isinstance(channel_type, TEnum):
+            findings.append(
+                Finding(
+                    rule="V19",
+                    node=node_id,
+                    message=(
+                        f"step {node_id!r} captures the call's ending into "
+                        f"{target_path!r}, which is not an `enum[...]`-typed "
+                        "channel — exhaustiveness over every value the call "
+                        "can produce cannot be proven for it"
+                    ),
+                    fix=f"declare {target_path!r}'s own channel as "
+                    f"enum[{', '.join(sorted(closed_values))}]",
+                )
+            )
+            continue
+
+        route = _find_capturing_route(process, node.next, target_path)
+        if route is None:
+            findings.append(
+                Finding(
+                    rule="V19",
+                    node=node_id,
+                    message=(
+                        f"step {node_id!r} captures the call's ending into "
+                        f"{target_path!r}, but no reachable ROUTE ever tests "
+                        "it — the captured value is provably never read"
+                    ),
+                    fix=f"add a ROUTE after {node_id!r} that tests {target_path!r}",
+                )
+            )
+            continue
+
+        covered = _route_covered_values(route, target_path)
+        if covered is None:
+            findings.append(
+                Finding(
+                    rule="V19",
+                    node=node_id,
+                    message=(
+                        f"step {node_id!r} captures the call's ending into "
+                        f"{target_path!r}, but the ROUTE it reaches does not "
+                        f"test every option against {target_path!r} with a "
+                        "simple equality check"
+                    ),
+                )
+            )
+            continue
+
+        if route.otherwise is not None:
+            continue
+        missing = closed_values - covered
+        if missing:
+            findings.append(
+                Finding(
+                    rule="V19",
+                    node=node_id,
+                    message=(
+                        f"step {node_id!r} captures the call's ending into "
+                        f"{target_path!r}, but the ROUTE that reads it has no "
+                        f"`otherwise` and does not cover: {sorted(missing)}"
+                    ),
+                    fix="add a `when` option for each missing value, or an `otherwise`",
+                )
+            )
+    return findings
+
+
+def _find_capturing_route(
+    process: model.Process, start_node_id: str | None, target_path: str
+) -> model.RouteNode | None:
+    """Walks forward from `start_node_id`, through a plain chain of STEP
+    nodes' own `next:`, stopping at the first ROUTE node reached —
+    reading what the definition actually does, the same approach
+    `_route_is_exhaustive` already takes for a plain ROUTE's own coverage,
+    rather than guessing. Any other branching shape (GATE, PARALLEL,
+    JOIN, FOR_EACH), a dangling/missing node id, or a cycle back to an
+    already-visited node ends the walk with nothing found, since there is
+    no single deterministic path left to keep following (D43's own
+    documented scope limit — see `v19_call_ending_routed`'s docstring).
+    """
+    visited: set[str] = set()
+    node_id = start_node_id
+    while node_id is not None and node_id not in visited:
+        visited.add(node_id)
+        node = process.nodes.get(node_id)
+        if node is None:
+            return None
+        if isinstance(node, model.RouteNode):
+            return node
+        if isinstance(node, model.StepNode):
+            node_id = node.next
+            continue
+        return None
+    return None
+
+
+def _route_covered_values(node: model.RouteNode, target_path: str) -> set[str] | None:
+    """The set of literal string values a ROUTE's own `when` options test
+    `target_path` against — `None` if any option is not a simple
+    `path == "LITERAL"` equality test, or tests a different path (the
+    same per-option shape `_route_is_exhaustive` already requires, here
+    checked against a known `target_path` rather than inferred from the
+    first option)."""
+    covered: set[str] = set()
+    for option in node.when:
+        try:
+            expr = parse(option.if_)
+        except DefinitionError:
+            return None
+        if not isinstance(expr, Compare) or expr.op != "==":
+            return None
+        left, right = expr.left, expr.right
+        if (
+            not isinstance(left, Path)
+            or str(left) != target_path
+            or not isinstance(right, Literal)
+            or not isinstance(right.value, str)
+        ):
+            return None
+        covered.add(right.value)
+    return covered
