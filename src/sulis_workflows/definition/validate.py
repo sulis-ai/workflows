@@ -1341,28 +1341,26 @@ def v16_state_channels(process: model.Process) -> list[Finding]:
 
 # ------------------------------------------------------------------------ V17 --
 
-_NOT_YET_EXECUTABLE_MECHANISM_KINDS = ("EXTERNAL", "TOOL")
+_NOT_YET_EXECUTABLE_MECHANISM_KINDS = ("TOOL",)
 
 
 def v17_mechanism_kinds(tool: model.Tool) -> list[Finding]:
-    """`mechanism.kind: EXTERNAL` or `TOOL` (composite) — spec §4.3, §12.1
-    ("CODE, EXTERNAL and deterministic PROCESS steps ... are run by the
-    engine before it answers"). Both are real, schema- and model-accepted
-    mechanism kinds, but nothing in `engine/run.py`'s dispatch-or-defer
-    decision (`_advance_step`) branches on either one: a StepNode whose
-    Tool declares either kind falls into the generic non-`CODE` branch and
-    is silently handed off to the caller's agent session as a `TOOL_STEP`
-    — exactly as if it were a `SKILL` Tool, which is wrong for both
-    (`EXTERNAL` should never need a hand-off at all; `TOOL`-composite has
-    no `ref` for `instructions_ref` to even carry, and its own `composes`
-    children are never dispatched by anyone). Refused rather than
-    implemented for this pass, the same "refuse rather than guess"
-    precedent D26 (`kind: INPUT`) already set: `EXTERNAL` needs a new
-    domain port this format's spec does not yet describe the shape of
-    ("per adapter" — spec's own words — names no operational contract);
-    `TOOL`-composite needs the spec's own undefined "shared values" and
-    intermediate-hand-off semantics settled first. Both are proposed spec
-    questions, not code guesses."""
+    """`mechanism.kind: TOOL` (composite) — spec §4.3, §12.1. A real,
+    schema- and model-accepted mechanism kind, but nothing in
+    `engine/run.py`'s dispatch-or-defer decision (`_advance_step`)
+    branches on it yet: a StepNode whose Tool declares `TOOL` falls into
+    the generic non-`CODE`/`EXTERNAL` branch and would be silently handed
+    off to the caller's agent session as a `TOOL_STEP` — wrong, since
+    `TOOL`-composite has no `ref` for `instructions_ref` to even carry,
+    and its own `composes` children would never be dispatched by anyone.
+    Refused rather than implemented for this pass: `TOOL`-composite needs
+    the spec's own "shared values" and intermediate-hand-off semantics
+    settled first (WP-04 Part 2, not yet built).
+
+    `mechanism.kind: EXTERNAL` was refused here for the identical reason
+    (D34) until WP-04 Part 1 built `ExternalToolPort` and wired
+    `_advance_step`/`attempt_step` to dispatch it the same way `CODE`
+    already is (D44) — no longer refused."""
 
     if tool.mechanism.kind in _NOT_YET_EXECUTABLE_MECHANISM_KINDS:
         return [
@@ -1373,10 +1371,8 @@ def v17_mechanism_kinds(tool: model.Tool) -> list[Finding]:
                     f"{tool.mechanism.kind} — not yet executable by this "
                     "engine (spec §4.3/§12.1, D34)"
                 ),
-                fix=(
-                    "use a CODE, SKILL, or PROCESS mechanism until EXTERNAL/TOOL "
-                    "(composite) dispatch is implemented"
-                ),
+                fix="use a CODE, EXTERNAL, SKILL, or PROCESS mechanism until "
+                "TOOL (composite) dispatch is implemented",
             )
         ]
     return []

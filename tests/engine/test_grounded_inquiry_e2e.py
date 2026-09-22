@@ -43,6 +43,7 @@ from sulis_workflows.definition.load import load_definition_file
 from sulis_workflows.definition.model import Process
 from sulis_workflows.definition.registry import Registry
 from sulis_workflows.domain.ports.claims import StubClaimsAdapter
+from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
 from sulis_workflows.domain.ports.policy import (
     PolicyDecision,
     StubPolicyAdapter,
@@ -234,6 +235,7 @@ def _ctx(
     return EngineContext(
         policy=policy or StubPolicyAdapter(),
         code_tool=code_tool,
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=claims,
         registry=registry,

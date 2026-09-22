@@ -40,6 +40,7 @@ from sulis_workflows.domain.ports.code_tool import (
     StubCodeToolAdapter,
     ToolTransientError,
 )
+from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
 from sulis_workflows.domain.ports.policy import (
     PolicyDecision,
     StubPolicyAdapter,
@@ -187,6 +188,7 @@ def _fresh_ctx(records=None, claims=None, policy=None, code_tool=None) -> Engine
         policy=policy or StubPolicyAdapter(),
         code_tool=code_tool
         or StubCodeToolAdapter(responses={"mod:classify": {"verdict": "A"}}),
+        external_tool=StubExternalToolAdapter(),
         records=records if records is not None else StubRecordsAdapter(),
         claims=claims if claims is not None else StubClaimsAdapter(),
         registry=Registry([_classify_tool()]),
@@ -432,6 +434,7 @@ def test_gate_agent_decider_permit_with_evidence_completes_via_report():
     producer_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -462,6 +465,7 @@ def test_gate_agent_decider_permit_with_evidence_completes_via_report():
     reviewer_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -502,6 +506,7 @@ def test_gate_agent_decider_is_refused_before_counting_when_tool_has_no_permissi
     producer_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -529,6 +534,7 @@ def test_gate_agent_decider_is_refused_before_counting_when_tool_has_no_permissi
     reviewer_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -578,6 +584,7 @@ def test_gate_agent_decider_cannot_decide_on_its_own_work():
     same_identity_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -831,6 +838,7 @@ def test_note_into_captures_a_policy_deciders_own_rationale_on_deny():
     ctx = EngineContext(
         policy=policy,
         code_tool=StubCodeToolAdapter(responses={"mod:log_note": {}}),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=registry,
@@ -869,6 +877,7 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([agentic_tool]),
@@ -886,6 +895,7 @@ def test_step_with_skill_mechanism_hands_off_as_tool_step_then_report_completes_
     ctx2 = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([agentic_tool]),
@@ -930,6 +940,7 @@ def test_tool_step_hand_off_carries_instructions_ref_and_controls():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([skill_tool]),
@@ -1155,6 +1166,7 @@ def test_decide_after_a_deny_loop_back_still_uses_the_person_deciders_permission
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([draft_tool]),
@@ -1304,6 +1316,7 @@ def test_decide_after_a_policy_indeterminate_loop_uses_the_correct_decider_index
     ctx = EngineContext(
         policy=policy,
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([draft_tool]),
@@ -1383,6 +1396,7 @@ def test_skill_mechanism_step_is_refused_before_hand_off_with_no_permission():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([agentic_tool]),
@@ -1416,6 +1430,7 @@ def test_skill_mechanism_step_is_refused_before_hand_off_when_permission_denied(
     ctx = EngineContext(
         policy=StubPolicyAdapter(denies={"workflows.classify.dispatch"}),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([agentic_tool]),
@@ -1561,6 +1576,7 @@ def test_mutation_step_second_caller_told_step_running():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=claims,
         registry=registry,
@@ -1605,6 +1621,7 @@ def test_hand_off_mutation_step_acquires_a_claim_so_a_second_caller_is_told_step
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=claims,
         registry=registry,
@@ -1654,6 +1671,7 @@ def test_heartbeat_renews_a_hand_off_steps_claim():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=claims,
         registry=registry,
@@ -1680,6 +1698,7 @@ def test_heartbeat_extends_the_deadline_so_a_later_caller_sees_step_running_not_
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=claims,
         registry=registry,
@@ -1698,6 +1717,7 @@ def test_heartbeat_extends_the_deadline_so_a_later_caller_sees_step_running_not_
     second_caller_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=claims,
         registry=registry,
@@ -1728,6 +1748,7 @@ def test_heartbeat_against_an_already_taken_over_claim_fails_cleanly():
     first_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=claims,
         registry=registry,
@@ -1743,6 +1764,7 @@ def test_heartbeat_against_an_already_taken_over_claim_fails_cleanly():
     second_ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=claims,
         registry=registry,
@@ -1893,6 +1915,7 @@ def test_step_revisited_via_a_loop_gets_a_fresh_dispatch_each_time():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=CountingAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tally_tool]),
@@ -1964,6 +1987,7 @@ def test_multi_step_loop_body_spanning_separate_report_calls_advances_correctly(
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([step_a_tool, step_b_tool]),
@@ -2059,6 +2083,7 @@ def test_gate_deny_loop_budget_is_enforced_across_askings():
     ctx = EngineContext(
         policy=policy,
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -2110,6 +2135,7 @@ def test_gate_deny_loop_with_no_own_budget_uses_the_process_declared_default():
     ctx = EngineContext(
         policy=policy,
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -2203,6 +2229,7 @@ def test_gate_loop_counts_failures_only_counts_deny_takes_toward_the_budget():
     ctx = EngineContext(
         policy=ScriptedVerdictPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -2460,6 +2487,7 @@ def test_gate_loop_body_spanning_separate_report_calls_asks_the_decider_once_per
     ctx = EngineContext(
         policy=StubPolicyAdapter(policy_denies={"always-deny@1"}),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=records,
         claims=StubClaimsAdapter(),
         registry=Registry([work_a_tool, work_b_tool]),
@@ -2601,6 +2629,7 @@ def test_gate_loop_body_spanning_separate_report_calls_uses_each_resolutions_own
     ctx = EngineContext(
         policy=FlipPolicy([Verdict.DENY, Verdict.PERMIT]),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([work_a_tool, work_b_tool]),
@@ -2855,50 +2884,165 @@ def test_decide_value_outside_an_enum_answer_type_is_refused():
         )
 
 
-def test_external_mechanism_step_is_refused_cleanly_rather_than_misrouted_as_a_skill():
-    """D34: spec §4.3/§12.1 — `EXTERNAL` is meant to be run BY THE ENGINE
-    (through a host adapter), the same side of the split as `CODE`. Before
-    this fix, `_advance_step`'s generic `!= "CODE"` branch treated it
-    exactly like a `SKILL` Tool, silently handing it off as a `TOOL_STEP`
-    the caller's agent session could never actually perform. V17 already
-    refuses this at validation time; this is the validator-bypass case."""
-    external_tool = Tool(
-        header=_header("notify-external", "TOOL"),
-        output={"value": OutputSpec(type="string")},
-        controls=(),
-        mechanism=Mechanism(kind="EXTERNAL", ref="adapter:notify"),
-        effect="SIDE_EFFECT",
-        inputs={},
-        permission="workflows.notify-external.dispatch",
-    )
-    process = Process(
-        header=_header("external-process", "PROCESS"),
-        start="notify",
-        permission="workflows.external-process.start",
-        nodes={
+def _external_notify_tool(**overrides) -> Tool:
+    defaults = {
+        "header": _header("notify-external", "TOOL"),
+        "output": {"value": OutputSpec(type="string")},
+        "controls": (),
+        "mechanism": Mechanism(kind="EXTERNAL", ref="adapter:notify"),
+        "effect": "SIDE_EFFECT",
+        "inputs": {},
+        "permission": "workflows.notify-external.dispatch",
+    }
+    defaults.update(overrides)
+    return Tool(**defaults)
+
+
+def _external_notify_process(**overrides) -> Process:
+    from sulis_workflows.definition.model import StateChannel
+
+    defaults = {
+        "header": _header("external-process", "PROCESS"),
+        "start": "notify",
+        "permission": "workflows.external-process.start",
+        "nodes": {
             "notify": StepNode(
-                id="notify", tool="notify-external@1", in_={}, out={}, end="DONE"
+                id="notify",
+                tool="notify-external@1",
+                in_={},
+                out={"value": "state.notified_value"},
+                end="DONE",
             ),
         },
-        endings={"DONE": Ending(outcome="SUCCESS", says="Done.")},
+        "endings": {"DONE": Ending(outcome="SUCCESS", says="Done.")},
+        "state": {"notified_value": StateChannel(type="string", reducer="REPLACE")},
+    }
+    defaults.update(overrides)
+    return Process(**defaults)
+
+
+def test_external_mechanism_step_dispatches_through_the_external_tool_port():
+    """A1 (WP-04 Part 1): an `EXTERNAL`-mechanism STEP dispatches through
+    `ExternalToolPort.call` before the engine answers — no `TOOL_STEP`
+    hand-off ever produced for it, the exact shape `CODE` already has
+    (`test_code_step_attempt_record_carries_its_real_resolved_inputs`).
+    D34's own regression (misrouted as a SKILL hand-off) is directly
+    disproved: the answer is `ENDED`/`DONE`, not `AWAITING`/`TOOL_STEP`."""
+    external_tool = StubExternalToolAdapter(
+        responses={"adapter:notify": {"value": "sent"}}
     )
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=external_tool,
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
-        registry=Registry([external_tool]),
+        registry=Registry([_external_notify_tool()]),
         identity="user:iain",
         platform_id="tenant-1",
     )
     answer = _run(
-        next_(process, "run-external-1", "root", ctx, inputs={}, host_inputs={})
+        next_(
+            _external_notify_process(),
+            "run-external-1",
+            "root",
+            ctx,
+            inputs={},
+            host_inputs={},
+        )
     )
     assert answer.kind is AnswerKind.ENDED
-    assert answer.ending == "FAILED"
-    assert answer.outcome == "FAILURE"
-    assert "EXTERNAL" in answer.says
-    assert answer.says != "Waiting on notify-external@1 to run."
+    assert answer.ending == "DONE"
+    assert answer.outcome == "SUCCESS"
+    assert external_tool.observed_calls == [("tenant-1", "run-external-1")]
+
+
+def test_external_mechanism_step_output_is_captured_into_state():
+    external_tool = StubExternalToolAdapter(
+        responses={"adapter:notify": {"value": "sent-for-real"}}
+    )
+    records = StubRecordsAdapter()
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        external_tool=external_tool,
+        records=records,
+        claims=StubClaimsAdapter(),
+        registry=Registry([_external_notify_tool()]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    _run(
+        next_(
+            _external_notify_process(),
+            "run-external-2",
+            "root",
+            ctx,
+            inputs={},
+            host_inputs={},
+        )
+    )
+    attempts = _run(
+        records.get_attempts(
+            "run-external-2",
+            "root",
+            "notify",
+            platform_id="tenant-1",
+            run_id="run-external-2",
+        )
+    )
+    assert attempts[0].output == {"value": "sent-for-real"}
+
+
+def test_external_mechanism_step_transient_error_is_retried(monkeypatch):
+    """The shared error-classification path (`attempt_step`) treats an
+    `EXTERNAL` dispatch failure exactly like a `CODE` one — the Tool's own
+    declared `errors[]` decides TRANSIENT/PERMANENT regardless of which
+    port raised it, and a TRANSIENT failure retries rather than failing
+    outright, mirroring `test_transient_error_retries_then_succeeds`'s own
+    CODE-mechanism proof."""
+    monkeypatch.setattr(
+        "sulis_workflows.engine.run.asyncio.sleep",
+        _no_real_sleep,
+    )
+    notify_tool = _external_notify_tool(
+        errors=(ErrorSpec(code="RATE_LIMITED", error_class="TRANSIENT"),)
+    )
+    call_count = {"n": 0}
+
+    class FlakyThenOkExternalAdapter:
+        def __init__(self):
+            self.identity = StubExternalToolAdapter().identity
+
+        async def call(self, ref, inputs, *, platform_id, run_id):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ToolTransientError("RATE_LIMITED")
+            return {"value": "sent-on-retry"}
+
+    ctx = EngineContext(
+        policy=StubPolicyAdapter(),
+        code_tool=StubCodeToolAdapter(),
+        external_tool=FlakyThenOkExternalAdapter(),
+        records=StubRecordsAdapter(),
+        claims=StubClaimsAdapter(),
+        registry=Registry([notify_tool]),
+        identity="user:iain",
+        platform_id="tenant-1",
+    )
+    answer = _run(
+        next_(
+            _external_notify_process(),
+            "run-external-3",
+            "root",
+            ctx,
+            inputs={},
+            host_inputs={},
+        )
+    )
+    assert answer.kind is AnswerKind.ENDED
+    assert answer.ending == "DONE"
+    assert call_count["n"] == 2
 
 
 def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted():
@@ -2942,6 +3086,7 @@ def test_tool_composite_mechanism_step_is_refused_cleanly_rather_than_misrouted(
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([composite_tool]),
@@ -3011,6 +3156,7 @@ def test_control_fail_repair_gives_one_more_attempt_before_then():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=RepairAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tool, profile]),
@@ -3081,6 +3227,7 @@ def test_control_fail_repair_receives_the_failures_as_input():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=RepairAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tool, profile]),
@@ -3139,6 +3286,7 @@ def test_skip_a_trivial_step_under_advisory_policy_reaches_the_end():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=NeverCalledAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tool]),
@@ -3187,6 +3335,7 @@ def test_skip_is_refused_without_permission_being_granted():
     ctx = EngineContext(
         policy=policy,
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -3233,6 +3382,7 @@ def test_skip_a_standard_step_is_refused_even_under_advisory():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -3278,6 +3428,7 @@ def test_skip_is_refused_when_the_process_is_strict_not_advisory():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -3322,6 +3473,7 @@ def test_skip_is_refused_when_the_step_declares_no_skip_permission():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([]),
@@ -3375,6 +3527,7 @@ def test_advisory_process_that_is_never_skipped_runs_normally():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=code_tool,
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tool]),
@@ -3459,6 +3612,7 @@ def test_process_call_ref_translates_outputs_and_endings():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(responses={"mod:child_work": {"y": "hello"}}),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([child_work_tool, child_process, call_child_tool]),
@@ -3536,6 +3690,7 @@ def test_process_call_inline_hands_off_and_resumes_via_report():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([skill_tool, call_tool]),
@@ -3626,6 +3781,7 @@ def test_process_call_depth_exhausted_routes_to_on_depth_exhausted():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(responses={"mod:child_work": {}}),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([child_work_tool, child_process, call_child_tool]),
@@ -3705,6 +3861,7 @@ def test_process_call_ref_child_with_no_permission_is_forbidden():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=CountingAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([child_work_tool, child_process, call_child_tool]),
@@ -3790,6 +3947,7 @@ def test_process_call_control_failure_on_translated_output_routes_via_then():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(responses={"mod:child_work": {}}),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([child_work_tool, child_process, call_child_tool, profile]),
@@ -3864,6 +4022,7 @@ def test_process_call_not_capturing_ending_is_refused_cleanly():
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(responses={"mod:child_work": {"y": "hello"}}),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([child_work_tool, child_process, call_child_tool]),
@@ -3920,6 +4079,7 @@ def test_step_writing_a_mismatched_value_to_an_append_channel_ends_cleanly() -> 
         code_tool=StubCodeToolAdapter(
             responses={"mod:gather": {"findings": "not a list"}}
         ),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([tool]),
@@ -4019,6 +4179,7 @@ def test_step_appending_a_real_list_to_an_append_channel_accumulates() -> None:
     ctx = EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=CapturingAdapter(),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=Registry([gather_tool, gather_again_tool, snapshot_tool]),

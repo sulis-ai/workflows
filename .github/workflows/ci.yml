@@ -32,6 +32,7 @@ jobs:
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
           src/sulis_workflows/domain/ports/code_tool.py
+          src/sulis_workflows/domain/ports/external_tool.py
           tests/test_policy_port.py tests/test_records_port.py tests/test_claims_port.py
       - name: Format (ruff format --check)
         run: >
@@ -42,6 +43,7 @@ jobs:
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
           src/sulis_workflows/domain/ports/code_tool.py
+          src/sulis_workflows/domain/ports/external_tool.py
           tests/test_policy_port.py tests/test_records_port.py tests/test_claims_port.py
       - name: Type check (mypy)
         run: >
@@ -52,6 +54,7 @@ jobs:
           src/sulis_workflows/domain/ports/records.py
           src/sulis_workflows/domain/ports/claims.py
           src/sulis_workflows/domain/ports/code_tool.py
+          src/sulis_workflows/domain/ports/external_tool.py
 
   wheel:
     # The suite above runs against the source tree, where the v1 schemas and

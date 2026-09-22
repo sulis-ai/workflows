@@ -32,6 +32,7 @@ from sulis_workflows.definition.registry import Registry
 from sulis_workflows.definition.validate import validate_definition
 from sulis_workflows.domain.ports.claims import StubClaimsAdapter
 from sulis_workflows.domain.ports.code_tool import StubCodeToolAdapter
+from sulis_workflows.domain.ports.external_tool import StubExternalToolAdapter
 from sulis_workflows.domain.ports.policy import StubPolicyAdapter
 from sulis_workflows.domain.ports.records import StubRecordsAdapter
 from sulis_workflows.engine.run import AnswerKind, EngineContext, next_, report
@@ -158,6 +159,7 @@ def _fresh_ctx(registry: Registry) -> EngineContext:
     return EngineContext(
         policy=StubPolicyAdapter(),
         code_tool=StubCodeToolAdapter(responses=_CODE_RESPONSES),
+        external_tool=StubExternalToolAdapter(),
         records=StubRecordsAdapter(),
         claims=StubClaimsAdapter(),
         registry=registry,
