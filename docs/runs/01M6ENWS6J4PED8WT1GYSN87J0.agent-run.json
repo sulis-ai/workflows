@@ -70,7 +70,7 @@
         {
           "tag": "VERIFIED",
           "claim": "With source and documents back at main and the tests kept, 22 tests failed, including every session and V20 test; test_engine_and_compiler_never_read_session passed, being a guard with no red state.",
-          "source": "git stash push -- src docs CHANGELOG.md pyproject.toml; python -m pytest -q tests/definition tests/test_smoke.py: 22 failed, 224 passed"
+          "source": "git restore --source=origin/main --worktree -- src docs CHANGELOG.md pyproject.toml; uv run --all-extras python -m pytest -q tests/definition tests/test_smoke.py: 22 failed, 225 passed, exit code 1"
         }
       ]
     }
@@ -85,7 +85,7 @@
     {
       "subject": "The whole suite, on the head.",
       "method": "uv run --all-extras python -m pytest -q tests",
-      "result": "All passed, exit code 0."
+      "result": "All passed, exit code 0, on the earlier head e5d32e9. Not re-run after uv.lock and the load.py message change came out; the tests near the change were."
     },
     {
       "subject": "Tests lost.",
@@ -95,7 +95,7 @@
     {
       "subject": "Changed lines excluding tests.",
       "method": "git diff --numstat 86638b6 on the committed head, leaving out tests/; uv.lock is not committed",
-      "result": "299 added plus removed, against a limit of 400."
+      "result": "277 added plus removed, against a limit of 400."
     },
     {
       "subject": "This machine's pytest temp folder.",
@@ -109,12 +109,18 @@
       "location": "src/sulis_workflows/definition/schema/tool.v1.schema.json",
       "divergence": "A Tool's inline process body has its own step shape, without session (and already without skip_permission), so session there is refused by V1.",
       "why_not_now": "The ask names only the Process side. Allowing it later is additive."
+    },
+    {
+      "id": "v1-message-stops-at-node",
+      "location": "src/sulis_workflows/definition/load.py",
+      "divergence": "A V1 refusal of a malformed session names the node, not the fault inside the session. A change that located it was removed from this branch as unrequested, with the one test assertion that read it.",
+      "why_not_now": "The principal did not ask for it, and no test on main or in the ask needs it. If wanted, it is a separate ask."
     }
   ],
   "lessons": [
     {
       "maxim": "A refusal test is not red just because the document is refused: check that it is refused for the reason under test.",
-      "incident": "V1 already refused session on main, so the bare refused fixtures passed before the change; the location check is what made them fail first. A typo ('knext') in one fixture made it refuse as invalid YAML, so a test now loads the same document without session.",
+      "incident": "V1 already refused session on main, so the bare refused fixtures passed before the change; the check of where the schema itself places the fault is what makes them fail first. A typo ('knext') in one fixture made it refuse as invalid YAML, so a test now loads the same document without session.",
       "applies_to": "NONE"
     }
   ],

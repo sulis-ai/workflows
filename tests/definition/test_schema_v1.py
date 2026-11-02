@@ -109,7 +109,6 @@ def test_session_fixture_refused_at_its_own_fault(fixture: str, location: str) -
     with pytest.raises(DefinitionError) as excinfo:
         load_definition_file(path)
     assert excinfo.value.rule == "V1"
-    assert f"nodes/step/{location}: " in excinfo.value.message
     node = yaml.safe_load(path.read_text(encoding="utf-8"))["nodes"]["step"]
     assert _faults_in_step(node) == [location]
 
