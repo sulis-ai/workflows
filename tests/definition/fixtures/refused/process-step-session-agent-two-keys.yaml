@@ -1,0 +1,17 @@
+# V1: `agent` is exactly one form; two at once is ambiguous.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: step-session-refused
+version: 1.0.0
+title: Refused step session
+start: step
+nodes:
+  step:
+    type: STEP
+    tool: do-it@1
+    in: {}
+    out: {}
+    session: { mode: FRESH, agent: {same: true, kind: reviewer}, model_role: BUILD, sees: [] }
+    end: DONE
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }

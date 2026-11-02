@@ -715,6 +715,47 @@
         "skip_permission": {
           "type": "string",
           "minLength": 1
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "agent", "model_role", "sees"],
+          "properties": {
+            "mode": { "enum": ["CONTINUE_IF_LOCAL", "FRESH"] },
+            "agent": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["same"],
+                  "properties": { "same": { "const": true } }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind"],
+                  "properties": {
+                    "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["different_from"],
+                  "properties": {
+                    "different_from": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ]
+            },
+            "model_role": { "enum": ["JUDGEMENT", "BUILD"] },
+            "sees": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "uniqueItems": true,
+              "maxItems": 20
+            }
+          }
         }
       }
     },

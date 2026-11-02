@@ -11,7 +11,7 @@ def test_package_imports():
     from sulis_workflows import compiler, domain  # noqa: F401
     from sulis_workflows.domain import ports  # noqa: F401
 
-    assert sulis_workflows.__version__ == "0.12.2"
+    assert sulis_workflows.__version__ == "0.13.0"
 
 
 def test_langgraph_available():

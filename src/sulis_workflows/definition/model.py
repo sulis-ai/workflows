@@ -194,6 +194,25 @@ class ControlFail:
 
 
 @dataclass(frozen=True, slots=True)
+class StepAgent:
+    """Which agent does a step: exactly one field is set (the schema's `oneOf`)."""
+
+    same: bool = False
+    kind: str | None = None  # the host's opaque word
+    different_from: str | None = None  # another STEP's id (V20)
+
+
+@dataclass(frozen=True, slots=True)
+class StepSession:
+    """Carried for the host, never acted on by this library (spec §7.1, D49)."""
+
+    mode: str
+    agent: StepAgent
+    model_role: str
+    sees: tuple[str, ...]  # the host's opaque words
+
+
+@dataclass(frozen=True, slots=True)
 class StepNode:
     id: str
     tool: str
@@ -211,6 +230,7 @@ class StepNode:
     next: str | None = None
     end: str | None = None
     skip_permission: str | None = None  # host's opaque grammar (ADR-024); spec §6, D15
+    session: StepSession | None = None  # spec §7.1, D49
     type: str = "STEP"
 
 
@@ -476,6 +496,22 @@ def _decider(d: Mapping[str, Any]) -> Decider:
     )
 
 
+def _step_session(d: Mapping[str, Any] | None) -> StepSession | None:
+    if d is None:
+        return None
+    agent = d["agent"]
+    return StepSession(
+        mode=d["mode"],
+        agent=StepAgent(
+            same=agent.get("same", False),
+            kind=agent.get("kind"),
+            different_from=agent.get("different_from"),
+        ),
+        model_role=d["model_role"],
+        sees=tuple(d["sees"]),
+    )
+
+
 def _node(node_id: str, d: Mapping[str, Any]) -> Node:
     node_type = d["type"]
     if node_type == "STEP":
@@ -498,6 +534,7 @@ def _node(node_id: str, d: Mapping[str, Any]) -> Node:
             next=d.get("next"),
             end=d.get("end"),
             skip_permission=d.get("skip_permission"),
+            session=_step_session(d.get("session")),
         )
     if node_type == "ROUTE":
         return RouteNode(

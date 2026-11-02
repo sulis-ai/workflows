@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sulis_workflows.definition.load import load_definition
 from sulis_workflows.definition.registry import Registry
-from sulis_workflows.definition.validate import Finding, validate
+from sulis_workflows.definition.validate import Finding, validate, validate_process
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1861,3 +1861,82 @@ effect: QUERY
     registry = Registry([load_definition(attack_claim_tool, fmt="yaml")])
     findings = validate(doc, registry=registry)
     assert not [f for f in findings if "inline process body" in f.message]
+
+
+# ------------------------------------------------------------------------------ V20 --
+# D49: `agent.different_from` must name another STEP. Asserts only on V20's own
+# findings, so the unregistered tools these documents name do not matter.
+
+
+def _process_with_different_from(target: str) -> str:
+    session = (
+        "session: { mode: FRESH, agent: { different_from: "
+        + target
+        + " }, model_role: JUDGEMENT, sees: [test-runs] }"
+    )
+    return _process_with_step(
+        "    { type: STEP, tool: echo@1, in: {}, out: {}, next: review }\n"
+        "  review:\n"
+        "    type: STEP\n"
+        "    tool: echo@1\n"
+        "    in: {}\n"
+        "    out: {}\n"
+        f"    {session}\n"
+        "    next: which\n"
+        "  which:\n"
+        "    type: ROUTE\n"
+        "    when: [{ if: 'state.verdict == \"SURVIVED\"', end: DONE }]\n"
+        "    otherwise: { end: DONE }"
+    )
+
+
+def _v20(doc: str) -> list[Finding]:
+    process = _load(doc)
+    return [f for f in validate_process(process, Registry()) if f.rule == "V20"]
+
+
+def test_v20_accepted_different_from_another_step() -> None:
+    assert _v20(_process_with_different_from("step")) == []
+
+
+def test_v20_refused_different_from_itself() -> None:
+    findings = _v20(_process_with_different_from("review"))
+    assert "V20" in _rules(findings)
+    assert findings[0].node == "review"
+    assert "'review'" in findings[0].message
+
+
+def test_v20_refused_different_from_naming_no_node() -> None:
+    findings = _v20(_process_with_different_from("ghost"))
+    assert "V20" in _rules(findings)
+    assert findings[0].node == "review"
+    assert "'ghost'" in findings[0].message
+
+
+def test_v20_refused_different_from_naming_a_route() -> None:
+    findings = _v20(_process_with_different_from("which"))
+    assert "V20" in _rules(findings)
+    assert findings[0].node == "review"
+    assert "'which'" in findings[0].message
+
+
+def test_v20_adds_no_check_on_kind_or_sees_words() -> None:
+    doc = _process_with_step(
+        "    type: STEP\n"
+        "    tool: echo@1\n"
+        "    in: {}\n"
+        "    out: {}\n"
+        "    session: { mode: FRESH, agent: { kind: no-such-agent },"
+        " model_role: BUILD, sees: [no-such-view] }\n"
+        "    end: DONE"
+    )
+    assert load_definition(doc, fmt="yaml").nodes["step"].session.sees == (
+        "no-such-view",
+    )
+    findings = validate_process(_load(doc), Registry())
+    assert not [
+        f
+        for f in findings
+        if "no-such-agent" in f.message or "no-such-view" in f.message
+    ]
+    assert "V20" not in _rules(findings)

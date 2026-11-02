@@ -1,0 +1,17 @@
+# V1: `sees` holds each word once.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: step-session-refused
+version: 1.0.0
+title: Refused step session
+start: step
+nodes:
+  step:
+    type: STEP
+    tool: do-it@1
+    in: {}
+    out: {}
+    session: { mode: FRESH, agent: {same: true}, model_role: BUILD, sees: [plan, plan] }
+    end: DONE
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }

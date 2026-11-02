@@ -425,6 +425,7 @@ def validate_process(process: model.Process, registry: Registry) -> list[Finding
     findings.extend(v16_state_channels(process))
     findings.extend(v18_invalidates(process))
     findings.extend(v19_call_ending_routed(process, registry))
+    findings.extend(v20_session(process))
     return findings
 
 
@@ -1679,6 +1680,40 @@ def v19_call_ending_routed(process: model.Process, registry: Registry) -> list[F
                     fix="add a `when` option for each missing value, or an `otherwise`",
                 )
             )
+    return findings
+
+
+def v20_session(process: model.Process) -> list[Finding]:
+    """§7.1's step `session` (D49): `agent.different_from` must name another STEP.
+    Everything else about `session` is the schema's (V1); `kind` and `sees` values are
+    the host's words, refused by the host if it does not have them (ADR-227 decision 8).
+    """
+    findings: list[Finding] = []
+    for node_id, node in process.nodes.items():
+        if not isinstance(node, model.StepNode) or node.session is None:
+            continue
+        target = node.session.agent.different_from
+        if target is None:
+            continue
+        if target == node_id:
+            problem = "names the step itself"
+        elif target not in process.nodes:
+            problem = "names no node"
+        elif not isinstance(process.nodes[target], model.StepNode):
+            problem = "names a node that is not a STEP"
+        else:
+            continue
+        findings.append(
+            Finding(
+                rule="V20",
+                node=node_id,
+                message=(
+                    f"step {node_id!r}: session.agent.different_from "
+                    f"{target!r} {problem}"
+                ),
+                fix="name another STEP of this process",
+            )
+        )
     return findings
 
 
