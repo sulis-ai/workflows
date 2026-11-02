@@ -95,7 +95,7 @@
     {
       "subject": "Changed lines excluding tests.",
       "method": "git diff --numstat 86638b6 on the committed head, leaving out tests/; uv.lock is not committed",
-      "result": "About 260 added plus removed, against a limit of 400."
+      "result": "299 added plus removed, against a limit of 400."
     },
     {
       "subject": "This machine's pytest temp folder.",
