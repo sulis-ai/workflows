@@ -19,7 +19,7 @@ mechanism:
     start: attack
     nodes:
       attack:
-        { type: STEP, tool: attack-claim@1, in: { candidate: state.current }, out: { survived: state.survived }, next: knext: keep-or-drop, session: { mode: FRESH, agent: { same: true }, model_role: BUILD, sees: [] } }
+        { type: STEP, tool: attack-claim@1, in: { candidate: state.current }, out: { survived: state.survived }, next: keep-or-drop, session: { mode: FRESH, agent: { same: true }, model_role: BUILD, sees: [] } }
       keep-or-drop:
         type: ROUTE
         when:

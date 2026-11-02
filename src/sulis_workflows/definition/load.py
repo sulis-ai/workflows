@@ -84,6 +84,29 @@ def _format_finding(error) -> str:  # jsonschema.exceptions.ValidationError
     return f"{location}: {error.message}"
 
 
+def _located(error) -> list:  # list[jsonschema.exceptions.ValidationError]
+    """Descend a failed ``oneOf`` into the branch the document chose.
+
+    A node is one of several shapes, told apart by its ``type``. Only the branch whose
+    ``type`` matches says what is wrong inside it; the others only say they do not fit.
+    With no such branch the error is returned as it is.
+    """
+
+    if error.validator != "oneOf" or not error.context:
+        return [error]
+    branches: dict[Any, list] = {}
+    for sub in error.context:
+        branches.setdefault(sub.schema_path[0], []).append(sub)
+    chosen = [
+        faults
+        for faults in branches.values()
+        if not any(list(f.relative_path) == ["type"] for f in faults)
+    ]
+    if len(chosen) != 1:
+        return [error]
+    return [inner for f in chosen[0] for inner in _located(f)]
+
+
 def load_definition(text: str, *, fmt: str = "yaml") -> model.Definition:
     """Parse and validate a definition document already read into memory.
 
@@ -115,7 +138,10 @@ def load_definition(text: str, *, fmt: str = "yaml") -> model.Definition:
 
     schema_path = str(_SCHEMA_DIR / _SCHEMA_BY_KIND[kind])
     validator = Draft202012Validator(_schema(kind))
-    findings = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
+    findings = sorted(
+        (inner for e in validator.iter_errors(doc) for inner in _located(e)),
+        key=lambda e: list(e.absolute_path),
+    )
     if findings:
         message = "; ".join(_format_finding(e) for e in findings)
         raise DefinitionError(message, rule="V1", schema_path=schema_path)

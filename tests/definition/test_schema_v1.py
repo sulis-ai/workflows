@@ -109,9 +109,24 @@ def test_session_fixture_refused_at_its_own_fault(fixture: str, location: str) -
     with pytest.raises(DefinitionError) as excinfo:
         load_definition_file(path)
     assert excinfo.value.rule == "V1"
-    assert "nodes/step" in excinfo.value.message
+    assert f"nodes/step/{location}: " in excinfo.value.message
     node = yaml.safe_load(path.read_text(encoding="utf-8"))["nodes"]["step"]
     assert _faults_in_step(node) == [location]
+
+
+def test_session_in_a_tools_inline_body_is_refused_for_session_alone() -> None:
+    path = FIXTURES / "refused" / "tool-process-inline-step-session.yaml"
+    text = path.read_text(encoding="utf-8")
+    with pytest.raises(DefinitionError) as excinfo:
+        load_definition(text)
+    assert "not valid YAML" not in excinfo.value.message
+    assert "mechanism/process/nodes/attack" in excinfo.value.message
+    without = text.replace(
+        ", session: { mode: FRESH, agent: { same: true }, model_role: BUILD, sees: [] }",
+        "",
+    )
+    assert without != text
+    load_definition(without)
 
 
 def test_session_schema_matches_the_decision() -> None:
