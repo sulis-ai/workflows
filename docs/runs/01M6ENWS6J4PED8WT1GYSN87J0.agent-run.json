@@ -1,0 +1,96 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "id": "01M6ENWS6J4PED8WT1GYSN87J0",
+  "started_at": "2026-11-02T17:31:55Z",
+  "agent": "Claude Code (CLAUDE.md, this repository), run by the Sulis deliver-work@2 workflow",
+  "branch": "step-session-format",
+  "summary_for_principal": "A process step can now say how it should be run: carry on in the open session or start fresh, which agent does it, which kind of model, and what it is shown. Badly formed settings are refused when a definition loads. Definitions without the setting behave as before. The library only carries this; the platform uses it in a later piece of work. Version 0.13.0 is prepared but not tagged.",
+  "subjects": {
+    "primary": { "coordinate": "src/sulis_workflows/definition/schema/process.v1.schema.json", "kind": "CONTRACT_FORM", "role": "ACTED_ON" },
+    "also": [
+      { "coordinate": "src/sulis_workflows/definition/model.py", "kind": "COMPONENT", "role": "ACTED_ON", "reason": "StepAgent, StepSession and StepNode.session." },
+      { "coordinate": "src/sulis_workflows/definition/validate.py", "kind": "COMPONENT", "role": "ACTED_ON", "reason": "Rule V20." },
+      { "coordinate": "docs/spec/process-definition.md", "kind": "CONTRACT_FORM", "role": "ACTED_ON", "reason": "Sections 7.1, 14, 16 and D49." }
+    ]
+  },
+  "interpretation": {
+    "ask_as_given": "Piece 3 of the founder-approved brief of 2 Nov, format half: a step's session in the process definition; a well-formed one loads and every malformed one is refused by name.",
+    "read_as": "Add the optional closed object, rule V20, the spec text and untagged 0.13.0 release prep. The library carries session and never executes it.",
+    "filled_in": [
+      {
+        "gap": "The ask adds session only to the Process schema; a Tool's inline process body has its own copy of the step shape.",
+        "assumed": "Leave the Tool schema unchanged, so session there stays refused by V1. Allowing it later is additive.",
+        "basis": "MOST_REVERSIBLE",
+        "reversal_cost": "Low: an additive schema change.",
+        "confidence": "HIGH"
+      },
+      {
+        "gap": "The ask names only pyproject.toml for the version.",
+        "assumed": "Also change __version__, the smoke test and both install guides, as bump commits 8d20d97 and c0cc563 did.",
+        "basis": "STACK_IDIOM",
+        "reversal_cost": "Low: text edits.",
+        "confidence": "HIGH"
+      }
+    ],
+    "proceeded_without_answer": false
+  },
+  "conformance_claim": "CONFORMS_TO_TARGET",
+  "decisions": [
+    {
+      "headline": "D49: a step's session is an optional closed object; V20 refuses a bad agent.different_from",
+      "problem": "Step policy lived in host code because every object in the format is closed.",
+      "options_rejected": ["A host-only extension field: an open field is what spec 1.4 refuses, and the library could not check it."],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "Low: optional, minor version.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "With source and documents back at main and the tests kept, 22 tests failed, including every session and V20 test; test_engine_and_compiler_never_read_session passed, being a guard with no red state.",
+          "source": "git stash push -- src docs CHANGELOG.md pyproject.toml; python -m pytest -q tests/definition tests/test_smoke.py: 22 failed, 224 passed"
+        }
+      ]
+    }
+  ],
+  "flags": [],
+  "measured": [
+    { "subject": "Tests near the change, on the head.", "method": "TMPDIR=<workspace>/tmp uv run --all-extras python -m pytest -q tests/definition tests/test_smoke.py", "result": "246 passed, exit code 0." },
+    { "subject": "Tests lost.", "method": "uv run --all-extras python -m pytest --collect-only -q tests, on main and on the head", "result": "467 collected on main, 496 on the head: none lost. The command needs --all-extras here because pytest is an optional dependency." },
+    { "subject": "Changed lines excluding tests.", "method": "git diff --numstat origin/main, leaving out tests/", "result": "233 added plus removed, against a limit of 400." },
+    { "subject": "This machine's pytest temp folder.", "method": "Running tests/definition/test_cli.py without TMPDIR", "result": "Its 5 tmp_path tests error because /tmp/pytest-of-sulis-agent belongs to another user, whatever the code. TMPDIR was pointed inside the workspace; that folder was left alone." }
+  ],
+  "untouched": [
+    {
+      "id": "tool-inline-step-session",
+      "location": "src/sulis_workflows/definition/schema/tool.v1.schema.json",
+      "divergence": "A Tool's inline process body has its own step shape, without session (and already without skip_permission), so session there is refused by V1.",
+      "why_not_now": "The ask names only the Process side. Allowing it later is additive."
+    },
+    {
+      "id": "v1-message-stops-at-node",
+      "location": "src/sulis_workflows/definition/load.py",
+      "divergence": "V1's message for a bad session stops at the node ('is not valid under any of the given schemas'), because $defs/node is a oneOf, so it does not name the faulty key. This is true of every node field.",
+      "why_not_now": "A change to V1's reporting for every node, outside this ask. The tests read the fault from node_step directly."
+    }
+  ],
+  "lessons": [
+    {
+      "maxim": "A refusal test is not red just because the document is refused: check that it is refused for the reason under test.",
+      "incident": "V1 already refused session on main, so the bare refused fixtures passed before the change; the location check is what made them fail first.",
+      "applies_to": "NONE"
+    }
+  ],
+  "where_next": {
+    "ready_now": ["After merge, the operator tags v0.13.0; the install guides pin that tag and fail until it exists."],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [],
+    "recommended_next": {
+      "recommendation": "Merge, tag v0.13.0, then build the platform half that reads session.",
+      "reason": "The platform can pin the new format only once the tag exists.",
+      "urgency": "NOT_URGENT"
+    }
+  }
+}

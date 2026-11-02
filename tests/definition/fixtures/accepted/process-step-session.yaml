@@ -1,0 +1,31 @@
+# Spec §7.1 (D49): a step's `session`, one step per `agent` form; `sees` may be empty.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: step-session
+version: 1.0.0
+title: A step's session, in each agent form
+start: build
+nodes:
+  build:
+    type: STEP
+    tool: build-it@1
+    in: {}
+    out: {}
+    session: { mode: CONTINUE_IF_LOCAL, agent: { same: true }, model_role: BUILD, sees: [] }
+    next: specialist
+  specialist:
+    type: STEP
+    tool: specialise@1
+    in: {}
+    out: {}
+    session: { mode: FRESH, agent: { kind: security-reviewer }, model_role: BUILD, sees: [plan, diff] }
+    next: review
+  review:
+    type: STEP
+    tool: review-it@1
+    in: {}
+    out: {}
+    session: { mode: FRESH, agent: { different_from: build }, model_role: JUDGEMENT, sees: [test-runs] }
+    end: DONE
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }

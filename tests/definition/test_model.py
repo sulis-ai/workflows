@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
+
+import pytest
 
 from sulis_workflows.definition.load import load_definition_file
 from sulis_workflows.definition.model import GateNode, RouteNode, StepNode
@@ -104,3 +107,60 @@ endings:
     implicit = load_definition(doc, fmt="yaml")
     assert implicit.nodes["gate"].kind == "APPROVAL"
     assert process is not None  # keep both fixtures exercised
+
+
+def test_step_session_loads_each_agent_form_with_exact_values() -> None:
+    from sulis_workflows.definition.model import StepAgent, StepSession
+
+    nodes = load_definition_file(
+        FIXTURES / "accepted" / "process-step-session.yaml"
+    ).nodes
+    assert nodes["build"].session == StepSession(
+        mode="CONTINUE_IF_LOCAL",
+        agent=StepAgent(same=True),
+        model_role="BUILD",
+        sees=(),
+    )
+    assert nodes["specialist"].session == StepSession(
+        mode="FRESH",
+        agent=StepAgent(kind="security-reviewer"),
+        model_role="BUILD",
+        sees=("plan", "diff"),
+    )
+    assert nodes["review"].session == StepSession(
+        mode="FRESH",
+        agent=StepAgent(different_from="build"),
+        model_role="JUDGEMENT",
+        sees=("test-runs",),
+    )
+
+
+def test_step_without_session_loads_none() -> None:
+    process = load_definition_file(FIXTURES / "accepted" / "process-appendix-a.yaml")
+    steps = [n for n in process.nodes.values() if isinstance(n, StepNode)]
+    assert steps
+    assert all(step.session is None for step in steps)
+
+
+def test_step_session_types_are_frozen_and_slotted() -> None:
+    from sulis_workflows.definition.model import StepAgent, StepSession
+
+    agent = StepAgent(kind="reviewer")
+    session = StepSession(mode="FRESH", agent=agent, model_role="BUILD", sees=())
+    for instance, name in ((agent, "kind"), (session, "mode")):
+        assert not hasattr(instance, "__dict__")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(instance, name, "other")
+    assert [(f.name, f.default) for f in dataclasses.fields(StepAgent)] == [
+        ("same", False),
+        ("kind", None),
+        ("different_from", None),
+    ]
+    assert [f.name for f in dataclasses.fields(StepSession)] == [
+        "mode",
+        "agent",
+        "model_role",
+        "sees",
+    ]
+    names = [f.name for f in dataclasses.fields(StepNode)]
+    assert names[-2:] == ["session", "type"]

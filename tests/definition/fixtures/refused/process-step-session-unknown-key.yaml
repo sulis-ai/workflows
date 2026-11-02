@@ -1,0 +1,17 @@
+# V1: `session` is closed; a plausible extra key is refused.
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: step-session-refused
+version: 1.0.0
+title: Refused step session
+start: step
+nodes:
+  step:
+    type: STEP
+    tool: do-it@1
+    in: {}
+    out: {}
+    session: { mode: FRESH, agent: {same: true}, model_role: BUILD, sees: [], timeout: 60 }
+    end: DONE
+endings:
+  DONE: { outcome: SUCCESS, says: "Done." }

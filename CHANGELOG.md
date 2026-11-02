@@ -5,7 +5,14 @@ versioning: [SemVer](https://semver.org/). A release is a `vX.Y.Z` git tag.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-02
+
 ### Added
+- **D49:** a step MAY declare `session`, an optional closed object saying whether it may continue
+  the open agent session or starts fresh, which agent does it, which kind of model (a role, never
+  a model id) and what it is shown (spec §7.1). `V20` refuses an `agent.different_from` naming no
+  node, a node that is not a STEP, or the step itself. The library carries it and never acts on it;
+  documents without it validate as before.
 - **D48 (WP-03 Part 3):** closes WP-03's own last part — the eighth and final originally planned
   PR across WP-03/WP-04/WP-05 is now built, tested and merged. `V11` refuses a `PARALLEL`'s
   `branches`/`join` naming no real node, and a `JOIN` reachable from other than exactly one
