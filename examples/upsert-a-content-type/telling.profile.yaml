@@ -1,0 +1,15 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: telling
+version: 1.0.0
+title: What a person is told when the run stops
+summary: One sentence for the person and the reasons behind it, one per finding or note.
+grounded_in: This format's own convention.
+schema:
+  type: object
+  required: [says, reasons]
+  additionalProperties: false
+  properties:
+    says:    { type: string, minLength: 20 }
+    reasons: { type: array, items: { type: string } }
+checker: profile-conformance@1

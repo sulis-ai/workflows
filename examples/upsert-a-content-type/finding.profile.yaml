@@ -1,0 +1,19 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: finding
+version: 1.0.0
+title: Finding
+summary: One thing a check or a trial found wrong, and where.
+grounded_in: >-
+  This format's own convention. It is a smaller shape than the finding in
+  profile `review-findings` on purpose: the rule names what was broken, where
+  names the path, and message says it in a sentence a person can act on.
+schema:
+  type: object
+  required: [rule, where, message]
+  additionalProperties: false
+  properties:
+    rule:    { type: string, pattern: "^[A-Z][A-Z0-9_]*$" }
+    where:   { type: string, minLength: 1 }
+    message: { type: string, minLength: 10 }
+checker: profile-conformance@1

@@ -1,0 +1,30 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: trial
+version: 1.0.0
+title: A trial of the drafted type
+summary: >-
+  What running the draft type's own Process once, in isolation, did: the
+  verdict, the ending it reached, the nodes it visited in order and what each
+  said.
+grounded_in: >-
+  This format's own convention. PASSED and FAILED are the only verdicts: a
+  trial with no verdict is an error of the Tool, not a third value.
+schema:
+  type: object
+  required: [verdict, ending, path, steps]
+  additionalProperties: false
+  properties:
+    verdict: { type: string, enum: [PASSED, FAILED] }
+    ending:  { type: string }
+    path:    { type: array, items: { type: string } }
+    steps:
+      type: array
+      items:
+        type: object
+        required: [node, says]
+        additionalProperties: false
+        properties:
+          node: { type: string }
+          says: { type: string }
+checker: profile-conformance@1
