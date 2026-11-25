@@ -1,0 +1,28 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: check-content-type
+version: 1.0.0
+title: Check the drafted content type
+summary: >-
+  Computed, never judged. Runs the host's manifest checks and the add-only rule
+  over the draft, and works out the draft's and the stored type's content
+  hashes, and clears the last trial's findings, since a new draft has had no trial. A finding that blocks is in `blocking`; one that only informs is in
+  `advisory`. Changes nothing.
+inputs:
+  type_name: { type: string }
+  draft: { type: "profile:manifest-draft@1" }
+  existing: { type: "profile:content-type-snapshot@1" }
+output:
+  blocking: { type: "list<profile:finding@1>" }
+  advisory: { type: "list<profile:finding@1>" }
+  unchanged: { type: boolean }
+  draft_hash: { type: string }
+  existing_hash: { type: string }
+  trial_findings: { type: "list<profile:finding@1>" }
+controls:
+  - profile: finding@1
+mechanism: { kind: CODE, ref: "upsert_a_content_type.hooks:check_content_type" }
+effect: QUERY
+permission: workflows.upsert-a-content-type.check
+errors:
+  - { code: CHECK_UNAVAILABLE, class: TRANSIENT }

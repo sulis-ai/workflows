@@ -1,0 +1,15 @@
+api_version: sulis.workflows/v1
+kind: CONTROL
+id: upsert-a-content-type-standing-rule
+version: 1.0.0
+type: POLICY
+title: The host may let a content type be saved without asking a person
+summary: >-
+  A standing rule the host evaluates before a person is asked. A host duty:
+  this library declares only that the question exists and holds no rule. A
+  host with no rule answers INDETERMINATE so that a person is asked; a host
+  that answers PERMIT is deciding that a draft may be saved with nobody asked.
+applies_to: state.draft
+grounded_in: >-
+  This format's own convention (spec section 7.6, a policy decider). The rule
+  itself belongs to the host.

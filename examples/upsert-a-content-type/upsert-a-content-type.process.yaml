@@ -1,0 +1,157 @@
+api_version: sulis.workflows/v1
+kind: PROCESS
+id: upsert-a-content-type
+version: 1.0.0
+title: Make or change a content type
+summary: >-
+  Takes a request for what a content type is for and the name to give it. Reads
+  the type if it already exists, drafts the type, checks it, tries it, asks for
+  approval and only then saves it. It ends with the type saved, unchanged, or a
+  person told what is in the way.
+permission: workflows.upsert-a-content-type.start
+inputs:
+  request: { type: string, description: "What the content type is for, in the requester's words." }
+  type_name: { type: string, description: "The name of the type to make or change. The type is looked up under this name; the draft must carry it." }
+state:
+  existing:         { type: "profile:content-type-snapshot@1", reducer: REPLACE }
+  draft:            { type: "profile:manifest-draft@1", reducer: REPLACE }
+  blocking:         { type: "list<profile:finding@1>", reducer: REPLACE, default: [] }
+  advisory:         { type: "list<profile:finding@1>", reducer: REPLACE, default: [] }
+  unchanged:        { type: boolean, reducer: REPLACE, default: false }
+  draft_hash:       { type: string, reducer: REPLACE }
+  existing_hash:    { type: string, reducer: REPLACE }
+  trial:            { type: "profile:trial@1", reducer: REPLACE }
+  trial_findings:   { type: "list<profile:finding@1>", reducer: REPLACE, default: [] }
+  note:             { type: string, reducer: REPLACE, default: "" }
+  saved:            { type: "profile:upsert-result@1", reducer: REPLACE }
+  told:             { type: "profile:telling@1", reducer: REPLACE }
+defaults:
+  loop_budget: 3
+start: read-existing
+endings:
+  UPSERTED:  { outcome: SUCCESS, says: "Saved: the content type is stored as approved." }
+  UNCHANGED: { outcome: SUCCESS, says: "Nothing left to do: the content type is already stored exactly as drafted, so this run saved nothing more." }
+  NEEDS_YOU: { outcome: STOPPED, says: "Stopped: the content type was not saved, and a person needs to look at what is in the way. What failed is written in the run's record." }
+nodes:
+  read-existing:
+    type: STEP
+    tool: read-content-type@1
+    in: { type_name: inputs.type_name }
+    out: { existing: state.existing }
+    criticality: CRITICAL
+    on_error: { EXISTING_UNREADABLE: { next: tell } }
+    next: draft
+  draft:
+    type: STEP
+    tool: draft-content-type@1
+    in:
+      request: inputs.request
+      type_name: inputs.type_name
+      existing: state.existing
+      findings: state.blocking
+      trial_findings: state.trial_findings
+      note: state.note
+    out: { draft: state.draft }
+    criticality: CRITICAL
+    on_control_fail: { then: { next: tell } }
+    on_error: { NEED_UNRESOLVED: { next: tell } }
+    next: check
+  check:
+    type: STEP
+    tool: check-content-type@1
+    in:
+      type_name: inputs.type_name
+      draft: state.draft
+      existing: state.existing
+    out:
+      blocking: state.blocking
+      advisory: state.advisory
+      unchanged: state.unchanged
+      draft_hash: state.draft_hash
+      existing_hash: state.existing_hash
+      trial_findings: state.trial_findings
+    criticality: CRITICAL
+    next: after-check
+  after-check:
+    type: ROUTE
+    when:
+      - if: len(state.blocking) > 0
+        next: draft
+        loop: { on_exhausted: { next: tell } }
+      - if: state.unchanged == true
+        end: UNCHANGED
+    otherwise: { next: try }
+  try:
+    type: STEP
+    tool: try-content-type@1
+    in:
+      type_name: inputs.type_name
+      draft: state.draft
+    out:
+      trial: state.trial
+      findings: state.trial_findings
+    criticality: CRITICAL
+    on_error: { TRIAL_INCONCLUSIVE: { next: tell } }
+    next: after-try
+  after-try:
+    type: ROUTE
+    when:
+      - if: state.trial.verdict == "FAILED" or len(state.trial_findings) > 0
+        next: draft
+        loop: { on_exhausted: { next: tell } }
+    otherwise: { next: approve }
+  approve:
+    type: GATE
+    kind: APPROVAL
+    asks: "Is this content type ready to be saved?"
+    criteria: >-
+      The type does what the request asked, its checks found nothing blocking,
+      and its trial ran the way the type says it should.
+    reviewing: [state.draft, state.advisory, state.trial]
+    permission: workflows.upsert-a-content-type.approve
+    deciders:
+      - policy: upsert-a-content-type-standing-rule@1
+      - person: { permission: workflows.upsert-a-content-type.approve }
+    note_into: state.note
+    on:
+      PERMIT: { next: upsert }
+      DENY:
+        next: draft
+        loop: { on_exhausted: { next: tell } }
+  upsert:
+    type: STEP
+    tool: upsert-content-type@1
+    in:
+      type_name: inputs.type_name
+      draft: state.draft
+      draft_hash: state.draft_hash
+      base_hash: state.existing_hash
+    out: { saved: state.saved }
+    criticality: CRITICAL
+    # It replaces what is stored under the name, so spec 13 (V13) asks for a precondition. This one
+    # repeats, at the step itself, what the routes before it already decided: a mistake in a route
+    # still cannot save a draft that has a blocking finding or a trial that did not pass.
+    destructive: true
+    precondition: len(state.blocking) == 0 and len(state.trial_findings) == 0 and state.trial.verdict == "PASSED"
+    on_precondition_false: { next: tell }
+    on_error:
+      STALE_BASE: { next: tell }
+      STORE_REFUSED: { next: tell }
+    next: after-upsert
+  after-upsert:
+    type: ROUTE
+    when:
+      - if: state.saved.outcome == "UNCHANGED"
+        end: UNCHANGED
+    otherwise: { end: UPSERTED }
+  tell:
+    type: STEP
+    tool: tell-what-is-in-the-way@1
+    in:
+      type_name: inputs.type_name
+      blocking: state.blocking
+      trial_findings: state.trial_findings
+      note: state.note
+    out: { told: state.told }
+    criticality: STANDARD
+    end: NEEDS_YOU

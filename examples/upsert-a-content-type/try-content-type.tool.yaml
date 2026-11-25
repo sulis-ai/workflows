@@ -1,0 +1,24 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: try-content-type
+version: 1.0.0
+title: Try the drafted content type in isolation
+summary: >-
+  Runs the draft type's own Process once, in isolation, with the case the draft
+  carries, and answers the verdict, the path it took and the findings. Only
+  PASSED is a pass. A trial that could not reach a verdict is an error, never a
+  pass. Changes nothing.
+inputs:
+  type_name: { type: string }
+  draft: { type: "profile:manifest-draft@1" }
+output:
+  trial: { type: "profile:trial@1" }
+  findings: { type: "list<profile:finding@1>" }
+controls:
+  - profile: trial@1
+mechanism: { kind: EXTERNAL, ref: content-type-tester }
+effect: QUERY
+permission: workflows.upsert-a-content-type.try
+errors:
+  - { code: TRIAL_UNAVAILABLE, class: TRANSIENT }
+  - { code: TRIAL_INCONCLUSIVE, class: PERMANENT }
