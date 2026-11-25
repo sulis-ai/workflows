@@ -1,0 +1,96 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "agent": "Claude Code (this repository's CLAUDE.md), building the upsert-a-content-type worked example from specs written and checked by separate agents in sulis-ai/operations",
+  "subjects": {
+    "primary": {
+      "coordinate": "examples/upsert-a-content-type",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON",
+      "reason": "New worked example and its tests"
+    }
+  },
+  "conformance_claim": "PARTIAL",
+  "id": "01M99S7W9Y2A4C6E8G1J3K5M7P",
+  "started_at": "2026-11-26T15:00:00Z",
+  "completed_at": "2026-11-26T18:00:00Z",
+  "summary_for_principal": "Adds a worked example: a Process that drafts, checks, tries and (after approval) saves a content type. 761 tests pass on Python 3.10 and 3.12. It shows an engine defect: a forged report for the save step ends the run as saved without saving.\n\n- Built: 14 definitions, a reference checker and 300 tests.\n- Open: the engine accepts a report for a step that is not current (proposed spec fix in the operations specs).\n- If nothing is done: the example says in its README that callers must report only the step offered.\n\nNumbered actions:\n1. Decide whether to fix the engine so it refuses a report for a step that is not current; I recommend yes (opinion).\n2. Nothing else needs deciding; no pull request opened.",
+  "interpretation": {
+    "ask_as_given": "Yes proceed (write the brief for the upsert Process in the library).",
+    "read_as": "Write the brief and queue item to the standard; do not build or write the spec yet.",
+    "filled_in": []
+  },
+  "decisions": [
+    {
+      "headline": "Ship the example with the engine defect pinned by two strict xfail tests and a README host duty, rather than change the engine.",
+      "problem": "A forged report for a node that is not current ends the run UPSERTED with the save Tool never called.",
+      "options_rejected": [
+        "Fix the engine in this change",
+        "Hide the defect"
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "The xfail tests fail the day the engine is fixed.",
+      "confidence": "HIGH",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "Two agents independently reproduced the forged-report run ending UPSERTED with nothing stored",
+          "source": "specs/upsert-a-content-type-process/index.md (G8) in sulis-ai/operations"
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "761 passed and 6 xfailed from a fresh clone of the pushed head, and reverting the add-only call fails 8 tests",
+          "source": "pytest, this review"
+        }
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "id": "f-1",
+      "kind": "STANDARDS_TENSION",
+      "subject": "Engine report() accepts a node that is not current (G8); the spec section 12.1 is silent",
+      "need": "A spec change and an engine fix, the principal's call"
+    }
+  ],
+  "measured": [
+    {
+      "subject": "The example's tests",
+      "method": "pytest on a fresh clone, Python 3.10.20 and 3.12.3",
+      "location": "tests/examples/test_upsert_a_content_type.py",
+      "result": "761 passed, 6 xfailed"
+    }
+  ],
+  "untouched": [
+    {
+      "id": "u-1",
+      "location": "src/sulis_workflows/engine/run.py",
+      "divergence": "report() for a non-current node",
+      "why_not_now": "Outside this work package; recorded as G8"
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "Decide the engine fix for report() on a non-current node"
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Decide the report() fix",
+        "action": "Refuse a report for a node other than the one handed off",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Fix the engine in its own pull request",
+      "reason": "The example's safety claims hold only for callers that report the offered node",
+      "urgency": "SOON"
+    }
+  },
+  "branch": "claude/confident-euler-4jt30v"
+}
