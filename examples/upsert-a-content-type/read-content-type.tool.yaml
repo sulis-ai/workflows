@@ -1,0 +1,21 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: read-content-type
+version: 1.0.0
+title: Read the content type, if it exists, and the system Profile it must keep
+summary: >-
+  Looks the type up by name. Answers what is stored under that name for the
+  account, and the Profile the platform itself keeps for a type of that name,
+  if there is one. Changes nothing.
+inputs:
+  type_name: { type: string }
+output:
+  existing: { type: "profile:content-type-snapshot@1" }
+controls:
+  - profile: content-type-snapshot@1
+mechanism: { kind: CODE, ref: "upsert_a_content_type.hooks:read_content_type" }
+effect: QUERY
+permission: workflows.upsert-a-content-type.read
+errors:
+  - { code: STORE_UNAVAILABLE, class: TRANSIENT }
+  - { code: EXISTING_UNREADABLE, class: PERMANENT }

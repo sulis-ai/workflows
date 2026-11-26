@@ -1,0 +1,26 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: draft-content-type
+version: 1.0.0
+title: Draft the content type
+summary: >-
+  Writes the content type, or changes the stored one, to do what the request
+  asks. This file names the need and the inputs and holds no instructions: the
+  host supplies the instructions behind the ref.
+inputs:
+  request: { type: string }
+  type_name: { type: string }
+  existing: { type: "profile:content-type-snapshot@1" }
+  findings: { type: "list<profile:finding@1>", required: false, default: [] }
+  trial_findings: { type: "list<profile:finding@1>", required: false, default: [] }
+  note: { type: string, required: false, default: "" }
+output:
+  draft: { type: "profile:manifest-draft@1" }
+controls:
+  - profile: manifest-draft@1
+mechanism: { kind: SKILL, ref: "needs/draft-content-type-manifest" }
+effect: QUERY
+permission: workflows.upsert-a-content-type.draft
+errors:
+  - { code: MODEL_UNAVAILABLE, class: TRANSIENT }
+  - { code: NEED_UNRESOLVED, class: PERMANENT }

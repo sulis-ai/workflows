@@ -1,0 +1,31 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: content-type-snapshot
+version: 1.0.0
+title: What is stored under a content type's name
+summary: >-
+  Whether a type of this name is stored for the account, and whether the
+  platform itself keeps a Profile for a type of this name. Each side carries
+  its parts only when it is there.
+grounded_in: >-
+  This format's own convention. `has_system` and `has_current` are stated, not
+  inferred, so that a missing part cannot read as "there is none".
+schema:
+  type: object
+  required: [name, has_system, has_current]
+  additionalProperties: false
+  properties:
+    name:            { type: string, minLength: 1 }
+    has_system:      { type: boolean }
+    has_current:     { type: boolean }
+    system_profile:  { type: object, description: "The Profile the platform keeps for a type of this name. Present exactly when has_system." }
+    current_manifest: { type: object }
+    current_profile:  { type: object }
+  allOf:
+    - if:   { properties: { has_system: { const: true } } }
+      then: { required: [system_profile] }
+      else: { properties: { system_profile: false } }
+    - if:   { properties: { has_current: { const: true } } }
+      then: { required: [current_manifest, current_profile] }
+      else: { properties: { current_manifest: false, current_profile: false } }
+checker: profile-conformance@1

@@ -1,0 +1,23 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: tell-what-is-in-the-way
+version: 1.0.0
+title: Tell the person what is in the way
+summary: >-
+  Computed from the run's own findings and the last note, in a fixed form.
+  Names every blocking finding and every trial finding, and the person's last
+  note, so that a stop says what failed. Changes nothing.
+inputs:
+  type_name: { type: string }
+  # Optional with a default: an empty list or an empty note is "not present" to a step's
+  # mapping (spec 7.1), and "nothing to report" is a true answer here.
+  blocking: { type: "list<profile:finding@1>", required: false, default: [] }
+  trial_findings: { type: "list<profile:finding@1>", required: false, default: [] }
+  note: { type: string, required: false, default: "" }
+output:
+  told: { type: "profile:telling@1" }
+controls:
+  - profile: telling@1
+mechanism: { kind: CODE, ref: "upsert_a_content_type.hooks:tell_what_is_in_the_way" }
+effect: QUERY
+permission: workflows.upsert-a-content-type.tell

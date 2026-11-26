@@ -1,0 +1,28 @@
+api_version: sulis.workflows/v1
+kind: TOOL
+id: upsert-content-type
+version: 1.0.0
+title: Save the content type
+summary: >-
+  The only step that changes anything. Saves the draft under its name when its
+  content hash is what the check worked out and the stored type is still the
+  one the run read. Where the host holds a system Profile for the name, it
+  also refuses a draft whose output Profile is not that Profile plus additions,
+  whatever the run read. Saving the same hash again changes nothing and answers
+  UNCHANGED.
+inputs:
+  type_name: { type: string }
+  draft: { type: "profile:manifest-draft@1" }
+  draft_hash: { type: string }
+  base_hash: { type: string }
+output:
+  saved: { type: "profile:upsert-result@1" }
+controls:
+  - profile: upsert-result@1
+mechanism: { kind: CODE, ref: "upsert_a_content_type.hooks:upsert_content_type" }
+effect: MUTATION
+permission: workflows.upsert-a-content-type.upsert
+errors:
+  - { code: STORE_UNAVAILABLE, class: TRANSIENT }
+  - { code: STALE_BASE, class: PERMANENT }
+  - { code: STORE_REFUSED, class: PERMANENT }

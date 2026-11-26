@@ -1,0 +1,22 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: manifest-draft
+version: 1.0.0
+title: A drafted content type
+summary: >-
+  The content type's manifest, the output Profile it must fit, and the case the
+  trial runs. This library does not say what a manifest or a case contains: the
+  host's own schemas do, and the host's check enforces them.
+grounded_in: >-
+  This format's own convention. The manifest and case shapes belong to the
+  host, so they are carried here as objects and checked by the host's check.
+schema:
+  type: object
+  required: [manifest, output_profile, case]
+  additionalProperties: false
+  properties:
+    manifest:       { type: object }
+    output_profile: { type: object, description: "A JSON Schema (2020-12) for the type's output. The check refuses one that is not." }
+    case:           { type: object }
+    notes:          { type: string }
+checker: profile-conformance@1

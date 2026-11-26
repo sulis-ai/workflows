@@ -1,0 +1,18 @@
+api_version: sulis.workflows/v1
+kind: PROFILE
+id: upsert-result
+version: 1.0.0
+title: What saving the content type did
+summary: The outcome of the one save, the name, and the content hash that is now stored.
+grounded_in: >-
+  This format's own convention. UNCHANGED is the idempotent repeat: the same
+  hash was already stored.
+schema:
+  type: object
+  required: [outcome, name, content_hash]
+  additionalProperties: false
+  properties:
+    outcome:      { type: string, enum: [CREATED, UPDATED, UNCHANGED] }
+    name:         { type: string, minLength: 1 }
+    content_hash: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+checker: profile-conformance@1
