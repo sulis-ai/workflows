@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -968,7 +969,6 @@ BAD = {
     "tightened": (_tightened, "CHANGED"),
     "additional-properties-opened": (_loosened_additional, "CHANGED"),
     "allof-added": (_wrapped_in_allof, "CHANGED"),
-    "ref-with-siblings": (_ref_with_siblings, "UNREADABLE"),
 }
 
 
@@ -1269,7 +1269,6 @@ def _ref_drafts():
         "new-type-ref-to-nothing": (prof({"$ref": "#/$defs/nowhere"}), False),
         "new-type-remote-ref": (prof({"$ref": "https://example.com/x.json"}), False),
         "new-type-relative-ref": (prof({"$ref": "other.json"}), False),
-        "new-type-ref-with-siblings": (prof({"$ref": "#/$defs/x", "description": "d"}) | {"$defs": {"x": {"type": "string"}}}, False),
         "new-type-cycle": ({"type": "object", "properties": {"b": {"$ref": "#/$defs/x"}}, "$defs": {"x": {"$ref": "#/$defs/x"}}}, False),
         "added-property-remote-ref": (copy.deepcopy(SYSTEM_PROFILE) | {}, True),
         "new-type-dynamic-ref": (prof({"$dynamicRef": "#node"}), False),
@@ -1725,3 +1724,241 @@ def test_tell_names_every_finding_and_the_note():
                            "RETYPED at /properties/body/type: 'type' at /properties/body was changed from the system Profile's; "
                            "The last note from a person: too vague.")
     assert out["reasons"][-1] == "The last note from a person: too vague"
+
+
+# ===== from test_round4
+SET_200 = settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow], derandomize=True)
+DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+
+def mod_of(fn, base=SYSTEM_PROFILE):
+    p = copy.deepcopy(base)
+    fn(p)
+    return p
+
+
+def found(q, base=SYSTEM_PROFILE):
+    Draft202012Validator.check_schema(q)
+    assert naive_extra(good_draft(profile=q), snapshot()) == ([], [])
+    return checks.add_only_findings(base, q)
+
+
+# ---- accepted: annotations at any path -----------------------------------------------------------------------------
+def _schema_and_desc_beside_ref(p):
+    p["$schema"] = DIALECT
+    p["properties"]["alternatives"]["items"] = {"$ref": "#/$defs/alt", "description": "one alternative", "title": "Alternative"}
+
+def _annotations_everywhere(p):
+    p["$schema"] = DIALECT; p["$id"] = "https://example.com/x"; p["$comment"] = "c"; p["deprecated"] = False
+    p["properties"]["title"]["description"] = "d"; p["properties"]["title"]["examples"] = ["abc"]
+    p["properties"]["body"]["default"] = "a body of more than twenty chars"            # P has no default here
+    p["properties"]["format"]["deprecated"] = True
+    p["$defs"]["alt"]["title"] = "Alt"
+
+ACCEPT = {"schema-and-description-beside-a-ref": _schema_and_desc_beside_ref, "annotations-everywhere": _annotations_everywhere}
+
+
+@pytest.mark.parametrize("name", sorted(ACCEPT))
+def test_annotation_only_changes_are_accepted(name):
+    assert found(mod_of(ACCEPT[name])) == []
+
+
+def test_a_draft_that_adds_schema_and_a_description_beside_a_ref_passes_the_whole_check():
+    d = good_draft(profile=mod_of(_schema_and_desc_beside_ref))
+    out = checks.check_content_type(type_name="quick-answer", draft=d, existing=snapshot())
+    assert out["blocking"] == []
+
+
+# ---- refused ----------------------------------------------------------------------------------------------------------------
+def _desc_and_drop(p):
+    p["description"] = "harmless"; p["properties"]["title"]["description"] = "also harmless"
+    del p["properties"]["summary"]; p["required"].remove("summary")
+
+def _retype_in_sibling(p):          # the property is still a $ref to a string, with a sibling that says integer
+    p["properties"]["alternatives"]["items"] = {"$ref": "#/$defs/alt", "type": "string"}
+
+def _retype_hidden_beside_ref_to_leaf(p):
+    p["$defs"]["s"] = {"type": "string"}
+    p["properties"]["summary"] = {"$ref": "#/$defs/s", "type": "integer", "description": "x"}
+
+def _constraint_beside_ref(p):
+    p["$defs"]["s"] = {"type": "string"}
+    p["properties"]["summary"] = {"$ref": "#/$defs/s", "minLength": 50}
+
+def _other_dialect(p):
+    p["$schema"] = "http://json-schema.org/draft-07/schema#"
+
+def _default_changed_where_p_has_one(p):
+    pass
+
+def _sibling_ref_to_nothing(p):
+    p["properties"]["alternatives"]["items"] = {"$ref": "#/$defs/nowhere", "description": "d"}
+
+def _sibling_ref_remote(p):
+    p["properties"]["alternatives"]["items"] = {"$ref": "https://example.com/a.json", "description": "d"}
+
+def _additional_opened_with_annotations(p):
+    p["description"] = "d"; p["additionalProperties"] = True
+
+def _enum_reordered(p):
+    p["properties"]["format"]["enum"] = ["TEXT", "MARKDOWN"]
+
+def _enum_narrowed(p):
+    p["properties"]["format"]["enum"] = ["MARKDOWN"]
+
+REFUSE = {
+    "description-and-a-drop": (_desc_and_drop, "REMOVED"),
+    "retype-in-a-sibling-of-a-ref": (_retype_in_sibling, "RETYPED"),
+    "retype-beside-a-ref-to-a-leaf": (_retype_hidden_beside_ref_to_leaf, "RETYPED"),
+    "constraint-beside-a-ref": (_constraint_beside_ref, None),
+    "other-dialect": (_other_dialect, "CHANGED"),
+    "sibling-ref-to-nothing": (_sibling_ref_to_nothing, "UNREADABLE"),
+    "sibling-ref-remote": (_sibling_ref_remote, "UNREADABLE"),
+    "additional-opened-with-annotations": (_additional_opened_with_annotations, "CHANGED"),
+    "enum-reordered": (_enum_reordered, "RETYPED"),
+    "enum-narrowed": (_enum_narrowed, "RETYPED"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(REFUSE))
+def test_the_other_changes_are_still_refused(name):
+    fn, rule = REFUSE[name]
+    base = copy.deepcopy(SYSTEM_PROFILE)
+    if name == "retype-beside-a-ref-to-a-leaf":                     # P must have the same shape for the property
+        base["$defs"]["s"] = {"type": "string"}; base["properties"]["summary"] = {"$ref": "#/$defs/s"}
+    if name == "constraint-beside-a-ref":
+        base["$defs"]["s"] = {"type": "string"}; base["properties"]["summary"] = {"$ref": "#/$defs/s"}
+    out = found(mod_of(fn, base), base)
+    assert out and (rule is None or any(f["rule"] == rule for f in out)), (name, out)
+
+
+def test_a_default_is_free_only_where_the_system_profile_has_none():
+    base = copy.deepcopy(SYSTEM_PROFILE); base["properties"]["title"]["default"] = "abc"
+    q = copy.deepcopy(base); q["properties"]["title"]["default"] = "xyz"
+    assert any(f["rule"] == "CHANGED" for f in checks.add_only_findings(base, q))
+    q = copy.deepcopy(base); del q["properties"]["title"]["default"]
+    assert checks.add_only_findings(base, q)
+    q = copy.deepcopy(SYSTEM_PROFILE); q["properties"]["title"]["default"] = "xyz"
+    assert checks.add_only_findings(SYSTEM_PROFILE, q) == []
+
+
+def test_a_ref_in_the_system_profile_with_siblings_is_judged_too():
+    base = copy.deepcopy(SYSTEM_PROFILE)
+    base["properties"]["alternatives"]["items"] = {"$ref": "#/$defs/alt", "description": "x"}
+    assert checks.add_only_findings(base, copy.deepcopy(base)) == []
+    q = copy.deepcopy(base); q["properties"]["alternatives"]["items"] = {"$ref": "#/$defs/alt"}      # the annotation went: free
+    assert checks.add_only_findings(base, q) == []
+    q["$defs"]["alt"]["properties"].pop("why_not")
+    assert any(f["rule"] == "REMOVED" for f in checks.add_only_findings(base, q))
+
+
+# ---- property: annotations at random paths never matter; with a random removal they never hide it ---------------------------
+ANNOT = st.sampled_from([("description", "d"), ("title", "T"), ("$comment", "c"), ("examples", ["a"]), ("deprecated", True), ("$id", "https://e.com/x")])
+
+
+@SET_200
+@given(ROOTS, st.data())
+def test_annotations_at_any_path_are_free_and_never_hide_a_removal(root, data):
+    q = copy.deepcopy(root)
+    for ptr, _ in data.draw(st.lists(st.sampled_from(object_paths(q)), min_size=1, max_size=4)):
+        k, v = data.draw(ANNOT)
+        at(q, ptr)[k] = v
+    assert checks.add_only_findings(root, q) == []
+    if all_props(q):
+        ptr, name = data.draw(st.sampled_from(all_props(q)))
+        node = at(q, ptr)
+        del node["properties"][name]
+        node["required"] = [r for r in node["required"] if r != name]
+        assert any(f["rule"] == "REMOVED" and f["where"] == f"{ptr}/properties/{name}" for f in checks.add_only_findings(root, q))
+
+
+# ===== from test_round5
+ALT = {"type": "object", "required": ["o"], "properties": {"o": {"type": "string"}, "w": {"type": "string"}}}
+LST = {"type": "array", "items": {"type": "string"}}
+
+
+def base():
+    return {"type": "object", "required": ["a"], "properties": {"a": {"$ref": "#/$defs/alt"}, "l": {"$ref": "#/$defs/lst"}},
+            "$defs": {"alt": copy.deepcopy(ALT), "lst": copy.deepcopy(LST)}}
+
+
+def with_a(sib):
+    q = base(); q["properties"]["a"] = {"$ref": "#/$defs/alt", **sib}
+    return q
+
+
+def with_l(sib):
+    q = base(); q["properties"]["l"] = {"$ref": "#/$defs/lst", **sib}
+    return q
+
+
+def found_ref(q):
+    Draft202012Validator.check_schema(q)
+    return checks.add_only_findings(base(), q)
+
+
+REFUSED = {
+    "sibling-required-makes-optional-required": (with_a({"required": ["w"]}), "CHANGED"),
+    "sibling-properties-retype-w": (with_a({"properties": {"w": {"type": "integer"}}}), "RETYPED"),
+    "sibling-properties-retype-o": (with_a({"properties": {"o": {"type": "integer"}}}), "RETYPED"),
+    "sibling-items-change-type": (with_l({"items": {"type": "integer"}}), "RETYPED"),
+    "sibling-adds-constraint-to-property": (with_a({"properties": {"w": {"type": "string", "minLength": 9}}}), "CHANGED"),
+    "sibling-adds-required-and-retype": (with_a({"required": ["w"], "properties": {"w": {"type": "integer"}}}), "RETYPED"),
+}
+ACCEPTED = {
+    "sibling-adds-a-new-optional-property": with_a({"properties": {"extra": {"type": "string"}}}),
+    "sibling-adds-a-new-required-property": with_a({"properties": {"extra": {"type": "string"}}, "required": ["extra"]}),
+    "sibling-repeats-the-target-unchanged": with_a(copy.deepcopy(ALT)),
+    "sibling-repeats-required-and-properties": with_a({"required": ["o"], "properties": {"o": {"type": "string"}}}),
+    "sibling-items-repeats": with_l({"items": {"type": "string"}}),
+    "sibling-annotations-only": with_a({"description": "d", "title": "T"}),
+    "sibling-property-annotation": with_a({"properties": {"w": {"type": "string", "description": "the w"}}}),
+}
+
+
+@pytest.mark.parametrize("name", sorted(REFUSED))
+def test_a_descending_sibling_beside_a_ref_is_judged(name):
+    q, rule = REFUSED[name]
+    out = found_ref(q)
+    assert any(f["rule"] == rule for f in out), (name, out)
+
+
+@pytest.mark.parametrize("name", sorted(ACCEPTED))
+def test_a_sibling_that_only_adds_or_repeats_passes(name):
+    assert found_ref(ACCEPTED[name]) == []
+
+
+def test_the_target_wins_and_the_clash_is_reported_not_overridden():
+    # P: a is a string. Q: a is a $ref to an integer with a sibling that says string. Both must hold: unsatisfiable.
+    p = {"type": "object", "properties": {"a": {"type": "string"}}}
+    q = {"type": "object", "properties": {"a": {"$ref": "#/$defs/n", "type": "string"}}, "$defs": {"n": {"type": "integer"}}}
+    out = checks.add_only_findings(p, q)
+    assert any("beside a $ref" in f["message"] for f in out)                                  # the clash itself
+    assert any("was changed from the system Profile" in f["message"] for f in out), out     # and the target (integer) judged against P
+
+
+def test_a_ref_to_a_boolean_schema_with_siblings_is_unreadable():
+    p = {"type": "object", "properties": {"a": {"$ref": "#/$defs/t"}}, "$defs": {"t": True}}
+    q = copy.deepcopy(p); q["properties"]["a"] = {"$ref": "#/$defs/t", "description": "d"}
+    out = checks.add_only_findings(p, q)
+    assert [f["rule"] for f in out] == ["UNREADABLE"], out
+    assert checks.add_only_findings(p, copy.deepcopy(p)) == []
+
+
+def test_the_ref_check_agrees_with_the_walk_on_siblings():
+    d = good_draft(profile=with_a({"required": ["w"]}))
+    out = checks.check_content_type(type_name="quick-answer", draft=d, existing={"name": "quick-answer", "has_system": True, "has_current": False, "system_profile": base()})
+    assert any(f["rule"] == "CHANGED" for f in out["blocking"])
+
+
+def test_known_limits_are_real():
+    # `$schema` spelled http:// or with a trailing # is refused although it names the same dialect (a false refusal, said in 04)
+    p = {"type": "object", "properties": {}}
+    q = {**p, "$schema": "https://json-schema.org/draft/2020-12/schema#"}
+    assert checks.add_only_findings(p, q), "known limit: a trailing # is refused"
+    q = {**p, "$schema": "http://json-schema.org/draft/2020-12/schema"}
+    assert checks.add_only_findings(p, q), "known limit: http:// is refused"
+    # a $id on a referenced $defs entry is accepted as an annotation although it can make a local ref dangle for a consumer
+    p = {"type": "object", "properties": {"a": {"$ref": "#/$defs/x"}}, "$defs": {"x": {"type": "string"}}}
+    q = copy.deepcopy(p); q["$defs"]["x"]["$id"] = "https://example.com/elsewhere"
+    assert checks.add_only_findings(p, q) == [], "known limit: accepted"

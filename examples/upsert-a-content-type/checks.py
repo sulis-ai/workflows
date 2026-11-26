@@ -17,7 +17,11 @@ Finding = dict[str, str]
 Extra = Callable[[dict[str, Any], dict[str, Any]], "tuple[list[Finding], list[Finding]]"]
 
 # Words in a JSON Schema that describe and never constrain (2020-12 core/meta-data vocabularies).
-ANNOTATIONS = frozenset({"title", "description", "examples", "$comment"})
+# Annotation-only keywords: they describe and never constrain, so a draft may add or change them at any path (D-h).
+# `default` is an annotation only where the system Profile has none at that node (a changed default changes what a
+# consumer is handed); `$schema` only when it names the dialect the rules are written in.
+ANNOTATIONS = frozenset({"title", "description", "examples", "$comment", "$id", "deprecated"})
+DIALECT = "https://json-schema.org/draft/2020-12/schema"
 # Keywords whose change retypes a property; any other changed keyword is CHANGED.
 RETYPING = frozenset({"type", "enum", "const", "format"})
 # Keywords the walk descends into. Every other keyword must be equal, or it is a finding.
@@ -70,22 +74,81 @@ class _Unreadable(Exception):
         self.where, self.why = where, why
 
 
-def _resolve(node: Any, root: Any, where: str, seen: tuple[str, ...] = ()) -> Any:
-    """Follow a local $ref (#/$defs/x or #/definitions/x). Anything else is unreadable."""
+def _both(a: Any, b: Any, root: Any, where: str, conflicts: list | None) -> Any:
+    """Two schemas that must both hold for one place: merged when both are objects, else they must be equal."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return _merge(a, b, root, where, conflicts)
+    if not same(a, b) and conflicts is not None:
+        conflicts.append(("schema", where))
+    return a
+
+
+def _merge(target: dict, siblings: dict, root: Any, where: str, conflicts: list | None) -> dict:
+    """The target and its siblings together, as JSON Schema 2020-12 applies them (both must hold).
+
+    `properties` and `required` are unions and a property both sides name is merged in turn; `items` is merged;
+    an annotation on the sibling side wins; any other keyword both sides hold must be equal, else it is recorded as
+    a conflict (the draft's schema contradicts itself there) and the target's value is kept.
+    """
+    def clash(kw: str, at: str) -> None:
+        if conflicts is not None:
+            conflicts.append((kw, at))
+
+    out = dict(target)
+    for k, v in siblings.items():
+        if k in ANNOTATIONS or k in ("$defs", "definitions"):
+            out[k] = v
+        elif k == "properties" and isinstance(v, dict) and isinstance(out.get("properties", {}), dict):
+            props = dict(out.get("properties", {}))
+            for n, sv in v.items():
+                here = f"{where}/properties/{n}"
+                if n in props:
+                    a = _resolve(props[n], root, here, conflicts)
+                    b = _resolve(sv, root, here, conflicts)
+                    props[n] = _both(a, b, root, here, conflicts)
+                else:
+                    props[n] = sv
+            out["properties"] = props
+        elif k == "required" and isinstance(v, list) and isinstance(out.get("required", []), list):
+            out["required"] = sorted({*out.get("required", []), *v}, key=str)
+        elif k == "items" and "items" in out and isinstance(v, (dict, bool)):
+            a = _resolve(out["items"], root, f"{where}/items", conflicts)
+            b = _resolve(v, root, f"{where}/items", conflicts)
+            out["items"] = _both(a, b, root, f"{where}/items", conflicts)
+        elif k in out:
+            if not same(out[k], v):
+                clash(k, where)
+        else:
+            out[k] = v
+    return out
+
+
+def _resolve(node: Any, root: Any, where: str, conflicts: list | None = None, seen: tuple[str, ...] = ()) -> Any:
+    """Follow a local $ref (#/$defs/x or #/definitions/x), alone or with sibling keywords.
+
+    Siblings are allowed by JSON Schema 2020-12 (the reference and its siblings all apply), so the schema judged is
+    the target with the siblings merged over it. A sibling that disagrees with the target on a non-annotation keyword
+    is recorded in `conflicts` (the draft's own schema contradicts itself there). A reference that is not local, does
+    not resolve or goes round is unreadable.
+    """
     while isinstance(node, dict) and ("$ref" in node or "$dynamicRef" in node):
         if "$dynamicRef" in node:  # resolved at run time by the validator: cannot be judged here
             raise _Unreadable(where, "a $dynamicRef cannot be followed")
         ref = node["$ref"]
-        if len(node) != 1:
-            raise _Unreadable(where, f"a $ref with other keywords beside it ({ref!r}) cannot be judged")
         if not isinstance(ref, str) or not ref.startswith(("#/$defs/", "#/definitions/")) or ref in seen:
-            raise _Unreadable(where, f"the reference {ref!r} is not a local, non-circular one")
+            raise _Unreadable(where, f"the reference {cap(repr(ref), QUOTE_CAP)} is not a local, non-circular one")
         key, _, name = ref[2:].partition("/")
         target = root.get(key, {}).get(name) if isinstance(root, dict) else None
         if target is None:
-            raise _Unreadable(where, f"the reference {ref!r} points at nothing")
+            raise _Unreadable(where, f"the reference {cap(repr(ref), QUOTE_CAP)} points at nothing")
         seen = (*seen, ref)
-        node = target
+        siblings = {k: v for k, v in node.items() if k != "$ref"}
+        target = _resolve(target, root, where, conflicts, seen)
+        if not isinstance(target, dict):
+            if siblings:
+                raise _Unreadable(where, "a reference to a boolean schema with siblings cannot be judged")
+            return target
+        node = _merge(target, siblings, root, where, conflicts)
     return node
 
 
@@ -93,19 +156,26 @@ def _walk(p: Any, q: Any, proot: Any, qroot: Any, where: str, out: list[Finding]
     if depth > MAX_DEPTH:
         raise _Unreadable(where, "the schema is nested too deep to judge")
     p = _resolve(p, proot, where)
-    q = _resolve(q, qroot, where)
+    qc: list = []
+    q = _resolve(q, qroot, where, qc)
+    for kw, at in qc:                       # a sibling of a $ref that contradicts what the reference points at
+        rule = "RETYPED" if kw in RETYPING else "CHANGED"
+        out.append(finding(rule, f"{at}/{kw}", f"{cap(repr(kw), QUOTE_CAP)} beside a $ref at {cap(at or '/', QUOTE_CAP)} disagrees with what the reference points at"))
     if not isinstance(p, dict) or not isinstance(q, dict):
         if not same(p, q):
             out.append(finding("CHANGED", where, f"{where} is not the same as the system Profile's"))
         return
-    for kw in sorted(set(p) - ANNOTATIONS - DESCENDS):
+    for kw in sorted(set(p) - ANNOTATIONS - DESCENDS - {"$schema"}):
         if kw not in q:
             rule = "RETYPED" if kw in RETYPING else "CHANGED"
             out.append(finding(rule, f"{where}/{kw}", f"the system Profile's {kw!r} at {where or '/'} is missing"))
         elif not same(p[kw], q[kw]) and not _same_type_set(kw, p[kw], q[kw]):
             rule = "RETYPED" if kw in RETYPING else "CHANGED"
             out.append(finding(rule, f"{where}/{kw}", f"{kw!r} at {where or '/'} was changed from the system Profile's"))
-    for kw in sorted(set(q) - set(p) - ANNOTATIONS - DESCENDS):
+    ps, qs = p.get("$schema", DIALECT), q.get("$schema", DIALECT)
+    if not same(ps, qs):
+        out.append(finding("CHANGED", f"{where}/$schema", f"the dialect at {cap(where or '/', QUOTE_CAP)} is not the system Profile's"))
+    for kw in sorted(set(q) - set(p) - ANNOTATIONS - DESCENDS - {"default", "$schema"}):
         out.append(finding("CHANGED", f"{where}/{kw}", f"{cap(repr(kw), QUOTE_CAP)} was added at {cap(where or '/', QUOTE_CAP)}; only properties may be added"))
     # properties: every system property stays, with the same schema; new ones are the addition
     pp, qp = p.get("properties"), q.get("properties")
@@ -146,7 +216,7 @@ def _same_type_set(kw: str, a: Any, b: Any) -> bool:
 
 
 def ref_findings(profile: Any) -> list[Finding]:
-    """Every $ref anywhere in the draft's Profile must be local, resolvable and alone in its object; a $dynamicRef is refused."""
+    """Every $ref anywhere in the draft's Profile must be local, resolvable and alone in its object."""
     out: list[Finding] = []
 
     def walk(node: Any, where: str, depth: int) -> None:
