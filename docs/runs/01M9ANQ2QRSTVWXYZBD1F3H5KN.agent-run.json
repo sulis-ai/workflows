@@ -1,0 +1,96 @@
+{
+  "$schema": "docs/runs/agent-run.schema.json",
+  "apiVersion": "product-architecture/v1",
+  "kind": "AgentRun",
+  "agent": "Claude Code (this repository's CLAUDE.md), building the upsert-a-content-type worked example from specs written and checked by separate agents in sulis-ai/operations",
+  "subjects": {
+    "primary": {
+      "coordinate": "examples/upsert-a-content-type",
+      "kind": "COMPONENT",
+      "role": "ACTED_ON",
+      "reason": "New worked example and its tests"
+    }
+  },
+  "conformance_claim": "PARTIAL",
+  "id": "01M9ANQ2QRSTVWXYZBD1F3H5KN",
+  "started_at": "2026-11-28T13:00:00Z",
+  "completed_at": "2026-11-28T14:30:00Z",
+  "summary_for_principal": "The upsert example's add-only check no longer refuses harmless changes (a description, a schema tag, a ref with extra keywords) and still refuses anything that could break a consumer. 792 tests pass on Python 3.10 and 3.12; an independent check passed it on the fourth round. Not merged; no pull request.\n\nNumbered actions:\n1. Decide whether to open a pull request for review (not merged).\n2. Decide whether a default may be added where the system Profile has none (decision D-i); it is allowed now.\n3. The engine defect (a forged report is accepted) still needs your call; a proposed fix is ready.",
+  "interpretation": {
+    "ask_as_given": "Yes proceed (write the brief for the upsert Process in the library).",
+    "read_as": "Write the brief and queue item to the standard; do not build or write the spec yet.",
+    "filled_in": []
+  },
+  "decisions": [
+    {
+      "headline": "Let annotations and a $ref with siblings through the add-only rule, judging the ref merged with its siblings.",
+      "problem": "The rule sent back harmless drafts and measured its own strictness.",
+      "options_rejected": [
+        "Keep the strict rule",
+        "Allow every change at a path the system Profile lacks"
+      ],
+      "reversibility": "TWO_WAY_DOOR",
+      "cost_to_change": "One file and its tests.",
+      "confidence": "MEDIUM",
+      "evidence": [
+        {
+          "tag": "VERIFIED",
+          "claim": "792 passed and 6 expected failures on a fresh clone; 24 tests fail with the previous checks.py restored",
+          "source": "pytest, this session and the builder's red run"
+        },
+        {
+          "tag": "VERIFIED",
+          "claim": "The amendment passed an independent check on the fourth round after the round-3 gap (sibling required and properties silently dropped) was fixed",
+          "source": "specs/upsert-a-content-type-process in sulis-ai/operations"
+        }
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "id": "f-1",
+      "kind": "STANDARDS_TENSION",
+      "subject": "Engine report() accepts a node that is not current (G8); proposed fix ready",
+      "need": "The principal's decision on the engine change"
+    }
+  ],
+  "measured": [
+    {
+      "subject": "The example's tests",
+      "method": "pytest on a fresh clone, Python 3.10.20 and 3.12.3 (builder), 3.13 (me)",
+      "location": "tests/examples/test_upsert_a_content_type.py",
+      "result": "792 passed, 6 xfailed"
+    }
+  ],
+  "untouched": [
+    {
+      "id": "u-1",
+      "location": "src/sulis_workflows/engine/run.py",
+      "divergence": "report() for a non-current node",
+      "why_not_now": "Outside this work package; recorded as G8"
+    }
+  ],
+  "lessons": [],
+  "where_next": {
+    "ready_now": [
+      "Open a pull request for review, not merged, if the principal asks"
+    ],
+    "waiting_on": [],
+    "parked": [],
+    "actions": [
+      {
+        "n": 1,
+        "label": "Decide on the pull request",
+        "action": "Open it unmerged for review",
+        "source_kind": "RECOMMENDATION",
+        "effort": "SMALL"
+      }
+    ],
+    "recommended_next": {
+      "recommendation": "Open the unmerged pull request",
+      "reason": "One complete change is ready to review",
+      "urgency": "NOT_URGENT"
+    }
+  },
+  "branch": "claude/confident-euler-4jt30v"
+}
