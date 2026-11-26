@@ -43,7 +43,11 @@ Each line is a claim and the test that proves it. Where a claim depends on how t
 - CLAIM: The reference checks import nothing from the platform or a vendor. (proof: test_the_reference_checks_import_nothing_from_the_platform_or_a_vendor)
 - CLAIM: A clean run reaches UPSERTED by read-existing, draft, check, try, approve, upsert. (proof: test_c2_a_clean_run_reaches_upserted)
 - CLAIM: A draft that drops a system Profile property is refused before the trial, although a naive manifest check passes it. (proof: test_c3_a_dropped_property_never_reaches_try_or_upsert)
-- CLAIM: Fifteen drafts that pass a naive add-only rule are each refused. (proof: test_bad_but_conformant_is_refused)
+- CLAIM: Fourteen drafts that pass a naive add-only rule are each refused. (proof: test_bad_but_conformant_is_refused)
+- CLAIM: Annotation-only changes (title, description, examples, a `default` where the system Profile has none, a 2020-12 `$schema`) are accepted at any path. (proof: test_annotation_only_changes_are_accepted)
+- CLAIM: The other changes beside those annotations are still refused. (proof: test_the_other_changes_are_still_refused)
+- CLAIM: A `$ref` with sibling keywords is judged as the target and its siblings together, so a sibling cannot hide a retype or a tightening. (proof: test_a_descending_sibling_beside_a_ref_is_judged)
+- CLAIM: A `default` is free only where the system Profile has none. (proof: test_a_default_is_free_only_where_the_system_profile_has_none)
 - CLAIM: The check loop ends after three send-backs, saying what failed. (proof: test_c4_the_check_loop_ends_after_three_send_backs)
 - CLAIM: The trial loop ends after three send-backs, saying what failed. (proof: test_c4_the_trial_loop_ends_after_three_send_backs)
 - CLAIM: Nothing is saved without passing the gate, for a caller that reports the offered node. (proof: test_every_path_to_upsert_passes_the_gate)
@@ -70,7 +74,12 @@ Report to the engine only the node `next` offered: the engine records a `report`
 - G8: the engine accepts a `report` for a node that is not current (see Host duties).
 - Known limit: the add-only rule compares JSON values exactly, so a `const` of `1` against `1.0` is refused although they are equal in JSON Schema; the refusal fails closed.
 - Known limit: a customer's version may not tighten a system Profile (a longer minimum length, a field made required) and may not drop a property it added itself in an earlier version; the first is refused, the second is not checked.
-- A `$dynamicRef` is refused (it is resolved at run time and cannot be judged here); a `$ref` must be local, resolvable, alone in its object and acyclic.
+- Known limit: a `$id` on a referenced `$defs` entry is accepted as an annotation, although it can make a local `$ref` dangle for a consumer.
+- Known limit: a `$schema` written `http://...` or with a trailing `#` is refused although it names the same dialect; only the exact 2020-12 URI, or the system Profile's own value, passes.
+- Known limit: a draft nested more than about 100 levels raises `RecursionError` out of `check_schema`, so the run ends `FAILED`; that fails closed.
+- Known limit: a schema that can never be satisfied, by design of its author, is not judged by the add-only rule; the trial would catch it.
+- The add-only rule: annotations (`title`, `description`, `examples`, `$comment`, `$id`, `deprecated`) are free at any path; `$schema` is free only when it names 2020-12 or equals the system Profile's; `default` is free only where the system Profile has none at that node (a changed or removed default changes what a consumer is handed). A `$ref` with siblings is judged as the allOf of its target and the siblings, so a sibling `required`, `properties` or `items` is compared, never dropped. A `$ref` must still be local, resolvable and acyclic; a `$dynamicRef` is refused.
+- Decision D-i: a draft may add a `default` where the system Profile has none. Open question O4 for the principal: if nothing is done, consumers that fill defaults may fill values the platform did not choose.
 - Python 3.10 to 3.12 run the tests; the library's CI matrix is the proof for those versions.
 
 ## The proposed spec change
